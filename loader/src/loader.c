@@ -594,15 +594,45 @@ static void configure_gicv2(void)
      * only needs to be called once, while the GICC registers
      * should be set for each CPU.
      */
-    puts("LDR|INFO: Setting all interrupts to Group 1\n");
+    puts("LDR|INFO: Configuring GICv2 for ARM\n");
+    // -------
+
+    puts("LDR|INFO: Enable the GIC distributer\n");
+    uint32_t gicd_enable = *((volatile uint32_t *)(GICD_BASE));
+    if ((gicd_enable & 0x1) != 0x1) {
+        *((volatile uint32_t *)(GICD_BASE)) = gicd_enable | 0x1;
+    }
+
     uint32_t gicd_typer = *((volatile uint32_t *)(GICD_BASE + 0x4));
     uint32_t it_lines_number = gicd_typer & 0x1f;
-    puts("LDR|INFO: GICv2 ITLinesNumber: ");
+    puts("LDR|INFO: GICv2 ITLinesNumber: "); // If zero, then number of interrupts is 32
     puthex32(it_lines_number);
     puts("\n");
 
+    unsigned int nr_lines = 32 * (it_lines_number + 1);
+    puts("LDR|INFO: GICv2 Max supported interrupts: ");
+    puthex32(nr_lines);
+    puts("\n");
+
+    puts("LDR|INFO: GICv2 Disable and clear all interrupts\n");
     for (uint32_t i = 0; i <= it_lines_number; i++) {
-        *((volatile uint32_t *)(GICD_BASE + 0x80 + (i * 4))) = 0xFFFFFFFF;
+        *((volatile uint32_t *)(GICD_BASE + 0x180 + (i * 4))) = 0xffffffff; // enable clr
+        *((volatile uint32_t *)(GICD_BASE + 0x280 + (i * 4))) = 0xffffffff; // pending clr
+    }
+
+    puts("LDR|INFO: GICv2 Setting all interrupts to be level triggered\n");
+    for (uint32_t i = 0; i <= it_lines_number; i++) {
+        *((volatile uint32_t *)(GICD_BASE + 0xC00 + (i * 4))) = 0x55555555; // config
+    }
+
+    puts("LDR|INFO: GICv2 Setting all interrupts to Group 1\n");
+    for (uint32_t i = 0; i <= it_lines_number; i++) {
+        *((volatile uint32_t *)(GICD_BASE + 0x80 + (i * 4))) = 0x0; // security
+    }
+
+    puts("LDR|INFO: GICv2 Make global interrupt priorities default\n");
+    for (uint32_t i = 0; i <= it_lines_number; i++) {
+        *((volatile uint32_t *)(GICD_BASE + 0x400 + (i * 4))) = 0x0; // priority
     }
 
     /* For any interrupts to go through the interrupt priority mask
@@ -613,6 +643,17 @@ static void configure_gicv2(void)
      * important to make sure this is greater than 0x80.
      */
     *((volatile uint32_t *)(GICC_BASE + 0x4)) = 0xf0;
+
+    // Just a double check..
+    gicd_enable = *((volatile uint32_t *)(GICD_BASE));
+    if ((gicd_enable & 0x1) != 0x1) {
+        puts("LDR|INFO: GICv2 Not enabled!\n");
+        while (1);
+    }
+
+    puts("LDR|INFO: GICv2 ctlr state: ");
+    puthex32(gicd_enable);
+    puts("\n");
 }
 #endif
 
