@@ -34,6 +34,9 @@ _Static_assert(sizeof(uintptr_t) == 8 || sizeof(uintptr_t) == 4, "Expect uintptr
 #elif defined(BOARD_qemu_virt_aarch64)
 #define GICD_BASE 0x8010000UL
 #define GICC_BASE 0x8020000UL
+#elif defined(BOARD_odroidc4)
+#define GICD_BASE 0xffc01000UL
+#define GICC_BASE 0xffc02000UL
 #endif
 
 #define REGION_TYPE_DATA 1
@@ -571,7 +574,7 @@ static void start_kernel(void)
     );
 }
 
-#if defined(BOARD_zcu102) || defined(BOARD_qemu_virt_aarch64)
+#if defined(BOARD_zcu102) || defined(BOARD_qemu_virt_aarch64) || defined(BOARD_odroidc4)
 static void configure_gicv2(void)
 {
     /* The ZCU102 start in EL3, and then we drop to EL1(NS).
@@ -599,8 +602,10 @@ static void configure_gicv2(void)
 
     puts("LDR|INFO: Enable the GIC distributer\n");
     uint32_t gicd_enable = *((volatile uint32_t *)(GICD_BASE));
+
     if ((gicd_enable & 0x1) != 0x1) {
-        *((volatile uint32_t *)(GICD_BASE)) = gicd_enable | 0x1;
+        puts("LDR|INFO: Enabling...\n");
+        *((volatile uint32_t *)(GICD_BASE)) = 0x1;
     }
 
     uint32_t gicd_typer = *((volatile uint32_t *)(GICD_BASE + 0x4));
@@ -648,7 +653,7 @@ static void configure_gicv2(void)
     gicd_enable = *((volatile uint32_t *)(GICD_BASE));
     if ((gicd_enable & 0x1) != 0x1) {
         puts("LDR|INFO: GICv2 Not enabled!\n");
-        while (1);
+        *((volatile uint32_t *)(GICD_BASE)) = 0x1;
     }
 
     puts("LDR|INFO: GICv2 ctlr state: ");
@@ -704,7 +709,7 @@ int main(void)
      */
     copy_data();
 
-#if defined(BOARD_zcu102) || defined(BOARD_qemu_virt_aarch64)
+#if defined(BOARD_zcu102) || defined(BOARD_qemu_virt_aarch64) || defined(BOARD_odroidc4)
     configure_gicv2();
 #endif
 
