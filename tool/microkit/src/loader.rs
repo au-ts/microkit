@@ -215,7 +215,7 @@ impl<'a> Loader<'a> {
 
         // Determine the pagetable variables
         assert!(kernel_first_vaddr.is_some());
-        assert!(kernel_first_vaddr.is_some());
+        assert!(kernel_first_paddr.is_some());
         let pagetable_vars = match config.arch {
             Arch::Aarch64 => Loader::aarch64_setup_pagetables(
                 &elf,

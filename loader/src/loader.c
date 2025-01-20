@@ -574,7 +574,7 @@ static void start_kernel(void)
     );
 }
 
-#if defined(BOARD_zcu102) || defined(BOARD_qemu_virt_aarch64) || defined(BOARD_odroidc4)
+#if defined(BOARD_zcu102) || defined(BOARD_odroidc4)
 static void configure_gicv2(void)
 {
     /* The ZCU102 start in EL3, and then we drop to EL1(NS).
@@ -709,7 +709,7 @@ int main(void)
      */
     copy_data();
 
-#if defined(BOARD_zcu102) || defined(BOARD_qemu_virt_aarch64) || defined(BOARD_odroidc4)
+#if defined(BOARD_zcu102) || defined(BOARD_odroidc4)
     configure_gicv2();
 #endif
 
