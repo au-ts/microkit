@@ -729,8 +729,8 @@ int main(void)
 #endif
 
     puts("LDR|INFO: # of multikernels is ");
-    #if defined(NUM_MULTIKERNELS)
-        putc(NUM_MULTIKERNELS + '0');
+    #ifdef NUM_MULTIKERNELS
+        putc(num_multikernels + '0');
     #else
         puts("undefined");
     #endif

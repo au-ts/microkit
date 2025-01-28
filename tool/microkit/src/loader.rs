@@ -223,12 +223,14 @@ impl<'a> Loader<'a> {
         let num_multikernels: u8 = *(elf.get_data(num_multikernels_addr, num_multikernels_size).expect("Could not extract number of multikernels to boot")).first().expect("Failed to copy in number of multikernels to boot");
         assert!(num_multikernels > 0);
 
+        // Debugging, delete later
         if num_multikernels > 1 {
             println!("MULTIKERNEL MODE ACTIVATED, number is {}", num_multikernels);
         } else {
             println!("MULTIKERNEL INACTIVE");
         }
 
+        // TODO make this a loop that goes from 0 to num_kernels
         const ID: usize = 0;
 
         println!("Making pagetables");

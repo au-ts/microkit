@@ -654,9 +654,9 @@ def main() -> None:
             # Used in multicore configurations, inject the number of cores into the makefile for loader.c
             if hasattr(board, 'multikernels'):
                 loader_defines.append(("NUM_MULTIKERNELS", board.multikernels))
-                print(f"Number of cores is {board.multikernels}")
+                print(f"Number of multikernels is {board.multikernels}")
             else:
-                print("Default number of cores (1)")
+                print("Default number of multikernels (1)")
 
             build_elf_component("loader", root_dir, build_dir, board, config, loader_defines)
             build_elf_component("monitor", root_dir, build_dir, board, config, [])
