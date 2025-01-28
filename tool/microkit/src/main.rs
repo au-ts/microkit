@@ -3620,6 +3620,7 @@ fn main() -> Result<(), String> {
         }
     }
 
+    println!("Making image");
     let loader = Loader::new(
         &kernel_config,
         Path::new(&loader_elf_path),
@@ -3629,7 +3630,9 @@ fn main() -> Result<(), String> {
         built_system.reserved_region,
         loader_regions,
     );
+    println!("Made image");
     loader.write_image(Path::new(args.output));
+    println!("Wrote image");
 
     Ok(())
 }

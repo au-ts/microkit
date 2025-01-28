@@ -91,7 +91,20 @@ void el2_mmu_enable(void);
 
 char _stack[STACK_SIZE] ALIGN(16);
 
-#ifdef ARCH_aarch64
+#if defined(ARCH_aarch64) && defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
+/* Paging structures for kernel mapping */
+uint64_t boot_lvl0_upper[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
+uint64_t boot_lvl1_upper[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
+uint64_t boot_lvl2_upper[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
+
+/* Paging structures for identity mapping */
+uint64_t boot_lvl0_lower[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
+uint64_t boot_lvl1_lower[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
+
+uintptr_t exception_register_state[32];
+
+uint8_t num_multikernels = NUM_MULTIKERNELS;
+#elif defined(ARCH_aarch64)
 /* Paging structures for kernel mapping */
 uint64_t boot_lvl0_upper[1 << 9] ALIGN(1 << 12);
 uint64_t boot_lvl1_upper[1 << 9] ALIGN(1 << 12);
@@ -102,6 +115,8 @@ uint64_t boot_lvl0_lower[1 << 9] ALIGN(1 << 12);
 uint64_t boot_lvl1_lower[1 << 9] ALIGN(1 << 12);
 
 uintptr_t exception_register_state[32];
+
+uint8_t num_multikernels = 1;
 #elif defined(ARCH_riscv64)
 /* Paging structures for kernel mapping */
 uint64_t boot_lvl1_pt[1 << 9] ALIGN(1 << 12);
@@ -712,6 +727,14 @@ int main(void)
 #if defined(BOARD_zcu102) || defined(BOARD_odroidc4)
     configure_gicv2();
 #endif
+
+    puts("LDR|INFO: # of multikernels is ");
+    #if defined(NUM_MULTIKERNELS)
+        putc(NUM_MULTIKERNELS + '0');
+    #else
+        puts("undefined");
+    #endif
+    puts("\n");
 
 #ifdef ARCH_aarch64
     int r;

@@ -73,6 +73,7 @@ class BoardInfo:
     gcc_cpu: Optional[str]
     loader_link_address: int
     kernel_options: KERNEL_OPTIONS
+    multikernels: Optional[int] = None
 
 
 @dataclass
@@ -187,6 +188,7 @@ SUPPORTED_BOARDS = (
             "KernelArmHypervisorSupport": True,
             "KernelArmVtimerUpdateVOffset": False,
         },
+        multikernels=4,
     ),
     BoardInfo(
         name="qemu_virt_aarch64",
@@ -648,6 +650,13 @@ def main() -> None:
                 else:
                     raise Exception("Unexpected ARM physical address bits defines")
                 loader_defines.append(("PHYSICAL_ADDRESS_BITS", arm_pa_size_bits))
+
+            # Used in multicore configurations, inject the number of cores into the makefile for loader.c
+            if hasattr(board, 'multikernels'):
+                loader_defines.append(("NUM_MULTIKERNELS", board.multikernels))
+                print(f"Number of cores is {board.multikernels}")
+            else:
+                print("Default number of cores (1)")
 
             build_elf_component("loader", root_dir, build_dir, board, config, loader_defines)
             build_elf_component("monitor", root_dir, build_dir, board, config, [])
