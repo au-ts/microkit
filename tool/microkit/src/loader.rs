@@ -230,9 +230,6 @@ impl<'a> Loader<'a> {
             println!("MULTIKERNEL INACTIVE");
         }
 
-        // TODO make this a loop that goes from 0 to num_kernels
-        const ID: usize = 0;
-
         println!("Making pagetables");
         assert!(kernel_first_vaddr.is_some());
         assert!(kernel_first_paddr.is_some());
@@ -241,7 +238,6 @@ impl<'a> Loader<'a> {
                 &elf,
                 kernel_first_vaddr.unwrap(),
                 kernel_first_paddr.unwrap(),
-                ID,
                 num_multikernels.try_into().unwrap(),
             ),
             Arch::Riscv64 => Loader::riscv64_setup_pagetables(
@@ -249,7 +245,6 @@ impl<'a> Loader<'a> {
                 &elf,
                 kernel_first_vaddr.unwrap(),
                 kernel_first_paddr.unwrap(),
-                ID,
                 num_multikernels.try_into().unwrap(),
             ),
         };
@@ -267,16 +262,22 @@ impl<'a> Loader<'a> {
             panic!("The loader entry point must be the first byte in the image");
         }
 
+        // Copy in all the page tables, for each level of the pagetable and then for each kernel
         println!("Writing pagetables to image..");
-        for (var_addr, var_size, var_data) in pagetable_vars {
-            println!("Pagetable.. var_size is {} and var_data.len() is {}", var_size / (num_multikernels as u64), (var_data[ID].len() as u64));
-            let offset = var_addr - image_vaddr;
-            assert!(var_size / (num_multikernels as u64) == var_data[ID].len() as u64);
-            assert!(offset > 0);
-            assert!(offset <= image.len() as u64);
-            image[offset as usize..(offset + (var_size  / (num_multikernels as u64))) as usize].copy_from_slice(&var_data[ID]);
+        let mut id: usize = 0;
+        while id < num_multikernels.into() {
+            for (var_addr, var_size, var_data) in &pagetable_vars {
+                println!("Pagetable id {} var_size is {} and var_data.len() is {}", id, var_size / (num_multikernels as u64), (var_data[id].len() as u64));
+                let offset = var_addr - image_vaddr;
+                assert!(var_size / (num_multikernels as u64) == var_data[id].len() as u64);
+                assert!(offset > 0);
+                assert!(offset <= image.len() as u64);
+                println!("Copying into the image at {:x} til {:x}", offset as usize + (id * PAGE_TABLE_SIZE), (offset + (var_size  / (num_multikernels as u64))) as usize + (id * PAGE_TABLE_SIZE));
+                image[offset as usize + (id * PAGE_TABLE_SIZE)..(offset + (var_size  / (num_multikernels as u64))) as usize + (id * PAGE_TABLE_SIZE)].copy_from_slice(&var_data[id]);
+            }
+            id += 1;
         }
-
+        
         let kernel_entry = kernel_elf.entry;
 
         let pv_offset = inittask_first_paddr.wrapping_sub(inittask_first_vaddr);
@@ -380,9 +381,10 @@ impl<'a> Loader<'a> {
         elf: &ElfFile,
         first_vaddr: u64,
         first_paddr: u64,
-        id: usize,
         num_multikernels: usize,
     ) -> Vec<(u64, u64, Vec<[u8; PAGE_TABLE_SIZE]>)> {
+        assert!(num_multikernels == 1, "Multikernel support for risc-v is not implemented.");
+
         let (text_addr, _) = elf
             .find_symbol("_text")
             .expect("Could not find 'text' symbol");
@@ -404,7 +406,7 @@ impl<'a> Loader<'a> {
             let pt_entry = Riscv64::pte_next(boot_lvl2_pt_elf_addr);
             let start = 8 * text_index_lvl1;
             let end = start + 8;
-            boot_lvl1_pt[id][start..end].copy_from_slice(&pt_entry.to_le_bytes());
+            boot_lvl1_pt[0][start..end].copy_from_slice(&pt_entry.to_le_bytes());
         }
 
         let mut boot_lvl2_pt_elf: Vec<[u8; PAGE_TABLE_SIZE]> = vec![[0; PAGE_TABLE_SIZE]; num_multikernels];
@@ -415,7 +417,7 @@ impl<'a> Loader<'a> {
                 let end = start + 8;
                 let addr = text_addr + ((page as u64) << Riscv64::BLOCK_BITS_2MB);
                 let pt_entry = Riscv64::pte_leaf(addr);
-                boot_lvl2_pt_elf[id][start..end].copy_from_slice(&pt_entry.to_le_bytes());
+                boot_lvl2_pt_elf[0][start..end].copy_from_slice(&pt_entry.to_le_bytes());
             }
         }
 
@@ -423,7 +425,7 @@ impl<'a> Loader<'a> {
             let index = Riscv64::pt_index(num_pt_levels, first_vaddr, 1);
             let start = 8 * index;
             let end = start + 8;
-            boot_lvl1_pt[id][start..end]
+            boot_lvl1_pt[0][start..end]
                 .copy_from_slice(&Riscv64::pte_next(boot_lvl2_pt_addr).to_le_bytes());
         }
 
@@ -436,7 +438,7 @@ impl<'a> Loader<'a> {
                 let end = start + 8;
                 let addr = first_paddr + ((page as u64) << Riscv64::BLOCK_BITS_2MB);
                 let pt_entry = Riscv64::pte_leaf(addr);
-                boot_lvl2_pt[id][start..end].copy_from_slice(&pt_entry.to_le_bytes());
+                boot_lvl2_pt[0][start..end].copy_from_slice(&pt_entry.to_le_bytes());
             }
         }
 
@@ -455,7 +457,6 @@ impl<'a> Loader<'a> {
         elf: &ElfFile,
         first_vaddr: u64,
         first_paddr: u64,
-        id: usize,
         num_multikernels: usize,
     ) -> Vec<(u64, u64, Vec<[u8; PAGE_TABLE_SIZE]>)> {
         let (boot_lvl1_lower_addr, boot_lvl1_lower_size) = elf
@@ -474,50 +475,59 @@ impl<'a> Loader<'a> {
             .find_symbol("boot_lvl0_upper")
             .expect("Could not find 'boot_lvl0_upper' symbol");
 
-        println!("Making first level, size is {} with num kernels is {} and hence final size should be {}", PAGE_TABLE_SIZE, num_multikernels, PAGE_TABLE_SIZE * num_multikernels);
+        // Make table vectors
         let mut boot_lvl0_lower: Vec<[u8; PAGE_TABLE_SIZE]> = vec![[0; PAGE_TABLE_SIZE]; num_multikernels];
-        boot_lvl0_lower[id][..8].copy_from_slice(&(boot_lvl1_lower_addr | 3).to_le_bytes());
-        println!("Made first level");
-
         let mut boot_lvl1_lower: Vec<[u8; PAGE_TABLE_SIZE]> = vec![[0; PAGE_TABLE_SIZE]; num_multikernels];
-        for i in 0..512 {
-            #[allow(clippy::identity_op)] // keep the (0 << 2) for clarity
-            let pt_entry: u64 = ((i as u64) << AARCH64_1GB_BLOCK_BITS) |
-                (1 << 10) | // access flag
-                (0 << 2) | // strongly ordered memory
-                (1); // 1G block
-            let start = 8 * i;
-            let end = 8 * (i + 1);
-            boot_lvl1_lower[id][start..end].copy_from_slice(&pt_entry.to_le_bytes());
-        }
-
         let boot_lvl0_upper: Vec<[u8; PAGE_TABLE_SIZE]> = vec![[0; PAGE_TABLE_SIZE]; num_multikernels];
-        {
-            let pt_entry = (boot_lvl1_upper_addr | 3).to_le_bytes();
-            let idx = Aarch64::lvl0_index(first_vaddr);
-            boot_lvl0_lower[id][8 * idx..8 * (idx + 1)].copy_from_slice(&pt_entry);
-        }
-
         let mut boot_lvl1_upper: Vec<[u8; PAGE_TABLE_SIZE]> = vec![[0; PAGE_TABLE_SIZE]; num_multikernels];
-        {
-            let pt_entry = (boot_lvl2_upper_addr | 3).to_le_bytes();
-            let idx = Aarch64::lvl1_index(first_vaddr);
-            boot_lvl1_upper[id][8 * idx..8 * (idx + 1)].copy_from_slice(&pt_entry);
-        }
-
         let mut boot_lvl2_upper: Vec<[u8; PAGE_TABLE_SIZE]> = vec![[0; PAGE_TABLE_SIZE]; num_multikernels];
 
-        let lvl2_idx = Aarch64::lvl2_index(first_vaddr);
-        for i in lvl2_idx..512 {
-            let entry_idx = (i - Aarch64::lvl2_index(first_vaddr)) << AARCH64_2MB_BLOCK_BITS;
-            let pt_entry: u64 = (entry_idx as u64 + first_paddr) |
-                (1 << 10) | // Access flag
-                (3 << 8) | // Make sure the shareability is the same as the kernel's
-                (4 << 2) | // MT_NORMAL memory
-                (1 << 0); // 2MB block
-            let start = 8 * i;
-            let end = 8 * (i + 1);
-            boot_lvl2_upper[id][start..end].copy_from_slice(&pt_entry.to_le_bytes());
+        // Populate all the page tables the same
+        let mut id: usize = 0;
+        while id < num_multikernels {
+            println!("Initing id {}", id);
+
+            println!("Making first level, size is {} with num kernels is {} and hence final size should be {}", PAGE_TABLE_SIZE, num_multikernels, PAGE_TABLE_SIZE * num_multikernels);
+            boot_lvl0_lower[id][..8].copy_from_slice(&(boot_lvl1_lower_addr | 3).to_le_bytes());
+            println!("Made first level");
+    
+            for i in 0..512 {
+                #[allow(clippy::identity_op)] // keep the (0 << 2) for clarity
+                let pt_entry: u64 = ((i as u64) << AARCH64_1GB_BLOCK_BITS) |
+                    (1 << 10) | // access flag
+                    (0 << 2) | // strongly ordered memory
+                    (1); // 1G block
+                let start = 8 * i;
+                let end = 8 * (i + 1);
+                boot_lvl1_lower[id][start..end].copy_from_slice(&pt_entry.to_le_bytes());
+            }
+            
+            {
+                let pt_entry = (boot_lvl1_upper_addr | 3).to_le_bytes();
+                let idx = Aarch64::lvl0_index(first_vaddr);
+                boot_lvl0_lower[id][8 * idx..8 * (idx + 1)].copy_from_slice(&pt_entry);
+            }
+            
+            {
+                let pt_entry = (boot_lvl2_upper_addr | 3).to_le_bytes();
+                let idx = Aarch64::lvl1_index(first_vaddr);
+                boot_lvl1_upper[id][8 * idx..8 * (idx + 1)].copy_from_slice(&pt_entry);
+            }
+    
+            let lvl2_idx = Aarch64::lvl2_index(first_vaddr);
+            for i in lvl2_idx..512 {
+                let entry_idx = (i - Aarch64::lvl2_index(first_vaddr)) << AARCH64_2MB_BLOCK_BITS;
+                let pt_entry: u64 = (entry_idx as u64 + first_paddr) |
+                    (1 << 10) | // Access flag
+                    (3 << 8) | // Make sure the shareability is the same as the kernel's
+                    (4 << 2) | // MT_NORMAL memory
+                    (1 << 0); // 2MB block
+                let start = 8 * i;
+                let end = 8 * (i + 1);
+                boot_lvl2_upper[id][start..end].copy_from_slice(&pt_entry.to_le_bytes());
+            }
+
+            id += 1;
         }
 
         vec![
