@@ -282,7 +282,10 @@ END_FUNC(switch_to_el2)
 
 BEGIN_FUNC(el1_mmu_enable)
     stp     x29, x30, [sp, #-16]!
+    stp     x27, x28, [sp, #-16]!
     mov     x29, sp
+    mov     x27, x0
+    mov     x28, x1
 
     bl      flush_dcache
 
@@ -315,10 +318,8 @@ BEGIN_FUNC(el1_mmu_enable)
     msr     tcr_el1, x10
 
     /* Setup page tables */
-    adrp    x8, boot_lvl0_lower
-    msr     ttbr0_el1, x8
-    adrp    x8, boot_lvl0_upper
-    msr     ttbr1_el1, x8
+    msr     ttbr0_el1, x27
+    msr     ttbr1_el1, x28
     isb
 
     /* invalidate all TLB entries for EL1 */
@@ -335,6 +336,7 @@ BEGIN_FUNC(el1_mmu_enable)
     adrp    x8, arm_vector_table
     msr     vbar_el1, x8
 
+    ldp     x27, x28, [sp], #16
     ldp     x29, x30, [sp], #16
     ret
 
@@ -342,7 +344,9 @@ END_FUNC(el1_mmu_enable)
 
 BEGIN_FUNC(el2_mmu_enable)
     stp     x29, x30, [sp, #-16]!
+    stp     x27, x28, [sp, #-16]!
     mov     x29, sp
+    mov     x27, x0
 
     /* Disable caches */
     bl      flush_dcache
@@ -375,8 +379,7 @@ BEGIN_FUNC(el2_mmu_enable)
     isb
 
     /* Setup page tables */
-    adrp    x8, boot_lvl0_lower
-    msr     ttbr0_el2, x8
+    msr     ttbr0_el2, x27
     isb
 
     /* invalidate all TLB entries for EL2 */
@@ -395,6 +398,7 @@ BEGIN_FUNC(el2_mmu_enable)
     dsb     ish
     isb
 
+    ldp     x27, x28, [sp], #16
     ldp     x29, x30, [sp], #16
     ret
 

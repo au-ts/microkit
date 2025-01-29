@@ -86,8 +86,8 @@ typedef void (*sel4_entry)(
 
 void switch_to_el1(void);
 void switch_to_el2(void);
-void el1_mmu_enable(void);
-void el2_mmu_enable(void);
+void el1_mmu_enable(uint64_t *pgd_down, uint64_t *pgd_up);
+void el2_mmu_enable(uint64_t *pgd_down);
 
 char _stack[STACK_SIZE] ALIGN(16);
 
@@ -747,9 +747,9 @@ int main(void)
     puts("LDR|INFO: enabling MMU\n");
     el = current_el();
     if (el == EL1) {
-        el1_mmu_enable();
+        el1_mmu_enable(boot_lvl0_lower[0], boot_lvl0_upper[0]);
     } else if (el == EL2) {
-        el2_mmu_enable();
+        el2_mmu_enable(boot_lvl0_lower[0]);
     } else {
         puts("LDR|ERROR: unknown EL level for MMU enable\n");
     }
