@@ -171,6 +171,14 @@ finished_\op:
     isb
 .endm
 
+.macro disable_id_cache sctlr tmp
+    mrs     \tmp, \sctlr
+    bic     \tmp, \tmp, #(1 << 2)
+    bic     \tmp, \tmp, #(1 << 12)
+    msr     \sctlr, \tmp
+    isb
+.endm
+
 
 /* Standard function decorators. */
 #define BEGIN_FUNC(_name) \
@@ -404,6 +412,28 @@ BEGIN_FUNC(el2_mmu_enable)
 
 END_FUNC(el2_mmu_enable)
 
+BEGIN_FUNC(start_secondary_cpu)
+    ldr     x9, =curr_cpu_stack
+    ldr     x9, [x9]
+    mov     sp, x9
+
+    b secondary_cpu_entry
+END_FUNC(start_secondary_cpu)
+
+BEGIN_FUNC(psci_func)
+    smc #0
+    ret
+END_FUNC(psci_func)
+
+BEGIN_FUNC(disable_caches_el2)
+    stp     x29, x30, [sp, #-16]!
+    mov     x29, sp
+    bl      flush_dcache
+    disable_id_cache sctlr_el2, x9
+    ldp     x29, x30, [sp], #16
+    ret
+END_FUNC(disable_caches_el2)
+
 .extern exception_handler
 .extern exception_register_state
 
@@ -454,4 +484,3 @@ BEGIN_FUNC(arm_vector_table)
     ventry  #14    // FIQ 32-bit EL0
     ventry  #15    // SError 32-bit EL0
 END_FUNC(arm_vector_table)
-

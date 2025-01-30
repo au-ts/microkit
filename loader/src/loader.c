@@ -89,7 +89,11 @@ void switch_to_el2(void);
 void el1_mmu_enable(uint64_t *pgd_down, uint64_t *pgd_up);
 void el2_mmu_enable(uint64_t *pgd_down);
 
+#if defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
+volatile char _stack[NUM_MULTIKERNELS][STACK_SIZE] ALIGN(16);
+#else
 char _stack[STACK_SIZE] ALIGN(16);
+#endif
 
 #if defined(ARCH_aarch64) && defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
 /* Paging structures for kernel mapping */
@@ -704,6 +708,92 @@ static inline void enable_mmu(void)
 }
 #endif
 
+// Multikernel features, powers on extra cpus with their own stack and own kernel entry
+#if defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
+
+#define PSCI_SM64_CPU_ON 0xc4000003
+
+// In utils
+void disable_caches_el2(void);
+void start_secondary_cpu(void);
+
+volatile uint64_t curr_cpu_id;
+volatile uintptr_t curr_cpu_stack;
+static volatile int core_up[NUM_MULTIKERNELS];
+
+volatile uint64_t cpu_magic;
+
+static inline void dsb(void)
+{
+    asm volatile("dsb sy" ::: "memory");
+}
+
+int psci_func(unsigned long smc_function_id, unsigned long param1, unsigned long param2, unsigned long param3);
+
+int psci_cpu_on(uint64_t cpu_id) {
+    dsb();
+    curr_cpu_id = cpu_id;
+    dsb();
+    uintptr_t cpu_stack = (uintptr_t)(&_stack[curr_cpu_id][0xff0]);
+    __atomic_store_n(&curr_cpu_stack, cpu_stack, __ATOMIC_SEQ_CST);
+    return psci_func(PSCI_SM64_CPU_ON, curr_cpu_id, (unsigned long)&start_secondary_cpu, 0);
+}
+
+#define MSR(reg, v)                                \
+    do {                                           \
+        uint64_t _v = v;                             \
+        asm volatile("msr " reg ",%0" :: "r" (_v));\
+    } while(0)
+
+void secondary_cpu_entry() {
+    dsb();
+    uint64_t cpu = curr_cpu_id;
+
+    int r;
+    r = ensure_correct_el();
+    if (r != 0) {
+        goto fail;
+    }
+
+    /* Get this CPU's ID and save it to TPIDR_EL1 for seL4. */
+    /* Whether or not seL4 is booting in EL2 does not matter, as it always looks at tpidr_el1 */
+    MSR("tpidr_el1", cpu);
+
+    puts("LDR|INFO: enabling MMU (CPU ");
+    puthex32(cpu);
+    puts(")\n");
+    el2_mmu_enable(boot_lvl0_lower[cpu]);
+
+    puts("LDR|INFO: jumping to kernel (CPU ");
+    puthex32(cpu);
+    puts(")\n");
+
+    dsb();
+    __atomic_store_n(&core_up[cpu], 1, __ATOMIC_RELEASE);
+    dsb();
+
+    // Temp: Hang all other kernels otherwise output becomes garbled
+    if (!cpu) {
+        start_kernel();
+    } else {
+        for (;;);
+    }
+
+    puts("LDR|ERROR: seL4 Loader: Error - KERNEL RETURNED (CPU ");
+    puthex32(cpu);
+    puts(")\n");
+
+fail:
+    /* Note: can't usefully return to U-Boot once we are here. */
+    /* IMPROVEMENT: use SMC SVC call to try and power-off / reboot system.
+     * or at least go to a WFI loop
+     */
+    for (;;) {
+    }
+}
+
+#endif
+
 int main(void)
 {
 #if defined(BOARD_zcu102)
@@ -744,7 +834,55 @@ int main(void)
         goto fail;
     }
 
-    puts("LDR|INFO: enabling MMU\n");
+    disable_caches_el2();
+
+#if defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
+
+    /* Get the CPU ID of the CPU we are booting on. */
+    uint64_t boot_cpu_id;
+    asm volatile("mrs %x0, mpidr_el1" : "=r"(boot_cpu_id) :: "cc");
+    boot_cpu_id = boot_cpu_id & 0x00ffffff;
+    if (boot_cpu_id >= NUM_MULTIKERNELS) {
+        puts("LDR|ERROR: Boot CPU ID (");
+        puthex32(boot_cpu_id);
+        puts(") exceeds the maximum CPU ID expected (");
+        puthex32(NUM_MULTIKERNELS - 1);
+        puts(")\n");
+        goto fail;
+    }
+    puts("LDR|INFO: Boot CPU ID (");
+    putc(boot_cpu_id + '0');
+    puts(")\n");
+
+    /* Start each CPU, other than the one we are booting on. */
+    for (int i = 0; i < NUM_MULTIKERNELS; i++) {
+        if (i == boot_cpu_id) continue;
+
+        asm volatile("dmb sy" ::: "memory");
+
+        puts("LDR|INFO: Starting other CPUs (");
+        puthex32(i);
+        puts(")\n");
+
+        r = psci_cpu_on(i);
+        /* PSCI success is 0. */
+        // TODO: decode PSCI error and print out something meaningful.
+        if (r != 0) {
+            puts("LDR|ERROR: Failed to start CPU ");
+            puthex32(i);
+            puts(", PSCI error code is ");
+            puthex64(r);
+            puts("\n");
+            goto fail;
+        }
+
+        dsb();
+        while (!__atomic_load_n(&core_up[i], __ATOMIC_ACQUIRE));
+    }
+
+#endif
+
+    puts("LDR|INFO: enabling self MMU\n");
     el = current_el();
     if (el == EL1) {
         el1_mmu_enable(boot_lvl0_lower[0], boot_lvl0_upper[0]);
@@ -758,7 +896,7 @@ int main(void)
     enable_mmu();
 #endif
 
-    puts("LDR|INFO: jumping to kernel\n");
+    puts("LDR|INFO: jumping to first kernel\n");
     start_kernel();
 
     puts("LDR|ERROR: seL4 Loader: Error - KERNEL RETURNED\n");
