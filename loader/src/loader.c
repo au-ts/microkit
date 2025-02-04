@@ -131,7 +131,7 @@ uint64_t boot_lvl2_pt_elf[1 << 9] ALIGN(1 << 12);
 
 extern char _text;
 extern char _bss_end;
-const struct loader_data *loader_data = (void *) &_bss_end;
+const struct loader_data *loader_data = (void *) &_bss_end; // loader_data[NUM_MULTIKERNELS] if multikernel enabled
 
 static void memcpy(void *dst, const void *src, size_t sz)
 {
@@ -579,7 +579,7 @@ static int ensure_correct_el(void)
 }
 #endif
 
-static void start_kernel(void)
+static void start_kernel(int id)
 {
     ((sel4_entry)(loader_data->kernel_entry))(
         loader_data->ui_p_reg_start,
@@ -774,7 +774,7 @@ void secondary_cpu_entry() {
 
     // Temp: Hang all other kernels otherwise output becomes garbled
     if (!cpu) {
-        start_kernel();
+        start_kernel(cpu);
     } else {
         for (;;);
     }
@@ -834,9 +834,9 @@ int main(void)
         goto fail;
     }
 
-    disable_caches_el2();
-
 #if defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
+
+    disable_caches_el2();
 
     /* Get the CPU ID of the CPU we are booting on. */
     uint64_t boot_cpu_id;
@@ -877,7 +877,9 @@ int main(void)
         }
 
         dsb();
+        //while (1); // dont boot 0
         while (!__atomic_load_n(&core_up[i], __ATOMIC_ACQUIRE));
+        //for (volatile int i = 0; i < 100000000; i++); // delay boot 0
     }
 
 #endif
@@ -897,7 +899,7 @@ int main(void)
 #endif
 
     puts("LDR|INFO: jumping to first kernel\n");
-    start_kernel();
+    start_kernel(0);
 
     puts("LDR|ERROR: seL4 Loader: Error - KERNEL RETURNED\n");
 

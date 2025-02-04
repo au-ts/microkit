@@ -125,6 +125,7 @@ pub struct Loader<'a> {
     header: LoaderHeader64,
     region_metadata: Vec<LoaderRegion64>,
     regions: Vec<(u64, &'a [u8])>,
+    additional_headers: Vec<LoaderHeader64>,
 }
 
 impl<'a> Loader<'a> {
@@ -182,6 +183,8 @@ impl<'a> Loader<'a> {
                     panic!("Kernel does not have a consistent physical to virtual offset");
                 }
 
+                println!("Yup heres a kernel segment: paddr:{:x} vaddr_first:{:x} size:{:x}", segment.phys_addr, segment.virt_addr, segment.mem_size());
+                println!("Updated first and last vaddrs: {:x?} and {:x?}, first paddr {:x?} and offset {:x?}", kernel_first_vaddr, kernel_last_vaddr, kernel_first_paddr, kernel_p_v_offset);
                 regions.push((segment.phys_addr, segment.data.as_slice()));
             }
         }
@@ -258,6 +261,8 @@ impl<'a> Loader<'a> {
         let image_vaddr = image_segment.virt_addr;
         let mut image = image_segment.data;
 
+        println!("Loader elf entry is {:x}", image_vaddr);
+
         if image_vaddr != elf.entry {
             panic!("The loader entry point must be the first byte in the image");
         }
@@ -267,12 +272,12 @@ impl<'a> Loader<'a> {
         let mut id: usize = 0;
         while id < num_multikernels.into() {
             for (var_addr, var_size, var_data) in &pagetable_vars {
-                println!("Pagetable id {} var_size is {} and var_data.len() is {}", id, var_size / (num_multikernels as u64), (var_data[id].len() as u64));
+                //println!("Pagetable id {} var_size is {} and var_data.len() is {}", id, var_size / (num_multikernels as u64), (var_data[id].len() as u64));
                 let offset = var_addr - image_vaddr;
                 assert!(var_size / (num_multikernels as u64) == var_data[id].len() as u64);
                 assert!(offset > 0);
                 assert!(offset <= image.len() as u64);
-                println!("Copying into the image at {:x} til {:x}", offset as usize + (id * PAGE_TABLE_SIZE), (offset + (var_size  / (num_multikernels as u64))) as usize + (id * PAGE_TABLE_SIZE));
+                //println!("Copying into the image at {:x} til {:x}", offset as usize + (id * PAGE_TABLE_SIZE), (offset + (var_size  / (num_multikernels as u64))) as usize + (id * PAGE_TABLE_SIZE));
                 image[offset as usize + (id * PAGE_TABLE_SIZE)..(offset + (var_size  / (num_multikernels as u64))) as usize + (id * PAGE_TABLE_SIZE)].copy_from_slice(&var_data[id]);
             }
             id += 1;
@@ -299,6 +304,7 @@ impl<'a> Loader<'a> {
         }
 
         let mut all_regions_with_loader = all_regions.clone();
+        println!("Image vaddr at: {}", image_vaddr);
         all_regions_with_loader.push((image_vaddr, &image));
         check_non_overlapping(&all_regions_with_loader);
 
@@ -306,6 +312,18 @@ impl<'a> Loader<'a> {
             true => 1,
             false => 0,
         };
+
+        println!("-------------------");
+        println!("    HEADER INFO    ");
+        println!("-------------------");
+        println!("kernel_entry: {:x}", kernel_entry);
+        println!("ui_p_reg_start: {:x} (user image physical start address)", ui_p_reg_start);
+        println!("ui_p_reg_end: {:x} (user image physical end address)", ui_p_reg_end);
+        println!("pv_offset: {:x} (physical/virtual offset)", pv_offset);
+        println!("initial_task_elf entry: {:x}  (user image virtual entry address)", v_entry);
+        println!("extra_device_addr_p: {:x}", extra_device_addr_p);
+        println!("extra_device_size: {:x}", extra_device_size);
+        println!("-------------------");
 
         let header = LoaderHeader64 {
             magic,
@@ -320,9 +338,26 @@ impl<'a> Loader<'a> {
             num_regions: all_regions.len() as u64,
         };
 
+        let mut additional_headers: Vec<LoaderHeader64> = Vec::new();
+        additional_headers.push(
+            LoaderHeader64 {
+                magic,
+                flags,
+                kernel_entry,
+                ui_p_reg_start,      // this matters
+                ui_p_reg_end,        // this matters
+                pv_offset,           // this matters
+                v_entry,             // this matters
+                extra_device_addr_p, // this matters
+                extra_device_size,   // this matters
+                num_regions: all_regions.len() as u64,
+            }
+        );
+
         let mut region_metadata = Vec::new();
         let mut offset: u64 = 0;
         for (addr, data) in &all_regions {
+            println!("Adding region at {:x} size {:x} and offset {:x}", *addr, data.len() as u64, offset);
             region_metadata.push(LoaderRegion64 {
                 load_addr: *addr,
                 size: data.len() as u64,
@@ -337,6 +372,7 @@ impl<'a> Loader<'a> {
             header,
             region_metadata,
             regions: all_regions,
+            additional_headers,
         }
     }
 
@@ -485,11 +521,11 @@ impl<'a> Loader<'a> {
         // Populate all the page tables the same
         let mut id: usize = 0;
         while id < num_multikernels {
-            println!("Initing id {}", id);
+            //println!("Initing id {}", id);
 
-            println!("Making first level, size is {} with num kernels is {} and hence final size should be {}", PAGE_TABLE_SIZE, num_multikernels, PAGE_TABLE_SIZE * num_multikernels);
+            //println!("Making first level, size is {} with num kernels is {} and hence final size should be {}", PAGE_TABLE_SIZE, num_multikernels, PAGE_TABLE_SIZE * num_multikernels);
             boot_lvl0_lower[id][..8].copy_from_slice(&(boot_lvl1_lower_addr | 3).to_le_bytes());
-            println!("Made first level");
+            //println!("Made first level");
     
             for i in 0..512 {
                 #[allow(clippy::identity_op)] // keep the (0 << 2) for clarity
