@@ -301,7 +301,10 @@ SUPPORTED_CONFIGS = (
         name="benchmark",
         debug=False,
         kernel_options={
+            "KernelArmExportPCNTUser": True,
+            "KernelArmExportPTMRUser": True,
             "KernelArmExportPMUUser": True,
+            "KernelPrinting": True,
             "KernelDebugBuild": False,
             "KernelVerificationBuild": False,
             "KernelBenchmarks": "track_utilisation"
