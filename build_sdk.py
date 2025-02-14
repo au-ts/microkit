@@ -188,6 +188,19 @@ SUPPORTED_BOARDS = (
             "KernelArmHypervisorSupport": True,
             "KernelArmVtimerUpdateVOffset": False,
         },
+    ),
+    BoardInfo(
+        name="odroidc4_multikernel",
+        arch=KernelArch.AARCH64,
+        gcc_cpu="cortex-a55",
+        loader_link_address=0x20000000,
+        kernel_options={
+            "KernelPlatform": "odroidc4",
+            "KernelIsMCS": True,
+            "KernelArmExportPCNTUser": True,
+            "KernelArmHypervisorSupport": True,
+            "KernelArmVtimerUpdateVOffset": False,
+        },
         multikernels=4,
     ),
     BoardInfo(
@@ -657,6 +670,8 @@ def main() -> None:
                 print(f"Number of multikernels is {board.multikernels}")
             else:
                 print("Default number of multikernels (1)")
+                loader_defines.append(("NUM_MULTIKERNELS", 1))
+                print(f"Number of multikernels is DEFAULT")
 
             build_elf_component("loader", root_dir, build_dir, board, config, loader_defines)
             build_elf_component("monitor", root_dir, build_dir, board, config, [])

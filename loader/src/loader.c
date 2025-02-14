@@ -34,7 +34,7 @@ _Static_assert(sizeof(uintptr_t) == 8 || sizeof(uintptr_t) == 4, "Expect uintptr
 #elif defined(BOARD_qemu_virt_aarch64)
 #define GICD_BASE 0x8010000UL
 #define GICC_BASE 0x8020000UL
-#elif defined(BOARD_odroidc4)
+#elif defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel)
 #define GICD_BASE 0xffc01000UL
 #define GICC_BASE 0xffc02000UL
 #endif
@@ -58,9 +58,7 @@ struct region {
     uintptr_t type;
 };
 
-struct loader_data {
-    uintptr_t magic;
-    uintptr_t flags;
+struct kernel_data {
     uintptr_t kernel_entry;
     uintptr_t ui_p_reg_start;
     uintptr_t ui_p_reg_end;
@@ -68,9 +66,15 @@ struct loader_data {
     uintptr_t v_entry;
     uintptr_t extra_device_addr_p;
     uintptr_t extra_device_size;
+};
 
+// Changing this structure is precarious, maybe better to wrap in NUM_MULTIKERNELS IFDEF
+struct loader_data {
+    uintptr_t magic;
+    uintptr_t flags;
+    uintptr_t num_kernels;
     uintptr_t num_regions;
-    struct region regions[];
+    struct kernel_data kernel_data[];
 };
 
 typedef void (*sel4_entry)(
@@ -89,13 +93,13 @@ void switch_to_el2(void);
 void el1_mmu_enable(uint64_t *pgd_down, uint64_t *pgd_up);
 void el2_mmu_enable(uint64_t *pgd_down);
 
-#if defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
+#if NUM_MULTIKERNELS > 1
 volatile char _stack[NUM_MULTIKERNELS][STACK_SIZE] ALIGN(16);
 #else
 char _stack[STACK_SIZE] ALIGN(16);
 #endif
 
-#if defined(ARCH_aarch64) && defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
+#if defined(ARCH_aarch64) && NUM_MULTIKERNELS > 1
 /* Paging structures for kernel mapping */
 uint64_t boot_lvl0_upper[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
 uint64_t boot_lvl1_upper[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
@@ -107,7 +111,7 @@ uint64_t boot_lvl1_lower[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
 
 uintptr_t exception_register_state[32];
 
-uint8_t num_multikernels = NUM_MULTIKERNELS;
+uint64_t num_multikernels = NUM_MULTIKERNELS;
 #elif defined(ARCH_aarch64)
 /* Paging structures for kernel mapping */
 uint64_t boot_lvl0_upper[1 << 9] ALIGN(1 << 12);
@@ -120,7 +124,7 @@ uint64_t boot_lvl1_lower[1 << 9] ALIGN(1 << 12);
 
 uintptr_t exception_register_state[32];
 
-uint8_t num_multikernels = 1;
+uint64_t num_multikernels = 1;
 #elif defined(ARCH_riscv64)
 /* Paging structures for kernel mapping */
 uint64_t boot_lvl1_pt[1 << 9] ALIGN(1 << 12);
@@ -131,7 +135,8 @@ uint64_t boot_lvl2_pt_elf[1 << 9] ALIGN(1 << 12);
 
 extern char _text;
 extern char _bss_end;
-const struct loader_data *loader_data = (void *) &_bss_end; // loader_data[NUM_MULTIKERNELS] if multikernel enabled
+const struct loader_data *loader_data = (void *) &_bss_end;
+struct region *regions; // Should be end of loader data at loader_data->kernel_data[laoder_data->num_kernels]
 
 static void memcpy(void *dst, const void *src, size_t sz)
 {
@@ -216,7 +221,7 @@ static void putc(uint8_t ch)
     while ((*UART_REG(UART_STATUS) & UART_TX_FULL));
     *UART_REG(UART_WFIFO) = ch;
 }
-#elif defined(BOARD_odroidc4)
+#elif defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel)
 #define UART_BASE 0xff803000
 #define UART_WFIFO 0x0
 #define UART_STATUS 0xC
@@ -482,24 +487,30 @@ static void print_loader_data(void)
     puthex64(loader_data->flags);
     puts("\n");
     print_flags();
-    puts("LDR|INFO: Kernel:      entry:   ");
-    puthex64(loader_data->kernel_entry);
-    puts("\n");
 
-    puts("LDR|INFO: Root server: physmem: ");
-    puthex64(loader_data->ui_p_reg_start);
-    puts(" -- ");
-    puthex64(loader_data->ui_p_reg_end);
-    puts("\nLDR|INFO:              virtmem: ");
-    puthex64(loader_data->ui_p_reg_start - loader_data->pv_offset);
-    puts(" -- ");
-    puthex64(loader_data->ui_p_reg_end - loader_data->pv_offset);
-    puts("\nLDR|INFO:              entry  : ");
-    puthex64(loader_data->v_entry);
-    puts("\n");
+    for (uint32_t i = 0; i < loader_data->num_kernels; i++) {
+        puts("LDR|INFO: Kernel: ");
+        puthex64(i);
+        puts("\n");
+        puts("LDR|INFO: Kernel:      entry:   ");
+        puthex64(loader_data->kernel_data[i].kernel_entry);
+        puts("\n");
+
+        puts("LDR|INFO: Root server: physmem: ");
+        puthex64(loader_data->kernel_data[i].ui_p_reg_start);
+        puts(" -- ");
+        puthex64(loader_data->kernel_data[i].ui_p_reg_end);
+        puts("\nLDR|INFO:              virtmem: ");
+        puthex64(loader_data->kernel_data[i].ui_p_reg_start - loader_data->kernel_data[i].pv_offset);
+        puts(" -- ");
+        puthex64(loader_data->kernel_data[i].ui_p_reg_end - loader_data->kernel_data[i].pv_offset);
+        puts("\nLDR|INFO:              entry  : ");
+        puthex64(loader_data->kernel_data[i].v_entry);
+        puts("\n");
+    }
 
     for (uint32_t i = 0; i < loader_data->num_regions; i++) {
-        const struct region *r = &loader_data->regions[i];
+        const struct region *r = &regions[i];
         puts("LDR|INFO: region: ");
         puthex32(i);
         puts("   addr: ");
@@ -516,9 +527,9 @@ static void print_loader_data(void)
 
 static void copy_data(void)
 {
-    const void *base = &loader_data->regions[loader_data->num_regions];
+    const void *base = &regions[loader_data->num_regions];
     for (uint32_t i = 0; i < loader_data->num_regions; i++) {
-        const struct region *r = &loader_data->regions[i];
+        const struct region *r = &regions[i];
         puts("LDR|INFO: copying region ");
         puthex32(i);
         puts("\n");
@@ -581,19 +592,19 @@ static int ensure_correct_el(void)
 
 static void start_kernel(int id)
 {
-    ((sel4_entry)(loader_data->kernel_entry))(
-        loader_data->ui_p_reg_start,
-        loader_data->ui_p_reg_end,
-        loader_data->pv_offset,
-        loader_data->v_entry,
+    ((sel4_entry)(loader_data->kernel_data[id].kernel_entry))(
+        loader_data->kernel_data[id].ui_p_reg_start,
+        loader_data->kernel_data[id].ui_p_reg_end,
+        loader_data->kernel_data[id].pv_offset,
+        loader_data->kernel_data[id].v_entry,
         0,
         0,
-        loader_data->extra_device_addr_p,
-        loader_data->extra_device_size
+        loader_data->kernel_data[id].extra_device_addr_p,
+        loader_data->kernel_data[id].extra_device_size
     );
 }
 
-#if defined(BOARD_zcu102) || defined(BOARD_odroidc4)
+#if defined(BOARD_zcu102) || defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel) 
 static void configure_gicv2(void)
 {
     /* The ZCU102 start in EL3, and then we drop to EL1(NS).
@@ -807,6 +818,8 @@ int main(void)
         goto fail;
     }
 
+    regions = (void *) &(loader_data->kernel_data[loader_data->num_kernels]);
+
     print_loader_data();
 
     /* past here we have trashed u-boot so any errors should go to the
@@ -814,16 +827,12 @@ int main(void)
      */
     copy_data();
 
-#if defined(BOARD_zcu102) || defined(BOARD_odroidc4)
+#if defined(BOARD_zcu102) || defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel)
     configure_gicv2();
 #endif
 
     puts("LDR|INFO: # of multikernels is ");
-    #ifdef NUM_MULTIKERNELS
-        putc(num_multikernels + '0');
-    #else
-        puts("undefined");
-    #endif
+    putc(num_multikernels + '0');
     puts("\n");
 
 #ifdef ARCH_aarch64
@@ -834,7 +843,7 @@ int main(void)
         goto fail;
     }
 
-#if defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
+#if NUM_MULTIKERNELS > 1
 
     disable_caches_el2();
 
@@ -887,9 +896,17 @@ int main(void)
     puts("LDR|INFO: enabling self MMU\n");
     el = current_el();
     if (el == EL1) {
+        #if NUM_MULTIKERNELS > 1
         el1_mmu_enable(boot_lvl0_lower[0], boot_lvl0_upper[0]);
+        #else
+        el1_mmu_enable(boot_lvl0_lower, boot_lvl0_upper);
+        #endif
     } else if (el == EL2) {
+        #if NUM_MULTIKERNELS > 1
         el2_mmu_enable(boot_lvl0_lower[0]);
+        #else
+        el2_mmu_enable(boot_lvl0_lower);
+        #endif
     } else {
         puts("LDR|ERROR: unknown EL level for MMU enable\n");
     }

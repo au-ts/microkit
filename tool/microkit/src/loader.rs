@@ -11,6 +11,8 @@ use crate::MemoryRegion;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
+use std::slice;
+use std::mem;
 
 const PAGE_TABLE_SIZE: usize = 4096;
 
@@ -107,9 +109,7 @@ struct LoaderRegion64 {
 }
 
 #[repr(C)]
-struct LoaderHeader64 {
-    magic: u64,
-    flags: u64,
+struct LoaderKernelInfo64 {
     kernel_entry: u64,
     ui_p_reg_start: u64,
     ui_p_reg_end: u64,
@@ -117,12 +117,20 @@ struct LoaderHeader64 {
     v_entry: u64,
     extra_device_addr_p: u64,
     extra_device_size: u64,
+}
+
+#[repr(C)]
+struct LoaderHeader64 {
+    magic: u64,
+    flags: u64,
+    num_multikernels: u64,
     num_regions: u64,
 }
 
 pub struct Loader<'a> {
     image: Vec<u8>,
     header: LoaderHeader64,
+    kernel_data: Vec<LoaderKernelInfo64>,
     region_metadata: Vec<LoaderRegion64>,
     regions: Vec<(u64, &'a [u8])>,
     additional_headers: Vec<LoaderHeader64>,
@@ -223,7 +231,8 @@ impl<'a> Loader<'a> {
             .expect("Could not find 'num_multikernels' symbol");
 
         println!("Reading multikernel number at {}", num_multikernels_addr);
-        let num_multikernels: u8 = *(elf.get_data(num_multikernels_addr, num_multikernels_size).expect("Could not extract number of multikernels to boot")).first().expect("Failed to copy in number of multikernels to boot");
+        let num_multikernels: u64 = (*(elf.get_data(num_multikernels_addr, num_multikernels_size).expect("Could not extract number of multikernels to boot")).first().expect("Failed to copy in number of multikernels to boot")).into();
+        println!("Recieved number {}", num_multikernels);
         assert!(num_multikernels > 0);
 
         // Debugging, delete later
@@ -270,15 +279,15 @@ impl<'a> Loader<'a> {
         // Copy in all the page tables, for each level of the pagetable and then for each kernel
         println!("Writing pagetables to image..");
         let mut id: usize = 0;
-        while id < num_multikernels.into() {
+        while id < num_multikernels as usize {
             for (var_addr, var_size, var_data) in &pagetable_vars {
                 //println!("Pagetable id {} var_size is {} and var_data.len() is {}", id, var_size / (num_multikernels as u64), (var_data[id].len() as u64));
                 let offset = var_addr - image_vaddr;
-                assert!(var_size / (num_multikernels as u64) == var_data[id].len() as u64);
+                assert!(var_size / (num_multikernels) == var_data[id].len() as u64);
                 assert!(offset > 0);
                 assert!(offset <= image.len() as u64);
                 //println!("Copying into the image at {:x} til {:x}", offset as usize + (id * PAGE_TABLE_SIZE), (offset + (var_size  / (num_multikernels as u64))) as usize + (id * PAGE_TABLE_SIZE));
-                image[offset as usize + (id * PAGE_TABLE_SIZE)..(offset + (var_size  / (num_multikernels as u64))) as usize + (id * PAGE_TABLE_SIZE)].copy_from_slice(&var_data[id]);
+                image[offset as usize + (id * PAGE_TABLE_SIZE)..(offset + (var_size  / (num_multikernels))) as usize + (id * PAGE_TABLE_SIZE)].copy_from_slice(&var_data[id]);
             }
             id += 1;
         }
@@ -325,16 +334,29 @@ impl<'a> Loader<'a> {
         println!("extra_device_size: {:x}", extra_device_size);
         println!("-------------------");
 
+        // Make new vector
+        let mut kernel_data = Vec::new();
+        for _i in 0..num_multikernels {
+            kernel_data.push(
+                LoaderKernelInfo64 {
+                    kernel_entry,
+                    ui_p_reg_start,
+                    ui_p_reg_end,
+                    pv_offset,
+                    v_entry,
+                    extra_device_addr_p,
+                    extra_device_size,
+                }
+            );
+        }
+        println!("Kernel data was copied {} times (target {})", kernel_data.len(), num_multikernels);
+        assert!(kernel_data.len() == num_multikernels as usize);
+        // Copy header info to it like 4 times lmbao
+
         let header = LoaderHeader64 {
             magic,
             flags,
-            kernel_entry,
-            ui_p_reg_start,
-            ui_p_reg_end,
-            pv_offset,
-            v_entry,
-            extra_device_addr_p,
-            extra_device_size,
+            num_multikernels,
             num_regions: all_regions.len() as u64,
         };
 
@@ -343,13 +365,7 @@ impl<'a> Loader<'a> {
             LoaderHeader64 {
                 magic,
                 flags,
-                kernel_entry,
-                ui_p_reg_start,      // this matters
-                ui_p_reg_end,        // this matters
-                pv_offset,           // this matters
-                v_entry,             // this matters
-                extra_device_addr_p, // this matters
-                extra_device_size,   // this matters
+                num_multikernels,
                 num_regions: all_regions.len() as u64,
             }
         );
@@ -370,6 +386,7 @@ impl<'a> Loader<'a> {
         Loader {
             image,
             header,
+            kernel_data,
             region_metadata,
             regions: all_regions,
             additional_headers,
@@ -394,6 +411,18 @@ impl<'a> Loader<'a> {
         loader_buf
             .write_all(header_bytes)
             .expect("Failed to write header data to loader");
+        
+        // Then kernel info bytes
+        let kernel_bytes = unsafe {
+            slice::from_raw_parts(
+                self.kernel_data.as_ptr() as *const u8,
+                self.kernel_data.len() * mem::size_of::<LoaderKernelInfo64>(),
+            )
+        };
+        loader_buf
+            .write_all(kernel_bytes)
+            .expect("Failed to write kernel data");
+
         // For each region, we need to write out the region metadata as well
         for region in &self.region_metadata {
             let region_metadata_bytes = unsafe { struct_to_bytes(region) };
