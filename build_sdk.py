@@ -201,7 +201,7 @@ SUPPORTED_BOARDS = (
             "KernelArmHypervisorSupport": True,
             "KernelArmVtimerUpdateVOffset": False,
         },
-        multikernels=4,
+        multikernels=2,
     ),
     BoardInfo(
         name="qemu_virt_aarch64",

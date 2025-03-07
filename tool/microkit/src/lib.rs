@@ -172,8 +172,10 @@ impl DisjointMemoryRegion {
     }
 
     pub fn remove_region(&mut self, base: u64, end: u64) {
+        //println!("remove_region called on base {:x} and end {:x}", base, end);
         let mut maybe_idx = None;
         for (i, r) in self.regions.iter().enumerate() {
+            //println!("Mem region given i = {} and r = {}", i, r);
             if base >= r.base && end <= r.end {
                 maybe_idx = Some(i);
                 break;

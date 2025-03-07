@@ -52,7 +52,7 @@ enum el {
 };
 
 struct region {
-    uintptr_t load_addr;
+    uintptr_t load_addr; // this should be updated for subsequent regions by loader.rs
     uintptr_t size;
     uintptr_t offset;
     uintptr_t type;
@@ -784,11 +784,8 @@ void secondary_cpu_entry() {
     dsb();
 
     // Temp: Hang all other kernels otherwise output becomes garbled
-    if (!cpu) {
-        start_kernel(cpu);
-    } else {
-        for (;;);
-    }
+    for (volatile int i = 0; i < cpu * 1000000; i++);
+    start_kernel(cpu);
 
     puts("LDR|ERROR: seL4 Loader: Error - KERNEL RETURNED (CPU ");
     puthex32(cpu);

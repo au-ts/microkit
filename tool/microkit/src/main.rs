@@ -3122,6 +3122,8 @@ impl<'a> Args<'a> {
 }
 
 fn main() -> Result<(), String> {
+    std::env::set_var("RUST_BACKTRACE", "full");
+
     let exe_path = std::env::current_exe().unwrap();
     let sdk_env = std::env::var("MICROKIT_SDK");
     let sdk_dir = match sdk_env {

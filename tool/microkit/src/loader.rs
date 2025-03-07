@@ -133,7 +133,7 @@ pub struct Loader<'a> {
     kernel_data: Vec<LoaderKernelInfo64>,
     region_metadata: Vec<LoaderRegion64>,
     regions: Vec<(u64, &'a [u8])>,
-    additional_headers: Vec<LoaderHeader64>,
+    _additional_headers: Vec<LoaderHeader64>,
 }
 
 impl<'a> Loader<'a> {
@@ -230,7 +230,7 @@ impl<'a> Loader<'a> {
             .find_symbol("num_multikernels")
             .expect("Could not find 'num_multikernels' symbol");
 
-        println!("Reading multikernel number at {}", num_multikernels_addr);
+        println!("Reading multikernel number at {:x}", num_multikernels_addr);
         let num_multikernels: u64 = (*(elf.get_data(num_multikernels_addr, num_multikernels_size).expect("Could not extract number of multikernels to boot")).first().expect("Failed to copy in number of multikernels to boot")).into();
         println!("Recieved number {}", num_multikernels);
         assert!(num_multikernels > 0);
@@ -286,7 +286,7 @@ impl<'a> Loader<'a> {
                 assert!(var_size / (num_multikernels) == var_data[id].len() as u64);
                 assert!(offset > 0);
                 assert!(offset <= image.len() as u64);
-                //println!("Copying into the image at {:x} til {:x}", offset as usize + (id * PAGE_TABLE_SIZE), (offset + (var_size  / (num_multikernels as u64))) as usize + (id * PAGE_TABLE_SIZE));
+                println!("Copying into the image at {:x} til {:x}", offset as usize + (id * PAGE_TABLE_SIZE), (offset + (var_size  / (num_multikernels))) as usize + (id * PAGE_TABLE_SIZE));
                 image[offset as usize + (id * PAGE_TABLE_SIZE)..(offset + (var_size  / (num_multikernels))) as usize + (id * PAGE_TABLE_SIZE)].copy_from_slice(&var_data[id]);
             }
             id += 1;
@@ -313,7 +313,7 @@ impl<'a> Loader<'a> {
         }
 
         let mut all_regions_with_loader = all_regions.clone();
-        println!("Image vaddr at: {}", image_vaddr);
+        println!("Image vaddr at: {:x}", image_vaddr);
         all_regions_with_loader.push((image_vaddr, &image));
         check_non_overlapping(&all_regions_with_loader);
 
@@ -321,6 +321,47 @@ impl<'a> Loader<'a> {
             true => 1,
             false => 0,
         };
+
+        let mut region_metadata = Vec::new();
+        let mut offset: u64 = 0;
+        let mut last_addr: u64 = 0;
+        let mut last_size: u64 = 0;
+        for (addr, data) in &all_regions {
+            println!("Adding region at {:x} size {:x} and offset {:x}", *addr, data.len() as u64, offset);
+            region_metadata.push(LoaderRegion64 {
+                load_addr: *addr,
+                size: data.len() as u64,
+                offset,
+                r#type: 1,
+            });
+            offset += data.len() as u64;
+            
+            if *addr > last_addr {
+                last_addr = *addr;
+                last_size = data.len() as u64;
+            }
+        }
+        // Assuming regions are packed together and start at load addr 0x0......
+        let offset_size: u64 = ((last_addr + last_size) + 0xFFF) & !(0xFFF);
+        println!("We can start adding from {:x} ({:x} + {:x} = {:x})", offset_size, last_addr, last_size, last_addr + last_size);
+        // Once region meta data is finalised, add all regions again but with addresses that are offset by the last free addr
+        // 
+        // So for each region in the list, add it 1..num_multikernel times
+        // Then same offset etc, but each load addr is now addr + total_size * i
+        let original_num_regions = region_metadata.len();
+        println!("We have {} regions", original_num_regions);
+        for i in 0..region_metadata.len() {
+            for j in 1..num_multikernels {
+                region_metadata.push(LoaderRegion64 {
+                    load_addr: region_metadata[i].load_addr + j * offset_size,
+                    size: region_metadata[i].size,
+                    offset: region_metadata[i].offset,
+                    r#type: region_metadata[i].r#type,
+                });
+            }
+        }
+        println!("We now have {} regions, expected {}", region_metadata.len(), original_num_regions * num_multikernels as usize);
+        assert!(region_metadata.len() == original_num_regions * num_multikernels as usize);
 
         println!("-------------------");
         println!("    HEADER INFO    ");
@@ -336,16 +377,16 @@ impl<'a> Loader<'a> {
 
         // Make new vector
         let mut kernel_data = Vec::new();
-        for _i in 0..num_multikernels {
+        for i in 0..num_multikernels {
             kernel_data.push(
                 LoaderKernelInfo64 {
-                    kernel_entry,
-                    ui_p_reg_start,
-                    ui_p_reg_end,
-                    pv_offset,
-                    v_entry,
-                    extra_device_addr_p,
-                    extra_device_size,
+                    kernel_entry: kernel_entry + i * offset_size,
+                    ui_p_reg_start: ui_p_reg_start  + i * offset_size,
+                    ui_p_reg_end: ui_p_reg_end  + i * offset_size,
+                    pv_offset: pv_offset + i * offset_size,
+                    v_entry: v_entry + i * offset_size,
+                    extra_device_addr_p: extra_device_addr_p + i * offset_size,
+                    extra_device_size: extra_device_size,
                 }
             );
         }
@@ -357,7 +398,7 @@ impl<'a> Loader<'a> {
             magic,
             flags,
             num_multikernels,
-            num_regions: all_regions.len() as u64,
+            num_regions: region_metadata.len() as u64,
         };
 
         let mut additional_headers: Vec<LoaderHeader64> = Vec::new();
@@ -366,22 +407,9 @@ impl<'a> Loader<'a> {
                 magic,
                 flags,
                 num_multikernels,
-                num_regions: all_regions.len() as u64,
+                num_regions: region_metadata.len() as u64,
             }
         );
-
-        let mut region_metadata = Vec::new();
-        let mut offset: u64 = 0;
-        for (addr, data) in &all_regions {
-            println!("Adding region at {:x} size {:x} and offset {:x}", *addr, data.len() as u64, offset);
-            region_metadata.push(LoaderRegion64 {
-                load_addr: *addr,
-                size: data.len() as u64,
-                offset,
-                r#type: 1,
-            });
-            offset += data.len() as u64;
-        }
 
         Loader {
             image,
@@ -389,7 +417,7 @@ impl<'a> Loader<'a> {
             kernel_data,
             region_metadata,
             regions: all_regions,
-            additional_headers,
+            _additional_headers: additional_headers,
         }
     }
 
@@ -402,6 +430,7 @@ impl<'a> Loader<'a> {
         let mut loader_buf = BufWriter::new(loader_file);
 
         // First write out all the image data
+        println!("Writing image data");
         loader_buf
             .write_all(self.image.as_slice())
             .expect("Failed to write image data to loader");
