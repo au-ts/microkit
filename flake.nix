@@ -67,6 +67,7 @@
           ps.lxml
           pyfdt
           ps.setuptools
+          ps.turnt
         ]);
 
         microkiToolToml = nixpkgs.lib.trivial.importTOML ./tool/microkit/Cargo.toml;

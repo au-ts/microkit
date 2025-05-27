@@ -1,0 +1,2 @@
+command = "python ../../dev_build.py --rebuild {args} --example {base}"
+output.txt = "../../tmp_build/report.txt"
