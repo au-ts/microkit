@@ -436,7 +436,7 @@ static bool check_untypeds_match(seL4_BootInfo *bi)
         puts("  boot info cap start: ");
         puthex32(bi->untyped.start);
         puts("\n");
-        puts("cap start mismatch");
+        puts("cap start mismatch\n");
         return false;
     }
 
@@ -446,7 +446,7 @@ static bool check_untypeds_match(seL4_BootInfo *bi)
         puts("  boot info cap end: ");
         puthex32(bi->untyped.end);
         puts("\n");
-        puts("cap end mismatch");
+        puts("cap end mismatch\n");
         return false;
     }
 
@@ -459,7 +459,7 @@ static bool check_untypeds_match(seL4_BootInfo *bi)
             puts("  boot info paddr: ");
             puthex64(bi->untypedList[i].paddr);
             puts("\n");
-            puts("paddr mismatch");
+            puts("paddr mismatch\n");
             return false;
         }
         if (untyped_info.regions[i].size_bits != bi->untypedList[i].sizeBits) {
@@ -470,7 +470,7 @@ static bool check_untypeds_match(seL4_BootInfo *bi)
             puts("  boot info size_bits: ");
             puthex32(bi->untypedList[i].sizeBits);
             puts("\n");
-            puts("size_bits mismatch");
+            puts("size_bits mismatch\n");
             return false;
         }
         if (untyped_info.regions[i].is_device != bi->untypedList[i].isDevice) {
@@ -481,7 +481,7 @@ static bool check_untypeds_match(seL4_BootInfo *bi)
             puts("  boot info is_device: ");
             puthex32(bi->untypedList[i].isDevice);
             puts("\n");
-            puts("is_device mismatch");
+            puts("is_device mismatch\n");
             return false;
         }
     }
