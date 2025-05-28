@@ -5,6 +5,9 @@
 //
 
 use crate::sel4::Object;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use alloc::{format, vec};
 use serde_json;
 
 pub fn msb(x: u64) -> u64 {
@@ -207,7 +210,7 @@ pub fn monitor_serialise_names(
         // Here instead of giving an error we simply take the minimum of the name
         // and how large of a name we can encode. The name length is one less than
         // the maximum since we still have to add the null terminator.
-        let name_length = std::cmp::min(name_bytes.len(), max_name_len - 1);
+        let name_length = core::cmp::min(name_bytes.len(), max_name_len - 1);
         let end = start + name_length;
         names_bytes[start..end].copy_from_slice(&name_bytes[..name_length]);
         // These bytes will be interpreted as a C string, so we must include

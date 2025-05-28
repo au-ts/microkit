@@ -24,8 +24,9 @@ use sel4::{
     RiscvVirtualMemory, RiscvVmAttributes,
 };
 use std::cmp::{max, min};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
+use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::iter::zip;
 use std::mem::size_of;
@@ -125,7 +126,7 @@ struct InitSystem<'a> {
     last_fixed_address: u64,
     normal_untyped: &'a mut ObjectAllocator,
     device_untyped: &'a mut ObjectAllocator,
-    cap_address_names: &'a mut HashMap<u64, String>,
+    cap_address_names: &'a mut BTreeMap<u64, String>,
     // seL4_BootInfo caps (sharedFrames, userImageFrames, etc).
     // TODO: at the moment just userImageFrames
     unused_boot_info_frames: Vec<Object>,
@@ -142,7 +143,7 @@ impl<'a> InitSystem<'a> {
         normal_untyped: &'a mut ObjectAllocator,
         device_untyped: &'a mut ObjectAllocator,
         invocations: &'a mut Vec<Invocation>,
-        cap_address_names: &'a mut HashMap<u64, String>,
+        cap_address_names: &'a mut BTreeMap<u64, String>,
         unused_boot_info_frames: Vec<Object>,
     ) -> InitSystem<'a> {
         InitSystem {
@@ -390,7 +391,7 @@ struct BuiltSystem {
     kernel_boot_info: BootInfo,
     fault_ep_cap_address: u64,
     reply_cap_address: u64,
-    cap_lookup: HashMap<u64, String>,
+    cap_lookup: BTreeMap<u64, String>,
     pd_tcb_caps: Vec<u64>,
     vm_tcb_caps: Vec<u64>,
     sched_caps: Vec<u64>,
@@ -803,7 +804,7 @@ fn build_system(
     assert!(invocation_table_size % config.minimum_page_size == 0);
     assert!(invocation_table_size <= MAX_SYSTEM_INVOCATION_SIZE);
 
-    let mut cap_address_names: HashMap<u64, String> = HashMap::new();
+    let mut cap_address_names: BTreeMap<u64, String> = BTreeMap::new();
     cap_address_names.insert(INIT_NULL_CAP_ADDRESS, "null".to_string());
     cap_address_names.insert(INIT_TCB_CAP_ADDRESS, "TCB: init".to_string());
     cap_address_names.insert(INIT_CNODE_CAP_ADDRESS, "CNode: init".to_string());
@@ -1103,7 +1104,7 @@ fn build_system(
     //  Page table structs:
     //     as needed by protection domains based on mappings required
     let mut extra_mrs = Vec::new();
-    let mut pd_extra_maps: HashMap<&ProtectionDomain, Vec<SysMap>> = HashMap::new();
+    let mut pd_extra_maps: BTreeMap<&ProtectionDomain, Vec<SysMap>> = BTreeMap::new();
 
     let pd_elf_regions = {
         let mut phys_addr_next = pd_elfs_phys_region.base;
@@ -1221,7 +1222,7 @@ fn build_system(
             all_mrs.push(mr);
         }
     }
-    let all_mr_by_name: HashMap<&str, &SysMemoryRegion> =
+    let all_mr_by_name: BTreeMap<&str, &SysMemoryRegion> =
         all_mrs.iter().map(|mr| (mr.name.as_str(), *mr)).collect();
 
     let mut system_invocations: Vec<Invocation> = Vec::new();
@@ -1237,7 +1238,7 @@ fn build_system(
         kernel_boot_info.user_image_frames.clone(),
     );
 
-    let mut mr_pages: HashMap<&SysMemoryRegion, Vec<Object>> = HashMap::new();
+    let mut mr_pages: BTreeMap<&SysMemoryRegion, Vec<Object>> = BTreeMap::new();
 
     // 3.1 Work out how many fixed page objects are required
 
@@ -1657,8 +1658,7 @@ fn build_system(
 
     let cnode_objs =
         init_system.allocate_objects(ObjectType::CNode, cnode_names, Some(PD_CAP_SIZE));
-    let mut cnode_objs_by_pd: HashMap<&ProtectionDomain, &Object> =
-        HashMap::with_capacity(system.protection_domains.len());
+    let mut cnode_objs_by_pd: BTreeMap<&ProtectionDomain, &Object> = BTreeMap::new();
     for (i, pd) in system.protection_domains.iter().enumerate() {
         cnode_objs_by_pd.insert(pd, &cnode_objs[i]);
     }
@@ -1670,7 +1670,7 @@ fn build_system(
 
     // Create all the necessary interrupt handler objects. These aren't
     // created through retype though!
-    let mut irq_cap_addresses: HashMap<&ProtectionDomain, Vec<u64>> = HashMap::new();
+    let mut irq_cap_addresses: BTreeMap<&ProtectionDomain, Vec<u64>> = BTreeMap::new();
     for pd in &system.protection_domains {
         irq_cap_addresses.insert(pd, vec![]);
         for sysirq in &pd.irqs {
@@ -1926,7 +1926,7 @@ fn build_system(
         }
     }
 
-    let mut badged_irq_caps: HashMap<&ProtectionDomain, Vec<u64>> = HashMap::new();
+    let mut badged_irq_caps: BTreeMap<&ProtectionDomain, Vec<u64>> = BTreeMap::new();
     for (notification_obj, pd) in zip(&notification_objs, &system.protection_domains) {
         badged_irq_caps.insert(pd, vec![]);
         for sysirq in &pd.irqs {
@@ -2763,7 +2763,7 @@ fn build_system(
 }
 
 fn write_report<W: std::io::Write>(
-    buf: &mut BufWriter<W>,
+    buf: &mut W,
     config: &Config,
     built_system: &BuiltSystem,
     bootstrap_invocation_data: &[u8],
@@ -2855,12 +2855,16 @@ fn write_report<W: std::io::Write>(
     writeln!(buf, "\n# Bootstrap Kernel Invocations Detail\n")?;
     for (i, invocation) in built_system.bootstrap_invocations.iter().enumerate() {
         write!(buf, "    0x{:04x} ", i)?;
-        invocation.report_fmt(buf, config, &built_system.cap_lookup);
+        let mut invocation_buf = String::new();
+        invocation.report_fmt(&mut invocation_buf, config, &built_system.cap_lookup);
+        buf.write_all(invocation_buf.as_bytes())?;
     }
     writeln!(buf, "\n# System Kernel Invocations Detail\n")?;
     for (i, invocation) in built_system.system_invocations.iter().enumerate() {
         write!(buf, "    0x{:04x} ", i)?;
-        invocation.report_fmt(buf, config, &built_system.cap_lookup);
+        let mut invocation_buf = String::new();
+        invocation.report_fmt(&mut invocation_buf, config, &built_system.cap_lookup);
+        buf.write_all(invocation_buf.as_bytes())?;
     }
 
     Ok(())
@@ -3016,7 +3020,7 @@ impl<'a> Args<'a> {
     }
 }
 
-fn main() -> Result<(), String> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let exe_path = std::env::current_exe().unwrap();
     let sdk_env = std::env::var("MICROKIT_SDK");
     let sdk_dir = match sdk_env {
@@ -3025,10 +3029,9 @@ fn main() -> Result<(), String> {
             // If there is no MICROKIT_SDK explicitly set, use the one that the binary is in.
             std::env::VarError::NotPresent => exe_path.parent().unwrap().parent().unwrap(),
             _ => {
-                return Err(format!(
-                    "Could not read MICROKIT_SDK environment variable: {}",
-                    err
-                ))
+                return Err(
+                    format!("Could not read MICROKIT_SDK environment variable: {}", err).into(),
+                )
             }
         },
     };
@@ -3266,8 +3269,18 @@ fn main() -> Result<(), String> {
         }
     };
 
-    let kernel_elf = ElfFile::from_path(&kernel_elf_path)?;
-    let mut monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
+    let kernel_elf = ElfFile::from_bytes(
+        &fs::read(&kernel_elf_path)?,
+        &kernel_elf_path.display().to_string(),
+    )?;
+    let loader_elf = ElfFile::from_bytes(
+        &fs::read(&loader_elf_path)?,
+        &loader_elf_path.display().to_string(),
+    )?;
+    let mut monitor_elf = ElfFile::from_bytes(
+        &fs::read(&monitor_elf_path)?,
+        &monitor_elf_path.display().to_string(),
+    )?;
 
     if monitor_elf.segments.iter().filter(|s| s.loadable).count() > 1 {
         eprintln!(
@@ -3288,16 +3301,31 @@ fn main() -> Result<(), String> {
     for pd in &system.protection_domains {
         match get_full_path(&pd.program_image, &search_paths) {
             Some(path) => {
-                let elf = ElfFile::from_path(&path).unwrap();
+                let elf =
+                    ElfFile::from_bytes(&fs::read(&path)?, &path.display().to_string()).unwrap();
                 pd_elf_files.push(elf);
             }
             None => {
                 return Err(format!(
                     "unable to find program image: '{}'",
                     pd.program_image.display()
-                ))
+                )
+                .into())
             }
         }
+        // }
+
+        // let path: PathBuf = get_full_path(&pd.program_image, &search_paths)
+        //     .ok_or::<core::error::Error>(Err(format!("hi")).into())?;
+        // // .ok_or_else(|| {
+        // //     Err(format!(
+        // //         "unable to find program image: '{}'",
+        // //         pd.program_image.display()
+        // //     ))
+        // // })?;
+
+        // let elf = ElfFile::from_bytes(&fs::read(&path)?, &path.display().to_string()).unwrap();
+        // pd_elf_files.push(elf);
     }
 
     let mut invocation_table_size = kernel_config.minimum_page_size;
@@ -3406,10 +3434,16 @@ fn main() -> Result<(), String> {
             "bootstrap invocation required size: {}",
             bootstrap_invocation_data.len()
         );
-        let mut stderr = BufWriter::new(std::io::stderr());
+        let mut stderr = std::io::stderr();
+        let mut invocation_buf = String::new();
         for bootstrap_invocation in &built_system.bootstrap_invocations {
-            bootstrap_invocation.report_fmt(&mut stderr, &kernel_config, &built_system.cap_lookup);
+            bootstrap_invocation.report_fmt(
+                &mut invocation_buf,
+                &kernel_config,
+                &built_system.cap_lookup,
+            );
         }
+        stderr.write_all(invocation_buf.as_bytes())?;
         stderr.flush().unwrap();
 
         eprintln!("Internal error: bootstrap invocations too large");
@@ -3489,31 +3523,17 @@ fn main() -> Result<(), String> {
     )?;
 
     // Generate the report
-    let report = match std::fs::File::create(args.report) {
-        Ok(file) => file,
-        Err(e) => {
-            return Err(format!(
-                "Could not create report file '{}': {}",
-                args.report, e
-            ))
-        }
-    };
+    let report = std::fs::File::create(args.report)
+        .map_err(|e| format!("Could not create report file '{}': {}", args.report, e))?;
 
     let mut report_buf = BufWriter::new(report);
-    match write_report(
+    write_report(
         &mut report_buf,
         &kernel_config,
         &built_system,
         &bootstrap_invocation_data,
-    ) {
-        Ok(()) => report_buf.flush().unwrap(),
-        Err(err) => {
-            return Err(format!(
-                "Could not write out report file '{}': {}",
-                args.report, err
-            ))
-        }
-    }
+    )
+    .map_err(|err| format!("Could not write out report file '{}': {}", args.report, err))?;
     report_buf.flush().unwrap();
 
     #[rustfmt::skip]
@@ -3529,7 +3549,8 @@ fn main() -> Result<(), String> {
 
     let loader = Loader::new(
         &kernel_config,
-        Path::new(&loader_elf_path),
+        &loader_elf,
+        &loader_elf_path.display().to_string(),
         &kernel_elf,
         // see the above todo as part of loader regions
         &monitor_elf,
@@ -3539,7 +3560,13 @@ fn main() -> Result<(), String> {
         built_system.initial_task_virt_region,
         loader_regions,
     );
-    loader.write_image(Path::new(args.output));
+
+    let loader_path = Path::new(args.output);
+    let mut loader_file = match File::create(loader_path) {
+        Ok(file) => file,
+        Err(e) => panic!("Could not create '{}': {}", loader_path.display(), e),
+    };
+    loader_file.write_all(&loader.create_image_data())?;
 
     Ok(())
 }

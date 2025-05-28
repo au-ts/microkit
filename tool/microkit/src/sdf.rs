@@ -19,6 +19,10 @@
 use crate::sel4::{Config, IrqTrigger, PageSize};
 use crate::util::str_to_bool;
 use crate::MAX_PDS;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use alloc::{format, vec};
+use core::cmp::Ordering;
 use std::path::{Path, PathBuf};
 
 /// Events that come through entry points (e.g notified or protected) are given an
@@ -97,7 +101,7 @@ pub enum SysMemoryRegionKind {
     Stack,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SysMemoryRegion {
     pub name: String,
     pub size: u64,
@@ -109,6 +113,18 @@ pub struct SysMemoryRegion {
     /// due to the user's SDF or created by the tool for setting up the
     /// stack, ELF, etc.
     pub kind: SysMemoryRegionKind,
+}
+
+impl Ord for SysMemoryRegion {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.name.cmp(&other.name)
+    }
+}
+
+impl PartialOrd for SysMemoryRegion {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl SysMemoryRegion {
@@ -167,7 +183,7 @@ pub struct Channel {
     pub end_b: ChannelEnd,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ProtectionDomain {
     /// Only populated for child protection domains
     pub id: Option<u64>,
@@ -192,6 +208,18 @@ pub struct ProtectionDomain {
     pub parent: Option<usize>,
     /// Location in the parsed SDF file
     text_pos: roxmltree::TextPos,
+}
+
+impl Ord for ProtectionDomain {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.name.cmp(&other.name)
+    }
+}
+
+impl PartialOrd for ProtectionDomain {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -1418,7 +1446,8 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         }
 
         if !found {
-            println!("WARNING: unused memory region '{}'", mr.name);
+            // TODO.
+            // println!("WARNING: unused memory region '{}'", mr.name);
         }
     }
 

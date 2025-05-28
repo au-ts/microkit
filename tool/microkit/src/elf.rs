@@ -5,9 +5,10 @@
 //
 
 use crate::util::bytes_to_struct;
-use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
+use alloc::collections::BTreeMap;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use alloc::{format, vec};
 
 #[repr(C, packed)]
 struct ElfHeader32 {
@@ -135,19 +136,14 @@ pub struct ElfFile {
     pub word_size: usize,
     pub entry: u64,
     pub segments: Vec<ElfSegment>,
-    symbols: HashMap<String, (ElfSymbol64, bool)>,
+    symbols: BTreeMap<String, (ElfSymbol64, bool)>,
 }
 
 impl ElfFile {
-    pub fn from_path(path: &Path) -> Result<ElfFile, String> {
-        let bytes = match fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(err) => return Err(format!("Failed to read ELF '{}': {}", path.display(), err)),
-        };
-
+    pub fn from_bytes(bytes: &[u8], name: &str) -> Result<ElfFile, String> {
         let magic = &bytes[0..4];
         if magic != ELF_MAGIC {
-            return Err(format!("ELF '{}': magic check failed", path.display()));
+            return Err(format!("ELF '{name}': magic check failed"));
         }
 
         let word_size;
@@ -156,20 +152,14 @@ impl ElfFile {
         let class = &bytes[4..5][0];
         match class {
             1 => {
-                hdr_size = std::mem::size_of::<ElfHeader32>();
+                hdr_size = core::mem::size_of::<ElfHeader32>();
                 word_size = 32;
             }
             2 => {
-                hdr_size = std::mem::size_of::<ElfHeader64>();
+                hdr_size = core::mem::size_of::<ElfHeader64>();
                 word_size = 64;
             }
-            _ => {
-                return Err(format!(
-                    "ELF '{}': invalid class '{}'",
-                    path.display(),
-                    class
-                ))
-            }
+            _ => return Err(format!("ELF '{name}': invalid class '{class}'",)),
         };
 
         // Now need to read the header into a struct
@@ -183,8 +173,7 @@ impl ElfFile {
 
         if hdr.ident_data != 1 {
             return Err(format!(
-                "ELF '{}': incorrect endianness, only little endian architectures are supported",
-                path.display()
+                "ELF '{name}': incorrect endianness, only little endian architectures are supported",
             ));
         }
 
@@ -240,18 +229,12 @@ impl ElfFile {
         }
 
         if shstrtab_shent.is_none() {
-            return Err(format!(
-                "ELF '{}': unable to find string table section",
-                path.display()
-            ));
+            return Err(format!("ELF '{name}': unable to find string table section",));
         }
 
         assert!(symtab_shent.is_some());
         if symtab_shent.is_none() {
-            return Err(format!(
-                "ELF '{}': unable to find symbol table section",
-                path.display()
-            ));
+            return Err(format!("ELF '{name}': unable to find symbol table section",));
         }
 
         // Reading the symbol table
@@ -265,9 +248,9 @@ impl ElfFile {
         let symtab_str = &bytes[symtab_str_start..symtab_str_end];
 
         // Read all the symbols
-        let mut symbols: HashMap<String, (ElfSymbol64, bool)> = HashMap::new();
+        let mut symbols: BTreeMap<String, (ElfSymbol64, bool)> = BTreeMap::new();
         let mut offset = 0;
-        let symbol_size = std::mem::size_of::<ElfSymbol64>();
+        let symbol_size = core::mem::size_of::<ElfSymbol64>();
         while offset < symtab.len() {
             let sym_bytes = &symtab[offset..offset + symbol_size];
             let (sym_head, sym_body, sym_tail) = unsafe { sym_bytes.align_to::<ElfSymbol64>() };
@@ -345,7 +328,7 @@ impl ElfFile {
         match strtab[idx..].iter().position(|&b| b == 0) {
             Some(null_byte_pos) => {
                 let end_idx = idx + null_byte_pos;
-                match std::str::from_utf8(&strtab[idx..end_idx]) {
+                match core::str::from_utf8(&strtab[idx..end_idx]) {
                     Ok(string) => Ok(string),
                     Err(err) => Err(format!(
                         "Failed to convert strtab bytes to UTF-8 string: {}",

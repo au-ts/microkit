@@ -8,9 +8,8 @@ use crate::elf::ElfFile;
 use crate::sel4::{Arch, Config};
 use crate::util::{kb, mask, mb, round_up, struct_to_bytes};
 use crate::MemoryRegion;
-use std::fs::File;
-use std::io::{BufWriter, Write};
-use std::path::Path;
+use alloc::vec;
+use alloc::vec::Vec;
 
 const PAGE_TABLE_SIZE: usize = 4096;
 
@@ -130,7 +129,8 @@ impl<'a> Loader<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: &Config,
-        loader_elf_path: &Path,
+        loader_elf: &'a ElfFile,
+        loader_elf_path: &str,
         kernel_elf: &'a ElfFile,
         monitor_elf: &'a ElfFile,
         monitor_phys_subregion: MemoryRegion,
@@ -141,15 +141,14 @@ impl<'a> Loader<'a> {
         // ... excluding the monitor??
         system_regions: Vec<(u64, &'a [u8])>,
     ) -> Loader<'a> {
-        let elf = ElfFile::from_path(loader_elf_path).unwrap();
+        let elf = loader_elf;
         let sz = elf.word_size;
         let magic = match sz {
             32 => 0x5e14dead,
             64 => 0x5e14dead14de5ead,
             _ => panic!(
                 "Internal error: unexpected ELF word size: {} from '{}'",
-                sz,
-                loader_elf_path.display()
+                sz, loader_elf_path,
             ),
         };
 
@@ -219,13 +218,13 @@ impl<'a> Loader<'a> {
         assert!(kernel_first_vaddr.is_some());
         let pagetable_vars = match config.arch {
             Arch::Aarch64 => Loader::aarch64_setup_pagetables(
-                &elf,
+                elf,
                 kernel_first_vaddr.unwrap(),
                 kernel_first_paddr.unwrap(),
             ),
             Arch::Riscv64 => Loader::riscv64_setup_pagetables(
                 config,
-                &elf,
+                elf,
                 kernel_first_vaddr.unwrap(),
                 kernel_first_paddr.unwrap(),
             ),
@@ -233,11 +232,11 @@ impl<'a> Loader<'a> {
 
         let image_segment = elf
             .segments
-            .into_iter()
+            .iter()
             .find(|segment| segment.loadable)
             .expect("Did not find loadable segment");
         let image_vaddr = image_segment.virt_addr;
-        let mut image = image_segment.data;
+        let mut image = image_segment.data.to_vec();
 
         if image_vaddr != elf.entry {
             panic!("The loader entry point must be the first byte in the image");
@@ -291,9 +290,9 @@ impl<'a> Loader<'a> {
             offset += data.len() as u64;
         }
 
-        let size = std::mem::size_of::<LoaderHeader64>() as u64
+        let size = core::mem::size_of::<LoaderHeader64>() as u64
             + region_metadata.iter().fold(0_u64, |acc, x| {
-                acc + x.size + std::mem::size_of::<LoaderRegion64>() as u64
+                acc + x.size + core::mem::size_of::<LoaderRegion64>() as u64
             });
 
         let header = LoaderHeader64 {
@@ -309,47 +308,34 @@ impl<'a> Loader<'a> {
         };
 
         Loader {
-            image,
+            image: image.to_vec(),
             header,
             region_metadata,
             regions: all_regions,
         }
     }
 
-    pub fn write_image(&self, path: &Path) {
-        let loader_file = match File::create(path) {
-            Ok(file) => file,
-            Err(e) => panic!("Could not create '{}': {}", path.display(), e),
-        };
-
-        let mut loader_buf = BufWriter::new(loader_file);
+    pub fn create_image_data(&self) -> Vec<u8> {
+        let mut loader_buf = Vec::new();
 
         // First write out all the image data
-        loader_buf
-            .write_all(self.image.as_slice())
-            .expect("Failed to write image data to loader");
+        loader_buf.extend(self.image.as_slice());
 
         // Then we write out the loader metadata (known as the 'header')
         let header_bytes = unsafe { struct_to_bytes(&self.header) };
-        loader_buf
-            .write_all(header_bytes)
-            .expect("Failed to write header data to loader");
+        loader_buf.extend(header_bytes);
         // For each region, we need to write out the region metadata as well
         for region in &self.region_metadata {
             let region_metadata_bytes = unsafe { struct_to_bytes(region) };
-            loader_buf
-                .write_all(region_metadata_bytes)
-                .expect("Failed to write region metadata to loader");
+            loader_buf.extend(region_metadata_bytes);
         }
 
         // Now we can write out all the region data
         for (_, data) in &self.regions {
-            loader_buf
-                .write_all(data)
-                .expect("Failed to write region data to loader");
+            loader_buf.extend(*data);
         }
 
-        loader_buf.flush().unwrap();
+        loader_buf
     }
 
     fn riscv64_setup_pagetables(

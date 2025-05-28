@@ -5,9 +5,12 @@
 //
 
 use crate::UntypedObject;
+use alloc::collections::BTreeMap;
+use alloc::fmt::Write;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use alloc::{format, vec};
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::io::{BufWriter, Write};
 
 #[derive(Clone)]
 pub struct BootInfo {
@@ -466,8 +469,8 @@ enum InvocationLabel {
     RISCVIRQIssueIRQHandlerTrigger,
 }
 
-impl std::fmt::Display for InvocationLabel {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl core::fmt::Display for InvocationLabel {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(f, "{:?}", self)
     }
 }
@@ -750,7 +753,7 @@ impl Invocation {
         if let Some((_, repeat)) = self.repeat.clone() {
             // Assert that the variant of the invocation arguments is the
             // same as the repeat invocation argument variant.
-            assert!(std::mem::discriminant(&self.args) == std::mem::discriminant(&repeat));
+            assert!(core::mem::discriminant(&self.args) == core::mem::discriminant(&repeat));
 
             let (repeat_service, repeat_args, repeat_extra_caps) = repeat.get_args(config);
             data.extend(repeat_service.to_le_bytes());
@@ -803,7 +806,7 @@ impl Invocation {
     fn fmt_field_cap(
         field_name: &'static str,
         cap: u64,
-        cap_lookup: &HashMap<u64, String>,
+        cap_lookup: &BTreeMap<u64, String>,
     ) -> String {
         let s = if let Some(name) = cap_lookup.get(&cap) {
             name
@@ -821,9 +824,9 @@ impl Invocation {
     // aware of.
     pub fn report_fmt<W: Write>(
         &self,
-        f: &mut BufWriter<W>,
+        f: &mut W,
         config: &Config,
-        cap_lookup: &HashMap<u64, String>,
+        cap_lookup: &BTreeMap<u64, String>,
     ) {
         let mut arg_strs = Vec::new();
         let (service, service_str): (u64, &str) = match self.args {

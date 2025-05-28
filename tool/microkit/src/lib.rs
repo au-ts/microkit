@@ -4,15 +4,25 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
+// The intent is the tool library doesn't do any I/O etc, and is instead no-std
+// but with alloc. However, for whatever reason, std::path::Path isn't in core
+// or in alloc, so we can't use it, even to represent paths.
+// #![no_std]
+
+extern crate alloc;
+
 pub mod elf;
 pub mod loader;
 pub mod sdf;
 pub mod sel4;
 pub mod util;
 
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cmp::min;
+use core::fmt;
 use sel4::Config;
-use std::cmp::min;
-use std::fmt;
 
 // Note that these values are used in the monitor so should also be changed there
 // if any of these were to change.
