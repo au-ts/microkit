@@ -1322,7 +1322,7 @@ impl InvocationArgs {
 }
 
 #[derive(Clone)]
-#[allow(dead_code, clippy::large_enum_variant)]
+#[allow(dead_code)]
 pub enum InvocationArgs {
     UntypedRetype {
         untyped: u64,
