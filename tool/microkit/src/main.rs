@@ -103,20 +103,18 @@ struct MonitorRegion64 {
     is_device: u64,
 }
 
-struct MonitorConfig {
-    untyped_info_symbol_name: &'static str,
-    bootstrap_invocation_count_symbol_name: &'static str,
-    bootstrap_invocation_data_symbol_name: &'static str,
-    system_invocation_count_symbol_name: &'static str,
-    system_invocation_data_symbol_name: &'static str,
-}
-
-impl MonitorConfig {
-    pub fn max_untyped_objects(&self, symbol_size: u64) -> u64 {
+impl MonitorUntypedInfoHeader64 {
+    pub const fn max_untyped_objects(symbol_size: u64) -> u64 {
         (symbol_size - size_of::<MonitorUntypedInfoHeader64>() as u64)
             / size_of::<MonitorRegion64>() as u64
     }
 }
+
+const MONITOR_SYMBOL_UNTYPED_INFO: &str = "untyped_info";
+const MONITOR_SYMBOL_BOOTSTRAP_INVOCATION_COUNT: &str = "bootstrap_invocation_count";
+const MONITOR_SYMBOL_BOOTSTRAP_INVOCATION_DATA: &str = "bootstrap_invocation_data";
+const MONITOR_SYMBOL_SYSTEM_INVOCATION_COUNT: &str = "system_invocation_count";
+const MONITOR_SYMBOL_SYSTEM_INVOCATION_DATA_ADDR: &str = "system_invocation_data";
 
 struct InitSystem<'a> {
     config: &'a Config,
@@ -3268,14 +3266,6 @@ fn main() -> Result<(), String> {
         }
     };
 
-    let monitor_config = MonitorConfig {
-        untyped_info_symbol_name: "untyped_info",
-        bootstrap_invocation_count_symbol_name: "bootstrap_invocation_count",
-        bootstrap_invocation_data_symbol_name: "bootstrap_invocation_data",
-        system_invocation_count_symbol_name: "system_invocation_count",
-        system_invocation_data_symbol_name: "system_invocation_data",
-    };
-
     let kernel_elf = ElfFile::from_path(&kernel_elf_path)?;
     let mut monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
 
@@ -3359,14 +3349,10 @@ fn main() -> Result<(), String> {
     // in a bad spot! Things will break. So we write out this information so that
     // the monitor can double check this at run time.
     let (_, untyped_info_size) = monitor_elf
-        .find_symbol(monitor_config.untyped_info_symbol_name)
-        .unwrap_or_else(|_| {
-            panic!(
-                "Could not find '{}' symbol",
-                monitor_config.untyped_info_symbol_name
-            )
-        });
-    let max_untyped_objects = monitor_config.max_untyped_objects(untyped_info_size);
+        .find_symbol(MONITOR_SYMBOL_UNTYPED_INFO)
+        .unwrap_or_else(|_| panic!("Could not find '{}' symbol", MONITOR_SYMBOL_UNTYPED_INFO));
+
+    let max_untyped_objects = MonitorUntypedInfoHeader64::max_untyped_objects(untyped_info_size);
     if built_system.kernel_boot_info.untyped_objects.len() as u64 > max_untyped_objects {
         eprintln!(
             "Too many untyped objects: monitor ({}) supports {} regions. System has {} objects.",
@@ -3402,7 +3388,7 @@ fn main() -> Result<(), String> {
     for o in &untyped_info_object_data {
         untyped_info_data.extend(unsafe { struct_to_bytes(o) });
     }
-    monitor_elf.write_symbol(monitor_config.untyped_info_symbol_name, &untyped_info_data)?;
+    monitor_elf.write_symbol(MONITOR_SYMBOL_UNTYPED_INFO, &untyped_info_data)?;
 
     let mut bootstrap_invocation_data: Vec<u8> = Vec::new();
     for invocation in &built_system.bootstrap_invocations {
@@ -3410,7 +3396,7 @@ fn main() -> Result<(), String> {
     }
 
     let (_, bootstrap_invocation_data_size) =
-        monitor_elf.find_symbol(monitor_config.bootstrap_invocation_data_symbol_name)?;
+        monitor_elf.find_symbol(MONITOR_SYMBOL_BOOTSTRAP_INVOCATION_DATA)?;
     if bootstrap_invocation_data.len() as u64 > bootstrap_invocation_data_size {
         eprintln!(
             "bootstrap invocation array size   : {}",
@@ -3430,25 +3416,32 @@ fn main() -> Result<(), String> {
     }
 
     monitor_elf.write_symbol(
-        monitor_config.bootstrap_invocation_count_symbol_name,
+        MONITOR_SYMBOL_BOOTSTRAP_INVOCATION_COUNT,
         &built_system.bootstrap_invocations.len().to_le_bytes(),
     )?;
     monitor_elf.write_symbol(
-        // address
-        monitor_config.system_invocation_data_symbol_name,
+        MONITOR_SYMBOL_BOOTSTRAP_INVOCATION_DATA,
+        &bootstrap_invocation_data,
+    )?;
+
+    // System Invocation Data, inserted later as part of the initial task region
+    monitor_elf.write_symbol(
+        MONITOR_SYMBOL_SYSTEM_INVOCATION_COUNT,
+        &built_system.system_invocations.len().to_le_bytes(),
+    )?;
+    monitor_elf.write_symbol(
+        MONITOR_SYMBOL_SYSTEM_INVOCATION_DATA_ADDR,
         &built_system
             .initial_task_invocations_virt_subregion
             .base
             .to_le_bytes(),
     )?;
-    monitor_elf.write_symbol(
-        monitor_config.system_invocation_count_symbol_name,
-        &built_system.system_invocations.len().to_le_bytes(),
-    )?;
-    monitor_elf.write_symbol(
-        monitor_config.bootstrap_invocation_data_symbol_name,
-        &bootstrap_invocation_data,
-    )?;
+    assert!(
+        // only >= because invocation_data_size is not page-aligned whereas the
+        // subregion is.
+        built_system.initial_task_invocations_virt_subregion.size()
+            >= built_system.invocation_data_size, // invocation_data.len()
+    );
 
     let pd_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.pd_tcb_caps);
     let vm_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.vm_tcb_caps);
