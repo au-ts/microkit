@@ -115,7 +115,11 @@ void dump_bootinfo(seL4_BootInfo *bi)
 #endif
 
 #if 1
+    seL4_Word prev_pos = 0;
     for (i = 0; i < bi->untyped.end - bi->untyped.start; i++) {
+        if (prev_pos != bi->untypedList[i].paddr) {
+            puts("\t\t\tskipped!!\n");
+        }
         puts("untypedList[");
         puthex32(i);
         puts("]        = slot: ");
@@ -129,6 +133,7 @@ void dump_bootinfo(seL4_BootInfo *bi)
         puts(") bits: ");
         puthex32(bi->untypedList[i].sizeBits);
         puts("\n");
+        prev_pos = bi->untypedList[i].paddr + (1UL << bi->untypedList[i].sizeBits);
     }
 #endif
     /* The extended printing over the individual untypes is good if you care
