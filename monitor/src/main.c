@@ -488,6 +488,91 @@ static bool check_untypeds_match(seL4_BootInfo *bi)
 
     puts("MON|INFO: bootinfo untyped list matches expected list\n");
 
+    // check cap types are right.
+
+/*
+
+enum cap_tag {
+    cap_null_cap = 0,
+    cap_untyped_cap = 2,
+    cap_endpoint_cap = 4,
+    cap_notification_cap = 6,
+    cap_reply_cap = 8,
+    cap_cnode_cap = 10,
+    cap_thread_cap = 12,
+    cap_irq_control_cap = 14,
+    cap_irq_handler_cap = 16,
+    cap_zombie_cap = 18,
+    cap_domain_cap = 20,
+    cap_sched_context_cap = 22,
+    cap_sched_control_cap = 24,
+    cap_frame_cap = 1,
+    cap_page_table_cap = 3,
+    cap_vspace_cap = 9,
+    cap_asid_control_cap = 11,
+    cap_asid_pool_cap = 13,
+    cap_vcpu_cap = 15,
+    cap_smc_cap = 25
+};
+
+*/
+
+#ifdef CONFIG_DEBUG_BUILD
+    // XXX: This might not be true, there could be multiple here.
+    for (seL4_CPtr cap = bi->userImagePaging.start; cap < bi->userImagePaging.end; cap++) {
+        uint32_t kind = seL4_DebugCapIdentify(cap);
+        if (kind != 3) {
+            puts("cap kind mismatch: got ");
+            puthex32(kind);
+            puts("but expected kind 3 (cap_page_table_cap)\n");
+            return false;
+        }
+    }
+
+    for (seL4_CPtr cap = bi->schedcontrol.start; cap < bi->schedcontrol.end; cap++) {
+        uint32_t kind = seL4_DebugCapIdentify(cap);
+        if (kind != 24) {
+            puts("cap kind mismatch: got ");
+            puthex32(kind);
+            puts("but expected kind 24 (cap_sched_control_cap)\n");
+            return false;
+        }
+    }
+
+    for (seL4_CPtr cap = bi->userImageFrames.start; cap < bi->userImageFrames.end; cap++) {
+        uint32_t kind = seL4_DebugCapIdentify(cap);
+        if (kind != 1) {
+            puts("cap kind mismatch: got ");
+            puthex32(kind);
+            puts("but expected kind 1 (cap_frame_cap)\n");
+            return false;
+        }
+    }
+
+    for (seL4_CPtr cap = bi->untyped.start; cap < bi->untyped.end; cap++) {
+        uint32_t kind = seL4_DebugCapIdentify(cap);
+        if (kind != 2) {
+            puts("cap kind mismatch: got ");
+            puthex32(kind);
+            puts("but expected kind 2 (cap_untyped_cap)\n");
+            return false;
+        }
+    }
+
+    // XXX: Hack because we make untypeds that aren't updated at 0x400.
+    for (seL4_CPtr cap = bi->empty.start; cap < bi->empty.end && cap < 0x400; cap++) {
+        uint32_t kind = seL4_DebugCapIdentify(cap);
+        if (kind != 0) {
+            puts("cap kind mismatch: got ");
+            puthex32(kind);
+            puts(" but expected kind 0 (cap_null_cap) at cap ");
+            puthex64(cap);
+            puts("\n");
+            return false;
+        }
+    }
+#endif
+
     return true;
 }
 
@@ -1069,6 +1154,8 @@ void main(seL4_BootInfo *bi)
 {
     __sel4_ipc_buffer = bi->ipcBuffer;
     puts("MON|INFO: Microkit Bootstrap\n");
+
+    dump_bootinfo(bi);
 
     if (!check_untypeds_match(bi)) {
         /* This can be useful to enable during new platform bring up
