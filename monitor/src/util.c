@@ -58,6 +58,9 @@ void fail(char *s)
     puts("FAIL: ");
     puts(s);
     puts("\n");
+#ifdef CONFIG_DEBUG_BUILD
+    seL4_DebugHalt();
+#endif
     for (;;) {}
 }
 

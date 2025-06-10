@@ -691,34 +691,12 @@ fn emulate_kernel_boot(
     let device_memory = partial_info.device_memory;
     let boot_region = partial_info.boot_region;
 
+    // XXX: still part of normal memory
+    //      instead emulate as untypeds retyped.
+
     // The initial task memory does not appear in the untypes, but instead
     // appears in the userImageFrames part of the bootinfo as frames.
     normal_memory.remove_region(initial_task_phys_region.base, initial_task_phys_region.end);
-
-    // Now, the tricky part! determine which memory is used for the initial task objects
-    let initial_objects_size = calculate_rootserver_size(config, initial_task_virt_region);
-    let initial_objects_align = rootserver_max_size_bits(config);
-
-    // Find an appropriate region of normal memory to allocate the objects
-    // from; this follows the same algorithm used within the kernel boot code
-    // (or at least we hope it does!)
-    // TODO: this loop could be done better in a functional way?
-    let mut region_to_remove: Option<u64> = None;
-    for region in normal_memory.regions.iter().rev() {
-        let start = util::round_down(
-            region.end - initial_objects_size,
-            1 << initial_objects_align,
-        );
-        if start >= region.base {
-            region_to_remove = Some(start);
-            break;
-        }
-    }
-    if let Some(start) = region_to_remove {
-        normal_memory.remove_region(start, start + initial_objects_size);
-    } else {
-        panic!("Couldn't find appropriate region for initial task kernel objects");
-    }
 
     let fixed_cap_count = 0x10;
     let sched_control_cap_count = 1;
@@ -779,8 +757,93 @@ fn emulate_kernel_boot(
         untyped_objects.push(UntypedObject::new(cap, *r, false));
     }
 
-    let first_available_cap =
-        first_untyped_cap + device_regions.len() as u64 + normal_regions.len() as u64;
+    let derived_regions_start_cap = normal_regions_start_cap + normal_regions.len() as u64;
+
+    // Now, the tricky part! determine which memory is used for the initial task objects
+    let initial_objects_size = calculate_rootserver_size(config, initial_task_virt_region);
+    let initial_objects_align = rootserver_max_size_bits(config);
+
+    // Find an appropriate region of normal memory to allocate the objects
+    // from; this follows the same algorithm used within the kernel boot code
+    // (or at least we hope it does!)
+    // TODO: this loop could be done better in a functional way?
+    let mut rootserver_mem: Option<MemoryRegion> = None;
+    for region in normal_memory.regions.iter().rev() {
+        let start = util::round_down(
+            region.end - initial_objects_size,
+            1 << initial_objects_align,
+        );
+        if start >= region.base {
+            rootserver_mem = Some(MemoryRegion {
+                base: start,
+                end: start + initial_objects_size,
+            });
+            break;
+        }
+    }
+
+    let Some(rootserver_mem) = rootserver_mem else {
+        panic!("Couldn't find appropriate region for initial task kernel objects");
+    };
+
+    println!("rootserver mem {:x?}", rootserver_mem);
+
+    /* Corresponds: derive_rootserver_untypeds */
+    /* Find the untyped covering this region. */
+    let mut rootserver_mem_ut: Option<UntypedObject> = None;
+    for ut in untyped_objects.iter() {
+        if ut.base() <= rootserver_mem.base && rootserver_mem.end <= ut.end() {
+            assert!(rootserver_mem_ut.is_none());
+            rootserver_mem_ut = Some(*ut);
+        }
+    }
+
+    let Some(mut rootserver_mem_ut) = rootserver_mem_ut else {
+        // XXX: internal
+        panic!("Could not find UT for the rootserver region");
+    };
+
+    println!("rootserver mem ut begin {:x?}", rootserver_mem_ut);
+    let mut derived_i = 0;
+    loop {
+        let new_size_bits = rootserver_mem_ut.size_bits() - 1;
+        #[allow(non_upper_case_globals)]
+        const seL4_MinUntypedBits: u64 = 4; // XXX? ???
+        if new_size_bits < seL4_MinUntypedBits || (1 << new_size_bits) < (rootserver_mem.size()) {
+            break;
+        }
+
+        let [lower, upper] = rootserver_mem_ut
+            .region
+            .aligned_power_of_two_regions(config, new_size_bits)[..]
+        else {
+            unreachable!("can always split an aligned power of 2 region into 2.");
+        };
+
+        /* Pretend we retype */
+        untyped_objects.push(UntypedObject::new(
+            derived_regions_start_cap + derived_i,
+            lower,
+            false,
+        ));
+        derived_i += 1;
+        untyped_objects.push(UntypedObject::new(
+            derived_regions_start_cap + derived_i,
+            upper,
+            false,
+        ));
+        derived_i += 1;
+
+        if upper.base <= rootserver_mem.base {
+            rootserver_mem_ut = untyped_objects[untyped_objects.len() - 1];
+        } else {
+            rootserver_mem_ut = untyped_objects[untyped_objects.len() - 2];
+        }
+    }
+
+    println!("rootserver mem ut found {:x?}", rootserver_mem_ut);
+
+    let first_available_cap = first_untyped_cap + untyped_objects.len() as u64;
     BootInfo {
         fixed_cap_count,
         paging_cap_count,

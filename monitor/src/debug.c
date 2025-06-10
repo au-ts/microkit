@@ -129,7 +129,11 @@ void dump_bootinfo(seL4_BootInfo *bi)
         puts(" - ");
         puthex64(bi->untypedList[i].paddr + (1UL << bi->untypedList[i].sizeBits));
         puts(" (");
-        puts(bi->untypedList[i].isDevice ? "device" : "normal");
+        puts((bi->untypedList[i].flags & seL4_UntypedDescFlag_IsDevice) ? "device" : "normal");
+        puts(" | ");
+        puts((bi->untypedList[i].flags & seL4_UntypedDescFlag_IsUsed) ? "used" : "free");
+        puts(" | ");
+        puts((bi->untypedList[i].flags & seL4_UntypedDescFlag_HasParent) ? "hasparent" : "no parent");
         puts(") bits: ");
         puthex32(bi->untypedList[i].sizeBits);
         puts("\n");
@@ -147,7 +151,7 @@ void dump_bootinfo(seL4_BootInfo *bi)
        memory, this is the memory regions of the GIC. For regular memory that is
        memory used for kernel and rootserver.
     */
-#if 1
+#if 0
     puts("\nBoot Info Untyped Memory Ranges\n");
     seL4_Word start = bi->untypedList[0].paddr;
     seL4_Word end = start + (1ULL << bi->untypedList[0].sizeBits);

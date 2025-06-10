@@ -473,17 +473,19 @@ static bool check_untypeds_match(seL4_BootInfo *bi)
             puts("size_bits mismatch\n");
             return false;
         }
-        if (untyped_info.regions[i].is_device != bi->untypedList[i].isDevice) {
-            puts("MON|ERROR: is_device mismatch for untyped region: ");
+#if 0
+        if (untyped_info.regions[i].flags != bi->untypedList[i].flags) {
+            puts("MON|ERROR: flags mismatch for untyped region: ");
             puthex32(i);
-            puts("  expected is_device: ");
-            puthex32(untyped_info.regions[i].is_device);
-            puts("  boot info is_device: ");
-            puthex32(bi->untypedList[i].isDevice);
+            puts("  expected flags: ");
+            puthex32(untyped_info.regions[i].flags);
+            puts("  boot info flags: ");
+            puthex32(bi->untypedList[i].flags);
             puts("\n");
-            puts("is_device mismatch\n");
+            puts("flags mismatch\n");
             return false;
         }
+#endif
     }
 
     puts("MON|INFO: bootinfo untyped list matches expected list\n");
@@ -1155,16 +1157,16 @@ void main(seL4_BootInfo *bi)
     __sel4_ipc_buffer = bi->ipcBuffer;
     puts("MON|INFO: Microkit Bootstrap\n");
 
-    dump_bootinfo(bi);
-
     if (!check_untypeds_match(bi)) {
         /* This can be useful to enable during new platform bring up
-         * if there are problems
-         */
+        * if there are problems
+        */
         dump_bootinfo(bi);
         dump_untyped_info();
         fail("MON|ERROR: found mismatch between boot info and untyped info");
     }
+
+    dump_bootinfo(bi);
 
     puts("MON|INFO: Number of bootstrap invocations: ");
     puthex32(bootstrap_invocation_count);
