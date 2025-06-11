@@ -42,7 +42,29 @@ void puthex32(uint32_t val)
 
 void puthex64(uint64_t val)
 {
-    char buffer[16 + 3];
+#if 1
+    uint8_t buffer[16];
+    for (unsigned i = 0; i < 16; i++) {
+        buffer[16 - (i + 1)] = hexchar(val & 0xf);
+        val >>= 4;
+    }
+
+    puts("0x");
+    unsigned printed = 0;
+    for (unsigned i = 0; i < 16; i++) {
+        if (buffer[i] != '0' && !printed) {
+            puts("\x1b[4m");
+            printed = 1;
+        }
+
+        putc(buffer[i]);
+    }
+
+    if (printed) {
+        puts("\x1b[0m");
+    }
+#else
+    char buffer[16 + 3 + 5];
     buffer[0] = '0';
     buffer[1] = 'x';
     buffer[16 + 3 - 1] = 0;
@@ -51,6 +73,7 @@ void puthex64(uint64_t val)
         val >>= 4;
     }
     puts(buffer);
+#endif
 }
 
 void fail(char *s)
