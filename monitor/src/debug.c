@@ -11,6 +11,16 @@
 #include "util.h"
 #include "debug.h"
 
+void print_flags(seL4_Uint8 flags)
+{
+    if (flags & seL4_UntypedDescFlag_IsDerived) {
+        puts("derived, ");
+    }
+    puts((flags & seL4_UntypedDescFlag_IsDevice) ? "device" : "normal");
+    puts(", ");
+    puts((flags & seL4_UntypedDescFlag_IsUsed) ? "used" : "empty");
+}
+
 void dump_bootinfo(seL4_BootInfo *bi)
 {
     unsigned i;
@@ -129,11 +139,7 @@ void dump_bootinfo(seL4_BootInfo *bi)
         puts(" - ");
         puthex64(bi->untypedList[i].paddr + (1UL << bi->untypedList[i].sizeBits));
         puts(" (");
-        puts((bi->untypedList[i].flags & seL4_UntypedDescFlag_IsDevice) ? "device" : "normal");
-        puts(" | ");
-        puts((bi->untypedList[i].flags & seL4_UntypedDescFlag_IsUsed) ? "used" : "free");
-        puts(" | ");
-        puts((bi->untypedList[i].flags & seL4_UntypedDescFlag_HasParent) ? "hasparent" : "no parent");
+        print_flags(bi->untypedList[i].flags);
         puts(") bits: ");
         puthex32(bi->untypedList[i].sizeBits);
         puts("\n");
@@ -151,23 +157,28 @@ void dump_bootinfo(seL4_BootInfo *bi)
        memory, this is the memory regions of the GIC. For regular memory that is
        memory used for kernel and rootserver.
     */
-#if 0
+#if 1
     puts("\nBoot Info Untyped Memory Ranges\n");
     seL4_Word start = bi->untypedList[0].paddr;
     seL4_Word end = start + (1ULL << bi->untypedList[0].sizeBits);
-    seL4_Word is_device = bi->untypedList[0].isDevice;
+    seL4_Word flags = bi->untypedList[0].flags;
     for (i = 1; i < bi->untyped.end - bi->untyped.start; i++) {
-        if (bi->untypedList[i].paddr != end || bi->untypedList[i].isDevice != is_device) {
+        if (bi->untypedList[i].paddr != end || bi->untypedList[i].flags != flags) {
             puts("                                     paddr: ");
             puthex64(start);
             puts(" - ");
             puthex64(end);
             puts(" (");
-            puts(is_device ? "device" : "normal");
+            print_flags(flags);
             puts(")\n");
             start = bi->untypedList[i].paddr;
             end = start + (1ULL << bi->untypedList[i].sizeBits);
-            is_device = bi->untypedList[i].isDevice;
+
+            // if the kind changes, but not the used/empty state
+            if ((bi->untypedList[i].flags & ~seL4_UntypedDescFlag_IsUsed) != (flags & ~seL4_UntypedDescFlag_IsUsed)) {
+                puts("\n");
+            }
+            flags = bi->untypedList[i].flags;
         } else {
             end += (1ULL << bi->untypedList[i].sizeBits);
         }
@@ -177,7 +188,7 @@ void dump_bootinfo(seL4_BootInfo *bi)
     puts(" - ");
     puthex64(end);
     puts(" (");
-    puts(is_device ? "device" : "normal");
+    print_flags(flags);
     puts(")\n");
 #endif
 }
