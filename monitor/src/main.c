@@ -689,9 +689,9 @@ static unsigned perform_invocation(seL4_Word *invocation_data, unsigned offset, 
             puts(sel4_strerror(result));
             puts("  invocation idx: ");
             puthex32(idx);
-            puts(".");
+            puts(" (repeat iteration ");
             puthex32(i);
-            puts("\n");
+            puts(")\n");
             fail("invocation error");
         }
 #if 0
