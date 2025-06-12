@@ -38,18 +38,13 @@ pub const VM_MAX_NAME_LENGTH: usize = 64;
 pub struct UntypedObject {
     pub cap: u64,
     pub region: MemoryRegion,
+    // see: seL4_UntypedDescFlag
     pub is_device: bool,
+    pub is_derived: bool,
+    pub is_used: bool,
 }
 
 impl UntypedObject {
-    pub fn new(cap: u64, region: MemoryRegion, is_device: bool) -> UntypedObject {
-        UntypedObject {
-            cap,
-            region,
-            is_device,
-        }
-    }
-
     pub fn base(&self) -> u64 {
         self.region.base
     }

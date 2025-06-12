@@ -100,16 +100,10 @@ seL4_Word notification_caps[MAX_PDS];
 /* For reporting potential stack overflows, keep track of the stack regions for each PD. */
 seL4_Word pd_stack_addrs[MAX_PDS];
 
-struct region {
-    uintptr_t paddr;
-    uintptr_t size_bits;
-    uintptr_t is_device; /*FIXME: should back size_bits / is_device */
-};
-
 struct untyped_info {
     seL4_Word cap_start;
     seL4_Word cap_end;
-    struct region regions[MAX_UNTYPED_REGIONS];
+    seL4_UntypedDesc regions[MAX_UNTYPED_REGIONS];
 };
 
 seL4_Word bootstrap_invocation_count;
@@ -119,37 +113,6 @@ seL4_Word system_invocation_count;
 seL4_Word *system_invocation_data;
 
 struct untyped_info untyped_info;
-
-void dump_untyped_info()
-{
-    puts("\nUntyped Info Expected Memory Ranges\n");
-    seL4_Word start = untyped_info.regions[0].paddr;
-    seL4_Word end = start + (1ULL << untyped_info.regions[0].size_bits);
-    seL4_Word is_device = untyped_info.regions[0].is_device;
-    for (int i = 1; i < untyped_info.cap_end - untyped_info.cap_start; i++) {
-        if (untyped_info.regions[i].paddr != end || untyped_info.regions[i].is_device != is_device) {
-            puts("                                     paddr: ");
-            puthex64(start);
-            puts(" - ");
-            puthex64(end);
-            puts(" (");
-            puts(is_device ? "device" : "normal");
-            puts(")\n");
-            start = untyped_info.regions[i].paddr;
-            end = start + (1ULL << untyped_info.regions[i].size_bits);
-            is_device = untyped_info.regions[i].is_device;
-        } else {
-            end += (1ULL << untyped_info.regions[i].size_bits);
-        }
-    }
-    puts("                                     paddr: ");
-    puthex64(start);
-    puts(" - ");
-    puthex64(end);
-    puts(" (");
-    puts(is_device ? "device" : "normal");
-    puts(")\n");
-}
 
 /*
  * Convert the fault status register given by the kernel into a string describing
@@ -462,18 +425,17 @@ static bool check_untypeds_match(seL4_BootInfo *bi)
             puts("paddr mismatch\n");
             return false;
         }
-        if (untyped_info.regions[i].size_bits != bi->untypedList[i].sizeBits) {
-            puts("MON|ERROR: size_bits mismatch for untyped region: ");
+        if (untyped_info.regions[i].sizeBits != bi->untypedList[i].sizeBits) {
+            puts("MON|ERROR: sizeBits mismatch for untyped region: ");
             puthex32(i);
-            puts("  expected size_bits: ");
-            puthex32(untyped_info.regions[i].size_bits);
-            puts("  boot info size_bits: ");
+            puts("  expected sizeBits: ");
+            puthex32(untyped_info.regions[i].sizeBits);
+            puts("  boot info sizeBits: ");
             puthex32(bi->untypedList[i].sizeBits);
             puts("\n");
-            puts("size_bits mismatch\n");
+            puts("sizeBits mismatch\n");
             return false;
         }
-#if 0
         if (untyped_info.regions[i].flags != bi->untypedList[i].flags) {
             puts("MON|ERROR: flags mismatch for untyped region: ");
             puthex32(i);
@@ -485,39 +447,9 @@ static bool check_untypeds_match(seL4_BootInfo *bi)
             puts("flags mismatch\n");
             return false;
         }
-#endif
     }
 
     puts("MON|INFO: bootinfo untyped list matches expected list\n");
-
-    // check cap types are right.
-
-/*
-
-enum cap_tag {
-    cap_null_cap = 0,
-    cap_untyped_cap = 2,
-    cap_endpoint_cap = 4,
-    cap_notification_cap = 6,
-    cap_reply_cap = 8,
-    cap_cnode_cap = 10,
-    cap_thread_cap = 12,
-    cap_irq_control_cap = 14,
-    cap_irq_handler_cap = 16,
-    cap_zombie_cap = 18,
-    cap_domain_cap = 20,
-    cap_sched_context_cap = 22,
-    cap_sched_control_cap = 24,
-    cap_frame_cap = 1,
-    cap_page_table_cap = 3,
-    cap_vspace_cap = 9,
-    cap_asid_control_cap = 11,
-    cap_asid_pool_cap = 13,
-    cap_vcpu_cap = 15,
-    cap_smc_cap = 25
-};
-
-*/
 
 #ifdef CONFIG_DEBUG_BUILD
     // XXX: This might not be true, there could be multiple here.
@@ -1162,7 +1094,8 @@ void main(seL4_BootInfo *bi)
         * if there are problems
         */
         dump_bootinfo(bi);
-        dump_untyped_info();
+        puts("\nUntyped Info Expected Memory Ranges\n");
+        dump_untyped_info(untyped_info.cap_end - untyped_info.cap_start, untyped_info.regions);
         fail("MON|ERROR: found mismatch between boot info and untyped info");
     }
 

@@ -19,7 +19,8 @@ use sdf::{
     SystemDescription, VirtualMachine,
 };
 use sel4::{
-    default_vm_attr, Aarch64Regs, Arch, ArmVmAttributes, BootInfo, Config, Invocation,
+    default_vm_attr, seL4_UntypedDescFlag_IsDerived, seL4_UntypedDescFlag_IsDevice,
+    seL4_UntypedDescFlag_IsUsed, Aarch64Regs, Arch, ArmVmAttributes, BootInfo, Config, Invocation,
     InvocationArgs, Object, ObjectType, PageSize, PlatformConfig, Rights, Riscv64Regs,
     RiscvVirtualMemory, RiscvVmAttributes,
 };
@@ -95,14 +96,18 @@ struct MonitorUntypedInfoHeader64 {
     cap_end: u64,
 }
 
-/// Corresponds to 'struct region' in the monitor
+/// Corresponds to 'seL4_UntypedDesc' in the monitor
 /// This struct assumes a 64-bit target
-#[repr(C)]
+#[repr(C, packed)]
 struct MonitorRegion64 {
     paddr: u64,
-    size_bits: u64,
-    is_device: u64,
+    size_bits: u8,
+    // seL4_UntypedDescFlag
+    flags: u8,
+    padding: [u8; size_of::<u64>() - 2 * size_of::<u8>()],
 }
+
+const _: () = assert!(size_of::<MonitorRegion64>() == 2 * size_of::<u64>());
 
 impl MonitorUntypedInfoHeader64 {
     pub const fn max_untyped_objects(symbol_size: u64) -> u64 {
@@ -691,13 +696,6 @@ fn emulate_kernel_boot(
     let device_memory = partial_info.device_memory;
     let boot_region = partial_info.boot_region;
 
-    // XXX: still part of normal memory
-    //      instead emulate as untypeds retyped.
-
-    // The initial task memory does not appear in the untypes, but instead
-    // appears in the userImageFrames part of the bootinfo as frames.
-    normal_memory.remove_region(initial_task_phys_region.base, initial_task_phys_region.end);
-
     let fixed_cap_count = 0x10;
     let sched_control_cap_count = 1;
     let paging_cap_count = get_arch_n_paging(config, initial_task_virt_region);
@@ -749,12 +747,24 @@ fn emulate_kernel_boot(
     let mut untyped_objects = Vec::new();
     for (i, r) in device_regions.iter().enumerate() {
         let cap = i as u64 + first_untyped_cap;
-        untyped_objects.push(UntypedObject::new(cap, *r, true));
+        untyped_objects.push(UntypedObject {
+            cap,
+            region: *r,
+            is_device: true,
+            is_derived: false,
+            is_used: false,
+        });
     }
     let normal_regions_start_cap = first_untyped_cap + device_regions.len() as u64;
     for (i, r) in normal_regions.iter().enumerate() {
         let cap = i as u64 + normal_regions_start_cap;
-        untyped_objects.push(UntypedObject::new(cap, *r, false));
+        untyped_objects.push(UntypedObject {
+            cap,
+            region: *r,
+            is_device: false,
+            is_derived: false,
+            is_used: false,
+        });
     }
 
     let derived_regions_start_cap = normal_regions_start_cap + normal_regions.len() as u64;
@@ -790,15 +800,15 @@ fn emulate_kernel_boot(
 
     /* Corresponds: derive_rootserver_untypeds */
     /* Find the untyped covering this region. */
-    let mut rootserver_mem_ut: Option<UntypedObject> = None;
-    for ut in untyped_objects.iter() {
+    let mut rootserver_mem_ut: Option<(usize, UntypedObject)> = None;
+    for (idx, ut) in untyped_objects.iter().enumerate() {
         if ut.base() <= rootserver_mem.base && rootserver_mem.end <= ut.end() {
             assert!(rootserver_mem_ut.is_none());
-            rootserver_mem_ut = Some(*ut);
+            rootserver_mem_ut = Some((idx, *ut));
         }
     }
 
-    let Some(mut rootserver_mem_ut) = rootserver_mem_ut else {
+    let Some((mut rootserver_mem_ut_idx, mut rootserver_mem_ut)) = rootserver_mem_ut else {
         // XXX: internal
         panic!("Could not find UT for the rootserver region");
     };
@@ -820,23 +830,32 @@ fn emulate_kernel_boot(
             unreachable!("can always split an aligned power of 2 region into 2.");
         };
 
+        // XX: update used/derived.
+        untyped_objects[rootserver_mem_ut_idx].is_used = true;
+
         /* Pretend we retype */
-        untyped_objects.push(UntypedObject::new(
-            derived_regions_start_cap + derived_i,
-            lower,
-            false,
-        ));
+        untyped_objects.push(UntypedObject {
+            cap: derived_regions_start_cap + derived_i,
+            region: lower,
+            is_device: false,
+            is_derived: true,
+            is_used: false,
+        });
         derived_i += 1;
-        untyped_objects.push(UntypedObject::new(
-            derived_regions_start_cap + derived_i,
-            upper,
-            false,
-        ));
+        untyped_objects.push(UntypedObject {
+            cap: derived_regions_start_cap + derived_i,
+            region: upper,
+            is_device: false,
+            is_derived: true,
+            is_used: false,
+        });
         derived_i += 1;
 
         if upper.base <= rootserver_mem.base {
+            rootserver_mem_ut_idx = untyped_objects.len() - 1;
             rootserver_mem_ut = untyped_objects[untyped_objects.len() - 1];
         } else {
+            rootserver_mem_ut_idx = untyped_objects.len() - 2;
             rootserver_mem_ut = untyped_objects[untyped_objects.len() - 2];
         }
     }
@@ -3470,8 +3489,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .iter()
         .map(|ut| MonitorRegion64 {
             paddr: ut.base(),
-            size_bits: ut.size_bits(),
-            is_device: ut.is_device as u64,
+            size_bits: ut.size_bits() as u8,
+            flags: (if ut.is_device {
+                seL4_UntypedDescFlag_IsDevice
+            } else {
+                0
+            }) | (if ut.is_derived {
+                seL4_UntypedDescFlag_IsDerived
+            } else {
+                0
+            }) | (if ut.is_used {
+                seL4_UntypedDescFlag_IsUsed
+            } else {
+                0
+            }),
+            padding: [0; 6],
         })
         .collect();
     let mut untyped_info_data: Vec<u8> =

@@ -159,11 +159,18 @@ void dump_bootinfo(seL4_BootInfo *bi)
     */
 #if 1
     puts("\nBoot Info Untyped Memory Ranges\n");
-    seL4_Word start = bi->untypedList[0].paddr;
-    seL4_Word end = start + (1ULL << bi->untypedList[0].sizeBits);
-    seL4_Word flags = bi->untypedList[0].flags;
-    for (i = 1; i < bi->untyped.end - bi->untyped.start; i++) {
-        if (bi->untypedList[i].paddr != end || bi->untypedList[i].flags != flags) {
+    dump_untyped_info(bi->untyped.end - bi->untyped.start, bi->untypedList);
+#endif
+}
+
+
+void dump_untyped_info(const seL4_Word untypeds_len, const seL4_UntypedDesc untypedsList[untypeds_len])
+{
+    seL4_Word start = untypedsList[0].paddr;
+    seL4_Word end = start + (1ULL << untypedsList[0].sizeBits);
+    seL4_Word flags = untypedsList[0].flags;
+    for (seL4_Word i = 1; i < untypeds_len; i++) {
+        if (untypedsList[i].paddr != end || untypedsList[i].flags != flags) {
             puts("                                     paddr: ");
             puthex64(start);
             puts(" - ");
@@ -171,16 +178,16 @@ void dump_bootinfo(seL4_BootInfo *bi)
             puts(" (");
             print_flags(flags);
             puts(")\n");
-            start = bi->untypedList[i].paddr;
-            end = start + (1ULL << bi->untypedList[i].sizeBits);
+            start = untypedsList[i].paddr;
+            end = start + (1ULL << untypedsList[i].sizeBits);
 
             // if the kind changes, but not the used/empty state
-            if ((bi->untypedList[i].flags & ~seL4_UntypedDescFlag_IsUsed) != (flags & ~seL4_UntypedDescFlag_IsUsed)) {
+            if ((untypedsList[i].flags & ~seL4_UntypedDescFlag_IsUsed) != (flags & ~seL4_UntypedDescFlag_IsUsed)) {
                 puts("\n");
             }
-            flags = bi->untypedList[i].flags;
+            flags = untypedsList[i].flags;
         } else {
-            end += (1ULL << bi->untypedList[i].sizeBits);
+            end += (1ULL << untypedsList[i].sizeBits);
         }
     }
     puts("                                     paddr: ");
@@ -190,5 +197,4 @@ void dump_bootinfo(seL4_BootInfo *bi)
     puts(" (");
     print_flags(flags);
     puts(")\n");
-#endif
 }

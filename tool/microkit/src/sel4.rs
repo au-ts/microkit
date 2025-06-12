@@ -34,6 +34,10 @@ pub struct PlatformConfig {
     pub memory: Vec<PlatformConfigRegion>,
 }
 
+pub const seL4_UntypedDescFlag_IsDevice: u8 = 1 << 0;
+pub const seL4_UntypedDescFlag_IsDerived: u8 = 1 << 1;
+pub const seL4_UntypedDescFlag_IsUsed: u8 = 1 << 2;
+
 /// Represents an allocated kernel object.
 ///
 /// Kernel objects can have multiple caps (and caps can have multiple addresses).
