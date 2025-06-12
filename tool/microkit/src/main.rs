@@ -692,7 +692,7 @@ fn emulate_kernel_boot(
 ) -> BootInfo {
     assert!(initial_task_phys_region.size() == initial_task_virt_region.size());
     let partial_info = kernel_partial_boot(config, kernel_elf);
-    let mut normal_memory = partial_info.normal_memory;
+    let normal_memory = partial_info.normal_memory;
     let device_memory = partial_info.device_memory;
     let boot_region = partial_info.boot_region;
 

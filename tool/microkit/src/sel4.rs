@@ -34,8 +34,11 @@ pub struct PlatformConfig {
     pub memory: Vec<PlatformConfigRegion>,
 }
 
+#[allow(non_upper_case_globals)]
 pub const seL4_UntypedDescFlag_IsDevice: u8 = 1 << 0;
+#[allow(non_upper_case_globals)]
 pub const seL4_UntypedDescFlag_IsDerived: u8 = 1 << 1;
+#[allow(non_upper_case_globals)]
 pub const seL4_UntypedDescFlag_IsUsed: u8 = 1 << 2;
 
 /// Represents an allocated kernel object.
