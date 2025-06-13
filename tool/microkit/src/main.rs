@@ -927,8 +927,10 @@ fn build_system(
     // boot/ELF region, so we have the end of the kernel boot region as the lower
     // bound for allocating the initial task.
     let initial_task_phys_region = {
-        let initial_task_phys_base =
-            available_memory.allocate_from(initial_task_size, kernel_boot_region.end);
+        // XXX: the booot region???????????????
+        // surely the kernel elf region normally...................
+        // plus allocate_from was broken xD
+        let initial_task_phys_base = available_memory.allocate(initial_task_size);
         assert!(kernel_boot_region.base < initial_task_phys_base);
 
         MemoryRegion::new(

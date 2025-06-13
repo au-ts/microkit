@@ -267,6 +267,10 @@ impl DisjointMemoryRegion {
         }
     }
 
+    // TODO: This function is broken. (and maybe unneeded)
+    // In the case we have a memory region [200, 300] and we want to
+    // allocate a region above 220 and of size 50, we can allocate
+    // [220, 270] but instead this fails to allocate as 200 is not >= 220.
     pub fn allocate_from(&mut self, size: u64, lower_bound: u64) -> u64 {
         let mut region_to_remove = None;
         for region in &self.regions {
