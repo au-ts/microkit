@@ -366,6 +366,9 @@ impl ObjectAllocator {
     pub fn new(untyped_pool: Vec<&UntypedObject>) -> ObjectAllocator {
         let mut untyped: Vec<UntypedAllocator> = untyped_pool
             .into_iter()
+            // TODO: This is a silly solution. However, it works, and is simple.
+            //  If we weren't we'd need to compute how much of it was used.
+            .filter(|ut| !ut.is_used)
             .map(|ut| UntypedAllocator::new(*ut, 0, vec![]))
             .collect();
         untyped.sort_by(|a, b| a.untyped_object.base().cmp(&b.untyped_object.base()));
