@@ -688,6 +688,9 @@ fn emulate_kernel_boot_untyped_derive(
     region: MemoryRegion,
     config: &Config,
 ) {
+    // TODO: Same issue as in the kernel - if we require more than one UT
+    // to cover the region then it is not possible to allocate it.
+
     /* Corresponds: derive_untyped_covering_region */
     /* Find the untyped covering this region. */
     let mut reg_ut: Option<(usize, UntypedObject)> = None;
@@ -700,7 +703,10 @@ fn emulate_kernel_boot_untyped_derive(
 
     let Some((mut reg_ut_idx, mut reg_ut)) = reg_ut else {
         // XXX: internal
-        panic!("Could not find UT for the mem region {:x?}", region);
+        panic!(
+            "Could not find UT for the mem region {:x?} {:x?}",
+            region, untyped_objects
+        );
     };
 
     let derived_start_cap = first_untyped_cap + untyped_objects.len() as u64;
@@ -951,7 +957,7 @@ fn build_system(
         // plus allocate_from was broken xD
 
         // HACK
-        available_memory.allocate(0xa000);
+        available_memory.allocate(0x1a000);
 
         // want aligned...
         let initial_task_phys_base = available_memory.allocate(initial_task_size);
