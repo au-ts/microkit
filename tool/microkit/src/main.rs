@@ -682,6 +682,79 @@ fn calculate_rootserver_size(config: &Config, initial_task_region: MemoryRegion)
     size
 }
 
+fn emulate_kernel_boot_untyped_derive(
+    untyped_objects: &mut Vec<UntypedObject>,
+    first_untyped_cap: u64,
+    region: MemoryRegion,
+    config: &Config,
+) {
+    /* Corresponds: derive_untyped_covering_region */
+    /* Find the untyped covering this region. */
+    let mut reg_ut: Option<(usize, UntypedObject)> = None;
+    for (idx, ut) in untyped_objects.iter().enumerate() {
+        if ut.base() <= region.base && region.end <= ut.end() {
+            assert!(reg_ut.is_none());
+            reg_ut = Some((idx, *ut));
+        }
+    }
+
+    let Some((mut reg_ut_idx, mut reg_ut)) = reg_ut else {
+        // XXX: internal
+        panic!("Could not find UT for the mem region {:x?}", region);
+    };
+
+    let derived_start_cap = first_untyped_cap + untyped_objects.len() as u64;
+
+    println!("mem ut begin {:x?}", reg_ut);
+    let mut derived_i = 0;
+    loop {
+        // XX: update used/derived.
+        untyped_objects[reg_ut_idx].is_used = true;
+
+        let new_size_bits = reg_ut.size_bits() - 1;
+        #[allow(non_upper_case_globals)]
+        const seL4_MinUntypedBits: u64 = 4; // XXX? ???
+        if new_size_bits < seL4_MinUntypedBits || (1 << new_size_bits) < (region.size()) {
+            break;
+        }
+
+        let [lower, upper] = reg_ut
+            .region
+            .aligned_power_of_two_regions(config, new_size_bits)[..]
+        else {
+            unreachable!("can always split an aligned power of 2 region into 2.");
+        };
+
+        /* Pretend we retype */
+        untyped_objects.push(UntypedObject {
+            cap: derived_start_cap + derived_i,
+            region: lower,
+            is_device: false,
+            is_derived: true,
+            is_used: false,
+        });
+        derived_i += 1;
+        untyped_objects.push(UntypedObject {
+            cap: derived_start_cap + derived_i,
+            region: upper,
+            is_device: false,
+            is_derived: true,
+            is_used: false,
+        });
+        derived_i += 1;
+
+        if upper.base <= region.base {
+            reg_ut_idx = untyped_objects.len() - 1;
+            reg_ut = untyped_objects[untyped_objects.len() - 1];
+        } else {
+            reg_ut_idx = untyped_objects.len() - 2;
+            reg_ut = untyped_objects[untyped_objects.len() - 2];
+        }
+    }
+
+    println!("mem ut found {:x?}", reg_ut);
+}
+
 /// Emulate what happens during a kernel boot, generating a
 /// representation of the BootInfo struct.
 fn emulate_kernel_boot(
@@ -767,8 +840,6 @@ fn emulate_kernel_boot(
         });
     }
 
-    let derived_regions_start_cap = normal_regions_start_cap + normal_regions.len() as u64;
-
     // Now, the tricky part! determine which memory is used for the initial task objects
     let initial_objects_size = calculate_rootserver_size(config, initial_task_virt_region);
     let initial_objects_align = rootserver_max_size_bits(config);
@@ -791,76 +862,24 @@ fn emulate_kernel_boot(
             break;
         }
     }
-
     let Some(rootserver_mem) = rootserver_mem else {
         panic!("Couldn't find appropriate region for initial task kernel objects");
     };
-
     println!("rootserver mem {:x?}", rootserver_mem);
 
-    /* Corresponds: derive_rootserver_untypeds */
-    /* Find the untyped covering this region. */
-    let mut rootserver_mem_ut: Option<(usize, UntypedObject)> = None;
-    for (idx, ut) in untyped_objects.iter().enumerate() {
-        if ut.base() <= rootserver_mem.base && rootserver_mem.end <= ut.end() {
-            assert!(rootserver_mem_ut.is_none());
-            rootserver_mem_ut = Some((idx, *ut));
-        }
-    }
-
-    let Some((mut rootserver_mem_ut_idx, mut rootserver_mem_ut)) = rootserver_mem_ut else {
-        // XXX: internal
-        panic!("Could not find UT for the rootserver region");
-    };
-
-    println!("rootserver mem ut begin {:x?}", rootserver_mem_ut);
-    let mut derived_i = 0;
-    loop {
-        let new_size_bits = rootserver_mem_ut.size_bits() - 1;
-        #[allow(non_upper_case_globals)]
-        const seL4_MinUntypedBits: u64 = 4; // XXX? ???
-        if new_size_bits < seL4_MinUntypedBits || (1 << new_size_bits) < (rootserver_mem.size()) {
-            break;
-        }
-
-        let [lower, upper] = rootserver_mem_ut
-            .region
-            .aligned_power_of_two_regions(config, new_size_bits)[..]
-        else {
-            unreachable!("can always split an aligned power of 2 region into 2.");
-        };
-
-        // XX: update used/derived.
-        untyped_objects[rootserver_mem_ut_idx].is_used = true;
-
-        /* Pretend we retype */
-        untyped_objects.push(UntypedObject {
-            cap: derived_regions_start_cap + derived_i,
-            region: lower,
-            is_device: false,
-            is_derived: true,
-            is_used: false,
-        });
-        derived_i += 1;
-        untyped_objects.push(UntypedObject {
-            cap: derived_regions_start_cap + derived_i,
-            region: upper,
-            is_device: false,
-            is_derived: true,
-            is_used: false,
-        });
-        derived_i += 1;
-
-        if upper.base <= rootserver_mem.base {
-            rootserver_mem_ut_idx = untyped_objects.len() - 1;
-            rootserver_mem_ut = untyped_objects[untyped_objects.len() - 1];
-        } else {
-            rootserver_mem_ut_idx = untyped_objects.len() - 2;
-            rootserver_mem_ut = untyped_objects[untyped_objects.len() - 2];
-        }
-    }
-
-    println!("rootserver mem ut found {:x?}", rootserver_mem_ut);
+    emulate_kernel_boot_untyped_derive(
+        &mut untyped_objects,
+        first_untyped_cap,
+        rootserver_mem,
+        config,
+    );
+    // kernel runs this after.
+    emulate_kernel_boot_untyped_derive(
+        &mut untyped_objects,
+        first_untyped_cap,
+        initial_task_phys_region,
+        config,
+    );
 
     let first_available_cap = first_untyped_cap + untyped_objects.len() as u64;
     BootInfo {
@@ -930,6 +949,11 @@ fn build_system(
         // XXX: the booot region???????????????
         // surely the kernel elf region normally...................
         // plus allocate_from was broken xD
+
+        // HACK
+        available_memory.allocate(0xa000);
+
+        // want aligned...
         let initial_task_phys_base = available_memory.allocate(initial_task_size);
         assert!(kernel_boot_region.base < initial_task_phys_base);
 
