@@ -1,0 +1,1674 @@
+$hc8
+h#8c
+T$hc8
+h#8c
+T!hc8
+h#8E
+$hc8
+h#8c
+q"<S
+0<S
+9!,@
+/<SR2
+9!0@
+/<SR2
+/<SR2
+.<S12
+qa<L
+qaLP
+qa\T
+qalX
+id8%
+he8Dh%8!
+@9?
+LDR|ERROR: relocation failed, loader destination would overlap current loader location
+LDR|INFO: relocating from 
+ to 
+LDR|INFO: region: 
+   addr: 
+   size: 
+   offset: 
+   type: 
+LDR|INFO: copying region 
+LDR|INFO: altloader for seL4 starting
+LDR|ERROR: mismatch on loader data structure magic number
+LDR|INFO: Flags:                
+             seL4 configured as hypervisor
+LDR|INFO: Kernel:      entry:   
+LDR|INFO: Root server: physmem: 
+ -- 
+LDR|INFO:              virtmem: 
+LDR|INFO:              entry  : 
+LDR|INFO: Setting all interrupts to Group 1
+LDR|INFO: GICv2 ITLinesNumber: 
+LDR|INFO: CurrentEL=
+<invalid el>
+LDR|ERROR: seL4 configured as a hypervisor, but not in EL2
+LDR|ERROR: Unsupported initial exception level
+LDR|INFO: Dropping from EL3 to EL2(NS)
+LDR|INFO: Dropped from EL3 to EL2(NS)
+LDR|INFO: Resetting CNTVOFF
+LDR|INFO: Dropping from EL2 to EL1
+LDR|INFO: Dropped to EL1 successfully
+LDR|ERROR: Failed to switch to EL1
+LDR|INFO: enabling MMU
+LDR|ERROR: unknown EL level for MMU enable
+LDR|INFO: jumping to kernel
+LDR|ERROR: seL4 Loader: Error - KERNEL RETURNED
+<invalid ex>
+<invalid EC>
+reg: 
+LDR|ERROR: loader trapped kernel exception: 
+   ec=
+)   il=
+   iss=
+   far=
+Unknown reason
+Trapped WFI or WFE instruction execution
+Trapped MCR or MRC access with (coproc==0b1111) this is not reported using EC 0b000000
+Trapped MCRR or MRRC access with (coproc==0b1111) this is not reported using EC 0b000000
+Trapped MCR or MRC access with (coproc==0b1110)
+Trapped LDC or STC access
+Access to SVC, Advanced SIMD or floating-point functionality trapped
+Trapped MRRC access with (coproc==0b1110)
+Branch Target Exception
+SVC instruction execution in AArch32 state
+SVC instruction execution in AArch64 state
+Trapped MSR, MRS or System instruction exuection in AArch64 state, this is not reported using EC 0xb000000, 0b000001 or 0b000111
+Access to SVE functionality trapped
+Exception from a Pointer Authentication instruction authentication failure
+Instruction Abort from a lower Exception level
+Instruction Abort taken without a change in Exception level
+PC alignment fault exception
+Data Abort from a lower Exception level
+Data Abort taken without a change in Exception level
+SP alignment faultr exception
+Trapped floating-point exception taken from AArch32 state
+Trapped floating-point exception taken from AArch64 state
+SError interrupt
+Breakpoint exception from a lower Exception level
+Breakpoint exception taken without a change in Exception level
+Software Step exception from a lower Exception level
+Software Step exception taken without a change in Exception level
+Watchpoint exception from a lower Exception level
+Watchpoint exception taken without a change in Exception level
+BKPT instruction execution in AArch32 state
+BRK instruction execution in AArch64 state
+Synchronous EL1t
+IRQ EL1t
+FIQ EL1t
+SError EL1t
+Synchronous EL1h
+IRQ EL1h
+FIQ EL1h
+SError EL1h
+Synchronous 64-bit EL0
+IRQ 64-bit EL0
+FIQ 64-bit EL0
+SError 64-bit EL0
+Synchronous 32-bit EL0
+IRQ 32-bit EL0
+FIQ 32-bit EL0
+SError 32-bit EL0
+T!\T
+TCtU
+T`ha8
+T@ha8
+"h#8
+T4@<
+@g9$
+#@g9
+2#@'9
+"@g9
+"@'9
+aJg9
+aJ'9
+$hb8
+h"8B
+cHa8a
+*!|@
+@8ahd8
+T!<P
+bh 8
+T"h`8b
+"h`8B
+hb8C
+ /@8
+*z~@
+*e}}
+*@}@
+@@q`
+_8@P 
+_8@P 
+Tak`8
+@9@
+!H`8`
+BH`8`
+T!(B
+07C G
+6Bd
+6!d
+6Bd
+6!d
+6cd
+Rg9s
+T`@
+Td@
+Ha8a
+6"@
+TcDP
+Tc<P
+T"@
+T"@
+7A$@
+7"$@
+T"hb
+T $B
+7"$@
+7 $@
+T`LB
+T!t
+6!@)
+TB|`
+Tbha8
+i"8B
+he8D
+Tbha8
+dh"8?<
+hb8D
+T?@P
+7"$@
+T"hb
+Rb.I
+Tf @
+T`za
+T?+@
+T:cA
+TE?P
+T`.B
+TBh`
+Tfj#
+6cd
+Te&E
+T`2B
+T $B
+T"$@
+TE @
+7`*B
+T@?J
+T@#@
+Tb&B
+Tb&B
+Tb&B
+RD@g9a
+3D@'9
+AH'9
+T3@
+Tb*B
+T`"@
+R$B
+T!<P
+T@k{
+T`#@
+Xgxg
+Ta2@
+*B`4
+Xkxk
+ H`8a
+T  @
+7 $@
+bh!8!
+ha8b
+@9_(
+Tb&B
+T"Hg9Bx
+"H'9
+"@g9#
+3"@'9
+$hc8
+h#8c
+hb8#hb8B
+1/-+)'%" 
+3/-+)'%# 
+memzero
+0123456789ABCDEF
+maskVMRights
+vcpu_hw_read_reg
+vcpu_save_reg
+vcpu_init_vtcr
+vcpu_hw_write_reg
+APFromVMRights
+pageBitsForSize
+doFlush
+Arch_getObjectSize
+Arch_handleFaultReply
+vcpu_restore_reg
+vcpu_write_reg
+dissociateVCPUTCB
+vcpu_read_reg
+cap_cnode_cap_get_capCNodeGuardSize
+cap_cnode_cap_get_capCNodeRadix
+cap_cnode_cap_get_capCNodePtr
+cap_endpoint_cap_get_capEPPtr
+cap_vspace_cap_get_capVSBasePtr
+asid_map_asid_map_vspace_get_vspace_root
+asid_map_asid_map_vspace_get_stored_vmid_valid
+invert_l1index
+getHighestPrio
+cap_endpoint_cap_get_capEPBadge
+thread_state_ptr_set_replyObject
+thread_state_ptr_set_replyObject_np
+call_stack_new
+ttbr_new
+cap_endpoint_cap_get_capCanReceive
+updateTimestamp
+cap_thread_cap_get_capTCBPtr
+lookup_fault_missing_capability_new
+addrFromKPPtr
+pte_pte_table_new
+cap_page_table_cap_get_capPTIsMapped
+pte_pte_table_ptr_get_pt_base_address
+cap_frame_cap_get_capFMappedAddress
+cap_frame_cap_get_capFBasePtr
+cap_frame_cap_get_capFMappedASID
+getASIDMap
+pte_get_page_base_address
+cap_frame_cap_set_capFMappedASID
+seL4_MessageInfo_new
+getSyscallArg
+cap_untyped_cap_get_capBlockSize
+cap_untyped_cap_get_capPtr
+cap_untyped_cap_ptr_set_capFreeIndex
+cap_asid_pool_cap_new
+cap_vcpu_cap_get_capVCPUPtr
+cap_smc_cap_get_capSMCBadge
+cap_frame_cap_set_capFVMRights
+initIRQController
+vcpu_restore
+cap_cnode_cap_new
+cap_thread_cap_new
+cap_untyped_cap_new
+lookup_fault_depth_mismatch_new
+resolveAddressBits
+lookup_fault_guard_mismatch_new
+refill_add_tail
+maybe_add_empty_tail
+sc_sporadic
+ready_queues_index
+setNextInterrupt
+cap_sched_context_cap_get_capSCPtr
+cap_notification_cap_get_capNtfnBadge
+handleFPUFault
+mdb_node_ptr_set_mdbNext
+mdb_node_set_mdbRevocable
+mdb_node_set_mdbFirstBadged
+cteInsert
+cteMove
+cap_zombie_cap_get_capZombieType
+cap_zombie_cap_get_capZombieID
+thread_state_ptr_set_blockingObject
+endpoint_ptr_set_epQueue_tail
+cap_irq_handler_cap_new
+ackInterrupt
+notification_ptr_set_ntfnQueue_head
+notification_ptr_set_ntfnBoundTCB
+maskCapRights
+sc_released
+notification_ptr_set_ntfnSchedContext
+tcbSchedEnqueue
+rescheduleRequired
+thread_state_ptr_set_tsType
+activateThread
+reply_unlink
+cancelSignal
+tcbSchedAppend
+tcbDebugRemove
+tcbReleaseDequeue
+schedContext_unbindTCB
+schedContext_donate
+reply_push
+tcbReleaseEnqueue
+tcb_queue_insert
+postpone
+schedContext_resume
+checkPrio
+cap_untyped_cap_set_capFreeIndex
+alloc_rootserver_obj
+checkBudget
+restart_thread_if_no_fault
+seL4_Fault_VMFault_get_address
+seL4_Fault_VGICMaintenance_get_idxValid
+seL4_Fault_VCPUFault_get_hsr
+seL4_Fault_VPPIEvent_get_irq_w
+Arch_setMRs_fault
+pte_pte_page_ptr_get_SH
+setMRs_syscall_error
+invalidateASID
+storeHWASID
+asid_map_asid_map_vspace_set_stored_vmid_valid
+asid_map_asid_map_vspace_new
+seL4_Fault_VMFault_new
+handleVMFault
+cap_frame_cap_new
+cap_vspace_cap_new
+cap_page_table_cap_new
+cap_vcpu_cap_new
+Arch_createObject
+cap_endpoint_cap_new
+cap_notification_cap_new
+cap_sched_context_cap_new
+switchToThread
+map_it_frame_cap
+pte_pte_4k_page_new
+map_kernel_frame
+deleteASIDPool
+reply_remove_tcb
+cancelIPC
+chooseThread
+reply_pop
+unmapPage
+reply_remove
+unmapPageTable
+checkValidIPCBuffer
+Arch_deriveCap
+seL4_MessageInfo_set_length
+_cap_frame_print_attrs_vptr
+print_cap_arch
+Arch_checkIRQ
+Arch_decodeIRQControlInvocation
+decodeARMSMCInvocation
+decodeVCPUWriteReg
+decodeVCPUReadReg
+decodeVCPUInjectIRQ
+decodeVCPUSetTCB
+reserve_region
+map_kernel_devices
+vm_attributes_new
+cap_cnode_cap_get_capCNodeGuard
+cap_notification_cap_get_capNtfnCanReceive
+decodeReadRegisters
+decodeSetPriority
+decodeSetMCPriority
+decodeDomainInvocation
+decodeBindNotification
+decodeUnbindNotification
+decodeUntypedInvocation
+cap_untyped_cap_get_capFreeIndex
+decodeARMVSpaceRootInvocation
+cap_page_table_cap_ptr_set_capPTIsMapped
+cap_page_table_cap_set_capPTMappedAddress
+decodeARMFrameInvocation
+cap_frame_cap_set_capFMappedAddress
+pte_pte_page_new
+decodeARMMMUInvocation
+insert_region
+init_freemem
+create_rootserver_objects
+print_object
+refill_new
+create_initial_thread
+refill_update
+refill_budget_check
+refill_pop_head
+commitTime
+refill_unblock_check
+decodeCopyRegisters
+decodeWriteRegisters
+schedule
+switchSchedContext
+thread_state_ptr_set_blockingIPCCanGrant
+thread_state_ptr_set_blockingIPCCanGrantReply
+thread_state_ptr_set_blockingIPCIsCall
+sendIPC
+sendFaultIPC
+handleTimeout
+endTimeslice
+chargeBudget
+decodeSchedControl_ConfigureFlags
+cap_sched_control_cap_get_core
+invokeSchedControl_ConfigureFlags
+decodeSchedControlInvocation
+checkBudgetRestart
+seL4_Fault_UserException_new
+seL4_Fault_VCPUFault_new
+VGICMaintenance
+VPPIEvent
+doReplyTransfer
+cancelBadgedSends
+sendSignal
+handleInterrupt
+handleInterruptEntry
+cap_notification_cap_get_capNtfnPtr
+cancelAllSignals
+completeSignal
+schedContext_bindTCB
+decodeSchedContext_Bind
+decodeSchedContext_UnbindObject
+decodeSchedContextInvocation
+decodeSchedContext_YieldTo
+invokeSchedContext_YieldTo
+receiveIPC
+lookupReply
+finaliseCap
+capRemovable
+reduceZombie
+decodeSetTimeoutEndpoint
+decodeSetSchedParams
+decodeSetIPCBuffer
+decodeTCBConfigure
+decodeSetSpace
+decodeSetTLSBase
+decodeTCBInvocation
+decodeCNodeInvocation
+cteDeleteOne
+decodeIRQHandlerInvocation
+decodeVCPUAckVPPI
+decodeARMVCPUInvocation
+decodeIRQControlInvocation
+decodeInvocation
+handleInvocation
+handleSyscall
+it_alloc_paging
+map_it_pt_cap
+cap_irq_handler_cap_get_capIRQ
+debug_printTCB
+handleUnknownSyscall
+thread_state_get_replyObject_np
+init_kernel
+rootserver
+idle_thread
+/Users/tasfiaahmed/microkit/seL4/src/util.c
+(unsigned long)s % sizeof(unsigned long) == 0
+n % sizeof(unsigned long) == 0
+(null)
+-+   0X0x
+Warning:  gpt_cntfrq %lu, expected %llu
+halting...
+Kernel entry via 
+Interrupt, irq %lu
+Unknown syscall, word: %lu
+VM Fault, fault type: %lu
+User level fault, number: %lu
+Syscall, number: %ld, %s
+Cap type: %lu, Invocation tag: %lu
+VCPUFault
+Unknown (%u)
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Attempted to make unsupported write only mapping>>
+KERNEL PREFETCH ABORT!
+Faulting instruction: 0x%lx
+ESR (IFSR): 0x%lx
+KERNEL DATA ABORT!
+FAR: 0x%lx ESR (DFSR): 0x%lx
+seL4 called fail at %s:%u in function %s, saying "%s"
+/Users/tasfiaahmed/microkit/seL4/include/arch/arm/armv/armv8-a/64/armv/vcpu.h
+ARM/HYP: Invalid register index
+/Users/tasfiaahmed/microkit/seL4/include/arch/arm/arch/object/vcpu.h
+ARM/HYP: Invalid register index or NULL VCPU
+Processor does not support a 40 bit PA
+Processor does not support 4KB
+/Users/tasfiaahmed/microkit/seL4/src/arch/arm/64/kernel/vspace.c
+Invalid VM rights
+/Users/tasfiaahmed/microkit/seL4/include/arch/arm/arch/64/mode/machine/hardware.h
+Invalid page size
+Invalid operation, shouldn't get here.
+/Users/tasfiaahmed/microkit/seL4/src/arch/arm/64/object/objecttype.c
+Invalid object type
+/Users/tasfiaahmed/microkit/seL4/src/arch/arm/api/faults.c
+Invalid fault
+/Users/tasfiaahmed/microkit/seL4/src/arch/arm/object/vcpu.c
+TCB and VCPU not associated.
+seL4 failed assertion '%s' at %s:%u in function %s
+/Users/tasfiaahmed/microkit/microkit/build/qemu_virt_aarch64/debug/sel4/build/generated/arch/object/structures_gen.h
+((cap.words[0] >> 59) & 0x1f) == cap_cnode_cap
+((cap.words[0] >> 59) & 0x1f) == cap_endpoint_cap
+((cap.words[0] >> 59) & 0x1f) == cap_vspace_cap
+((asid_map.words[0] >> 0) & 0x1) == asid_map_asid_map_vspace
+/Users/tasfiaahmed/microkit/seL4/include/kernel/thread.h
+inverted < L2_BITMAP_SIZE
+NODE_STATE(ksReadyQueuesL2Bitmap)[dom][l1index_inverted] != 0
+(((~0x1ffffffffffe0ull >> 1) | 0x0) & v64) == ((0 && (v64 & (1ull << (47)))) ? 0x0 : 0)
+/Users/tasfiaahmed/microkit/seL4/include/fastpath/fastpath.h
+!thread_state_ptr_get_tcbQueued(ts_ptr)
+!thread_state_ptr_get_tcbInReleaseQueue(ts_ptr)
+(callStackPtr & ~0xffffffffffffull) == ((0 && (callStackPtr & (1ull << 47))) ? 0x0 : 0)
+(base_address & ~0xffffffffffffull) == ((0 && (base_address & (1ull << 47))) ? 0x0 : 0)
+NODE_STATE(ksCurTime) < MAX_RELEASE_TIME
+((cap.words[0] >> 59) & 0x1f) == cap_thread_cap
+(bitsLeft & ~0x7full) == ((0 && (bitsLeft & (1ull << 47))) ? 0x0 : 0)
+/Users/tasfiaahmed/microkit/seL4/include/machine.h
+(paddr_t)pptr <= KERNEL_ELF_TOP
+(pt_base_address & ~0xfffffffff000ull) == ((0 && (pt_base_address & (1ull << 47))) ? 0x0 : 0)
+((cap.words[0] >> 59) & 0x1f) == cap_page_table_cap
+((pte_ptr->words[0] >> 0) & 0x400000000000003) == 0x3ull
+((cap.words[0] >> 59) & 0x1f) == cap_frame_cap
+poolPtr != NULL
+/Users/tasfiaahmed/microkit/seL4/include/arch/arm/arch/64/mode/object/structures.h
+pte_is_page_type(pte)
+/Users/tasfiaahmed/microkit/microkit/build/qemu_virt_aarch64/debug/sel4/build/generated/sel4/shared_types_gen.h
+(length & ~0x7full) == ((0 && (length & (1ull << 63))) ? 0x0 : 0)
+/Users/tasfiaahmed/microkit/seL4/include/api/syscall.h
+ipc_buffer != NULL
+((cap.words[0] >> 59) & 0x1f) == cap_untyped_cap
+((cap_ptr->words[0] >> 59) & 0x1f) == cap_untyped_cap
+(capASIDPool & ~0xfffffffff800ull) == ((0 && (capASIDPool & (1ull << 47))) ? 0x0 : 0)
+((cap.words[0] >> 59) & 0x1f) == cap_vcpu_cap
+((cap.words[0] >> 59) & 0x1f) == cap_smc_cap
+(((~0x180ull >> 7 ) | 0x0) & v64) == ((0 && (v64 & (1ull << (47)))) ? 0x0 : 0)
+/Users/tasfiaahmed/microkit/seL4/src/arch/arm/machine/gic_v2.c
+INT_STATE_ARRAY_SIZE < IRQT_TO_IRQ(irqInvalid)
+Warning: Could not infer GIC interrupt target ID, assuming 0.
+vcpu
+(capCNodePtr & ~0xfffffffffffeull) == ((0 && (capCNodePtr & (1ull << 47))) ? 0x0 : 0)
+(capTCBPtr & ~0xffffffffffffull) == ((0 && (capTCBPtr & (1ull << 47))) ? 0x0 : 0)
+(capPtr & ~0xffffffffffffull) == ((0 && (capPtr & (1ull << 47))) ? 0x0 : 0)
+/Users/tasfiaahmed/microkit/seL4/src/kernel/cspace.c
+levelBits != 0
+/Users/tasfiaahmed/microkit/seL4/src/kernel/sporadic.c
+new_tail < sc->scRefillMax
+refill_size(sc) == MIN_REFILLS
+/Users/tasfiaahmed/microkit/seL4/include/kernel/sporadic.h
+sc == NULL || !sc->scSporadic || sc_active(sc)
+dom == 0
+/Users/tasfiaahmed/microkit/seL4/src/kernel/thread.c
+next_interrupt >= NODE_STATE(ksCurTime)
+((cap.words[0] >> 59) & 0x1f) == cap_sched_context_cap
+((cap.words[0] >> 59) & 0x1f) == cap_notification_cap
+/Users/tasfiaahmed/microkit/seL4/src/machine/fpu.c
+!nativeThreadUsingFPU(NODE_STATE(ksCurThread))
+(((~0xfffffffffffcull << 0) | 0x0) & v64) == ((0 && (v64 & (1ull << (47)))) ? 0x0 : 0)
+(((~0x2ull >> 1 ) | 0x0) & v64) == ((0 && (v64 & (1ull << (47)))) ? 0x0 : 0)
+(((~0x1ull >> 0 ) | 0x0) & v64) == ((0 && (v64 & (1ull << (47)))) ? 0x0 : 0)
+/Users/tasfiaahmed/microkit/seL4/src/object/cnode.c
+cap_get_capType(destSlot->cap) == cap_null_cap
+(cte_t *)mdb_node_get_mdbNext(destSlot->cteMDBNode) == NULL && (cte_t *)mdb_node_get_mdbPrev(destSlot->cteMDBNode) == NULL
+((cap.words[0] >> 59) & 0x1f) == cap_zombie_cap
+(((~0xfffffffffff0ull << 0) | 0x0) & v64) == ((0 && (v64 & (1ull << (47)))) ? 0x0 : 0)
+(capIRQ & ~0xfffull) == ((0 && (capIRQ & (1ull << 47))) ? 0x0 : 0)
+/Users/tasfiaahmed/microkit/seL4/include/arch/arm/arch/machine/gic_v2.h
+IS_IRQ_VALID(active_irq[CURRENT_CPU_INDEX()]) && (active_irq[CURRENT_CPU_INDEX()] & IRQ_MASK) == IRQT_TO_IRQ(irq)
+(((~0xffffffffffffull << 0) | 0x0) & v64) == ((0 && (v64 & (1ull << (47)))) ? 0x0 : 0)
+/Users/tasfiaahmed/microkit/seL4/src/object/objecttype.c
+Invalid cap type
+refill_sufficient(sc, 0)
+/Users/tasfiaahmed/microkit/seL4/src/object/tcb.c
+isSchedulable(tcb)
+refill_sufficient(tcb->tcbSchedContext, 0)
+refill_sufficient(NODE_STATE(ksSchedulerAction)->tcbSchedContext, 0)
+refill_ready(NODE_STATE(ksSchedulerAction)->tcbSchedContext)
+(((~0xfull >> 0) | 0x0) & v64) == ((0 && (v64 & (1ull << (47)))) ? 0x0 : 0)
+thread_state_get_tsType(NODE_STATE(ksCurThread)->tcbState) == ThreadState_Running
+Current thread is blocked
+/Users/tasfiaahmed/microkit/seL4/include/object/reply.h
+thread_state_get_replyObject(tcb->tcbState) == REPLY_REF(reply)
+/Users/tasfiaahmed/microkit/seL4/src/object/notification.c
+notification_ptr_get_state(ntfnPtr) == NtfnState_Waiting
+refill_ready(tcb->tcbSchedContext)
+NODE_STATE_ON_CORE(ksDebugTCBs, tcb->tcbAffinity) != NULL
+TCB_PTR_DEBUG_PTR(tcb)->tcbDebugPrev
+NODE_STATE(ksReleaseQueue.head)->tcbSchedPrev == NULL
+awakened != NODE_STATE(ksCurThread)
+!isRoundRobin(awakened->tcbSchedContext)
+refill_sufficient(awakened->tcbSchedContext, 0)
+/Users/tasfiaahmed/microkit/seL4/src/object/schedcontext.c
+tcb != NULL
+sc != NULL
+to != NULL
+to->tcbSchedContext == NULL
+/Users/tasfiaahmed/microkit/seL4/src/object/reply.c
+reply != NULL
+reply->replyTCB == NULL
+call_stack_get_callStackPtr(reply->replyPrev) == 0
+call_stack_get_callStackPtr(reply->replyNext) == 0
+thread_state_get_tsType(tcb_caller->tcbState) == ThreadState_BlockedOnSend || thread_state_get_tsType(tcb_caller->tcbState) == ThreadState_Running || thread_state_get_tsType(tcb_caller->tcbState) == ThreadState_Restart
+thread_state_get_tsType(tcb_callee->tcbState) == ThreadState_Inactive || thread_state_get_tsType(tcb_callee->tcbState) == ThreadState_Running || thread_state_get_tsType(tcb_callee->tcbState) == ThreadState_Restart
+old_caller == NULL || SC_PTR(call_stack_get_callStackPtr(old_caller->replyNext)) == sc_donated
+thread_state_get_tcbInReleaseQueue(tcb->tcbState) == false
+thread_state_get_tcbQueued(tcb->tcbState) == false
+/Users/tasfiaahmed/microkit/seL4/include/object/tcb.h
+before != NULL
+before != after
+!sc || sc->scTcb != NULL
+!thread_state_get_tcbQueued(sc->scTcb->tcbState)
+mcp <= seL4_MaxPrio
+/Users/tasfiaahmed/microkit/seL4/src/kernel/boot.c
+allocated % BIT(size_bits) == 0
+rootserver_mem.start <= rootserver_mem.end
+refill_ready(NODE_STATE(ksCurSC))
+/Users/tasfiaahmed/microkit/seL4/src/object/endpoint.c
+thread->tcbSchedContext != NODE_STATE(ksCurSC)
+((seL4_Fault.words[0] >> 0) & 0xf) == seL4_Fault_VMFault
+((seL4_Fault.words[0] >> 0) & 0xf) == seL4_Fault_VGICMaintenance
+((seL4_Fault.words[0] >> 0) & 0xf) == seL4_Fault_VCPUFault
+((seL4_Fault.words[0] >> 0) & 0xf) == seL4_Fault_VPPIEvent
+((pte_ptr->words[0] >> 0) & 0x400000000000003) == 0x1ull
+, uncached
+Invalid syscall error
+(label & ~0xfffffffffffffull) == ((0 && (label & (1ull << 63))) ? 0x0 : 0)
+asid_map_get_type(asid_map) == asid_map_asid_map_vspace
+(vspace_root & ~0xfffffffff000ull) == ((0 && (vspace_root & (1ull << 47))) ? 0x0 : 0)
+(FSR & ~0xffffffffull) == ((0 && (FSR & (1ull << 47))) ? 0x0 : 0)
+Invalid VM fault type
+(capFBasePtr & ~0xffffffffffffull) == ((0 && (capFBasePtr & (1ull << 47))) ? 0x0 : 0)
+(paddr_t)pptr >= KERNEL_ELF_BASE
+(capVSBasePtr & ~0xffffffffffffull) == ((0 && (capVSBasePtr & (1ull << 47))) ? 0x0 : 0)
+(capPTBasePtr & ~0xffffffffffffull) == ((0 && (capPTBasePtr & (1ull << 47))) ? 0x0 : 0)
+(capVCPUPtr & ~0xffffffffffffull) == ((0 && (capVCPUPtr & (1ull << 47))) ? 0x0 : 0)
+Arch_createObject got an API type or invalid object type
+child of: '
+(capEPPtr & ~0xffffffffffffull) == ((0 && (capEPPtr & (1ull << 47))) ? 0x0 : 0)
+(capNtfnPtr & ~0xffffffffffffull) == ((0 && (capNtfnPtr & (1ull << 47))) ? 0x0 : 0)
+(capCNodeRadix & ~0x3full) == ((0 && (capCNodeRadix & (1ull << 47))) ? 0x0 : 0)
+(capBlockSize & ~0x3full) == ((0 && (capBlockSize & (1ull << 47))) ? 0x0 : 0)
+(capSCPtr & ~0xffffffffffffull) == ((0 && (capSCPtr & (1ull << 47))) ? 0x0 : 0)
+(capSCSizeBits & ~0x3full) == ((0 && (capSCSizeBits & (1ull << 47))) ? 0x0 : 0)
+thread->tcbSchedContext != NULL
+!thread_state_get_tcbInReleaseQueue(thread->tcbState)
+refill_sufficient(thread->tcbSchedContext, 0)
+refill_ready(thread->tcbSchedContext)
+cap_frame_cap_get_capFMappedASID(frame_cap) != 0
+pte_pte_table_ptr_get_present(pud)
+pte_pte_table_ptr_get_present(pd)
+(page_base_address & ~0xfffffffff000ull) == ((0 && (page_base_address & (1ull << 47))) ? 0x0 : 0)
+(capFMappedASID & ~0xffffull) == ((0 && (capFMappedASID & (1ull << 47))) ? 0x0 : 0)
+(capFMappedAddress & ~0xffffffffffffull) == ((0 && (capFMappedAddress & (1ull << 47))) ? 0x0 : 0)
+vaddr >= PPTR_TOP
+(asid_base & MASK(asidLowBits)) == 0
+thread_state_get_tsType(tcb->tcbState) == ThreadState_BlockedOnReply
+reply->replyTCB == tcb
+endpoint_ptr_get_state(epptr) != EPState_Idle
+thread
+isSchedulable(thread)
+call_stack_get_isHead(REPLY_PTR(prev_ptr)->replyNext)
+thread_state_get_tsType(tcb->tcbState) == ThreadState_BlockedOnReceive || thread_state_get_tsType(tcb->tcbState) == ThreadState_BlockedOnReply
+asid < BIT(16)
+ptSlot != NULL
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: IPC Buffer is an invalid cap.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Specifying a device frame as an IPC buffer is not permitted.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: IPC Buffer vaddr 0x%x is not aligned.>>
+Invalid vspace
+SP not aligned
+0x%lx: INVALID
+0x%lx: 0x%lx
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Deriving a VSpace cap without an assigned ASID>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Deriving a PT cap without an assigned ASID>>
+Invalid arch cap
+(((~0x7full >> 0 ) | 0x0) & v64) == ((0 && (v64 & (1ull << (63)))) ? 0x0 : 0)
+/Users/tasfiaahmed/microkit/seL4/src/arch/arm/64/machine/capdl.c
+frame_%p_%04lu 
+pt_%p_%04lu (asid: %lu)
+pt_%p_%04lu
+%p_pd (asid: %lu)
+asid_control
+find_ret.status == EXCEPTION_NONE
+%p_asid_pool
+%p_vcpu
+[unknown cap %lu]
+ipc_buffer_slot: 
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Rejecting request for IRQ %u. IRQ is out of range [0..%u].>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Rejecting request for IRQ %u. Already active.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Target slot for new IRQ Handler cap invalid: cap %lu, IRQ %u.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Target slot for new IRQ Handler cap not empty: cap %lu, IRQ %u.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: ARMSMCInvocation: Illegal operation.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: ARMSMCCall: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: ARMSMCCall: Illegal operation.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: VCPUWriteReg: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: VCPUWriteReg: Invalid field 0x%lx.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: VCPUReadReg: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: VCPUReadReg: Invalid field 0x%lx.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: VGIC List register in use.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: VCPU SetTCB: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB cap is not a TCB cap.>>
+reg.start <= reg.end
+Can't mark region 0x%lx-0x%lx as reserved, try increasing MAX_NUM_RESV_REG (currently %d)
+/Users/tasfiaahmed/microkit/seL4/src/arch/arm/machine/hardware.c
+frame->armExecuteNever
+(armExecuteNever & ~0x1ull) == ((0 && (armExecuteNever & (1ull << 47))) ? 0x0 : 0)
+ERROR: can't add another cap, all %lu (=2^CONFIG_ROOT_CNODE_SIZE_BITS) slots used
+WARNING: internal book keeping error. Less pagetables allocated than predicted: %ld page tables allocated but not used.
+receive
+send
+code
+data
+Found thread has no fault handler while trying to handle:
+null fault
+cap fault in %s phase at address %p
+vm fault on %s at address %p with status %p
+unknown syscall %p
+user exception %p code %p
+Timeout fault for 0x%x
+unknown fault
+in thread %p "%s" 
+at address %p
+With stack:
+(addr: 0x%lx, ip: 0x%lx, sp: 0x%lx, prio: %lu, max_prio: %lu
+, fault_ep: %p
+, dom: %ld)
+(period: %llu us (%llu ticks), budget: %llu us (%llu ticks), %lu bits)
+(%lu bits)
+(guard: %lu, guard_size: %lu)
+, badge: %lu)
+irq maps {
+%d: 0x%lx_%lu_irq
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB ReadRegisters: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB ReadRegisters: Attempted to read an invalid number of registers (%d).>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB ReadRegisters: Attempted to read our own registers.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetPriority: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Set priority: authority cap not a TCB.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetPriority: Requested priority %lu too high (max %lu).>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetMCPriority: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetMCPriority: authority cap not a TCB.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetMCPriority: Requested maximum controlled priority %lu too high (max %lu).>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Domain Configure: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Domain Configure: invalid domain (%lu >= %u).>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Domain Configure: thread cap required.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB BindNotification: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB BindNotification: TCB already has a bound notification.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB BindNotification: Notification is invalid.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB BindNotification: Insufficient access rights>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB BindNotification: Notification cannot be bound.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB UnbindNotification: TCB already has no bound Notification.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Untyped cap: Illegal operation attempted.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Untyped invocation: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Untyped Retype: Invalid object type.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Untyped Retype: Invalid object size.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Untyped Retype: Requested CapTable size too small.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Untyped Retype: Requested UntypedItem size too small.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Untyped retype: Requested a scheduling context too small.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Untyped Retype: Invalid destination address.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Untyped Retype: Destination cap invalid or read-only.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Untyped Retype: Destination node offset #%d too large.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Untyped Retype: Number of requested objects (%d) too small or large.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Untyped Retype: Requested destination window overruns size of node.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Untyped Retype: Slot #%d in destination window non-empty.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Untyped Retype: Insufficient memory (%lu * %lu bytes needed, %lu bytes available).>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Untyped Retype: Creating kernel objects with device untyped>>
+%p_pd {
+0x%lx: pd_%p_%04lu
+pd_%p_%04lu {
+0x%lx: frame_%p_%04lu
+0x%lx: pt_%p_%04lu
+pt_%p_%04lu {
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: VSpaceRoot Flush: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: VSpaceRoot Flush: Invalid range.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: VSpaceRoot Flush: Exceed the user addressable region.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: VSpaceRoot Flush: No VSpace for ASID>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: VSpaceRoot Flush: Invalid VSpace Cap>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: VSpaceRoot Flush: cannot cross page boundary, valid range is [0x%lx..0x%lx)>>
+((cap_ptr->words[0] >> 59) & 0x1f) == cap_page_table_cap
+(((~0xfffffff00000ull << 0 ) | 0x0) & v64) == ((0 && (v64 & (1ull << (47)))) ? 0x0 : 0)
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: ARMPageMap: Attempting to remap a frame that does not belong to the passed address space>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: ARMPageMap: Attempting to map frame into multiple addresses>>
+(((~0x1fffffffffffe00ull >> 9 ) | 0x0) & v64) == ((0 && (v64 & (1ull << (47)))) ? 0x0 : 0)
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Page Flush: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Page Flush: Frame is not mapped.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Page Flush: No PGD for ASID>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: PageFlush: Invalid range>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Page Flush: Requested range not inside page>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Page Flush: Overlaps kernel region.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: ASIDControlMakePool: No unallocated pools found.>>
+Invalid ARM arch cap type
+no free memory slot left for [%lx..%lx], consider increasing MAX_NUM_FREEMEM_REG (%u)
+ERROR: no memory regions available
+available phys memory regions: %lu
+  [%lx..%lx]
+ERROR: memory region %lu has start > end
+ERROR: memory region %lu empty
+ERROR: memory region %d in wrong order
+reserved virt address space regions: %lu
+ERROR: reserved region %lu has start > end
+ERROR: reserved region %lu in wrong order
+ERROR: insufficient MAX_NUM_FREEMEM_REG (%u)
+ERROR: no free memory region is big enough for root server objects, need size/alignment of 2^%lu
+i < ARRAY_SIZE(ndks_boot.freemem) - 1
+is_reg_empty(ndks_boot.freemem[i + 1])
+rootserver_mem.start == rootserver_mem.end
+%p_asid_pool = asid_pool 
+(asid_high: 0x%lx)
+%p_vcpu = vcpu
+[unknown object %lu]
+%p_ep = ep
+%p_notification = notification
+/Users/tasfiaahmed/microkit/seL4/src/machine/capdl.c
+!"should not happend"
+%p_reply = rtreply
+%p_sc = sc 
+%p_%lu_irq = irq
+%p_pd = pud
+frame_%p_%04lu = frame 
+, paddr: 0x%p)
+pd_%p_%04lu = pd
+pt_%p_%04lu = pt
+Head %lu tail %lu
+index %lu, Amount: %llx, time %llx
+budget >= MIN_BUDGET
+refill_size(sc) < sc->scRefillMax
+refill_sum(sc) == budget
+isRoundRobin(sc) || refill_ordered(sc)
+Failed to derive copy of IPC Buffer
+ksCurDomain < CONFIG_NUM_DOMAINS && ksDomainTime > 0
+sc->scRefillMax > 0
+refill_sum(sc) == new_budget
+!isRoundRobin(sc)
+prev_size == (refill_size(sc) + 1)
+sc->scRefillHead < sc->scRefillMax
+head.rAmount > usage
+!refill_single(sc)
+refill_sum(sc) == _sum
+refill_sufficient(NODE_STATE(ksCurSC), NODE_STATE(ksConsumed))
+refill_size(NODE_STATE(ksCurSC)) == MIN_REFILLS
+refill_sufficient(NODE_STATE(ksCurSC), 0)
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB CopyRegisters: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB CopyRegisters: Invalid source TCB.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB WriteRegisters: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB WriteRegisters: Message too short for requested write size (%d/%d).>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB WriteRegisters: Attempted to write our own registers.>>
+isSchedulable(candidate)
+candidate != NODE_STATE(ksCurThread)
+refill_ready(NODE_STATE(ksCurThread)->tcbSchedContext)
+refill_sufficient(NODE_STATE(ksCurThread)->tcbSchedContext, 0)
+(((~0x10ull >> 4) | 0x0) & v64) == ((0 && (v64 & (1ull << (47)))) ? 0x0 : 0)
+(((~0x8ull >> 3) | 0x0) & v64) == ((0 && (v64 & (1ull << (47)))) ? 0x0 : 0)
+(((~0x4ull >> 2) | 0x0) & v64) == ((0 && (v64 & (1ull << (47)))) ? 0x0 : 0)
+dest
+dest->tcbSchedContext == NULL || refill_sufficient(dest->tcbSchedContext, 0)
+dest->tcbSchedContext == NULL || refill_ready(dest->tcbSchedContext)
+/Users/tasfiaahmed/microkit/seL4/src/kernel/faulthandler.c
+cap_endpoint_cap_get_capCanSend(handlerCap)
+cap_endpoint_cap_get_capCanGrant(handlerCap) || cap_endpoint_cap_get_capCanGrantReply(handlerCap)
+cap_get_capType(handlerCap) == cap_null_cap
+validTimeoutHandler(tptr)
+!thread_state_get_tcbQueued(NODE_STATE(ksCurThread)->tcbState)
+refill_head(NODE_STATE(ksCurSC))->rAmount >= MIN_BUDGET
+NODE_STATE(ksCurThread)->tcbSchedContext == NODE_STATE(ksCurSC)
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedControl_ConfigureFlags: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedControl_configureFlags: truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedControl_ConfigureFlags: target cap not a scheduling context cap>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedControl_ConfigureFlags: budget out of range.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedControl_ConfigureFlags: period out of range.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedControl_ConfigureFlags: budget must be <= period>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Max refills invalid, got %lu, max %lu>>
+((cap.words[0] >> 59) & 0x1f) == cap_sched_control_cap
+/Users/tasfiaahmed/microkit/seL4/src/object/schedcontrol.c
+checkBudget()
+sc_active(target)
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedControl invocation: Illegal operation attempted.>>
+isRunnable(NODE_STATE(ksCurThread))
+(number & ~0xffffffffull) == ((0 && (number & (1ull << 47))) ? 0x0 : 0)
+(code & ~0xfffffffull) == ((0 && (code & (1ull << 47))) ? 0x0 : 0)
+(hsr & ~0xffffffffull) == ((0 && (hsr & (1ull << 47))) ? 0x0 : 0)
+Received VGIC maintenance without active VCPU!
+ARCH_NODE_STATE(armHSCurVCPU) != NULL && ARCH_NODE_STATE(armHSVCPUActive)
+irqVPPIEventIndex(irq) != VPPIEventIRQ_invalid
+thread_state_get_tsType(receiver->tcbState) == ThreadState_Inactive
+thread_state_get_tsType(thread->tcbState) == ThreadState_BlockedOnSend
+invalid EP state
+tcb->tcbSchedContext != NODE_STATE(ksCurSC)
+dest->tcbSchedContext != NODE_STATE(ksCurSC)
+Received IRQ %d, which is above the platforms maxIRQ of %d
+Undelivered IRQ: %d
+Received unhandled reserved IRQ: 0x%lx
+Received disabled IRQ: %d
+/Users/tasfiaahmed/microkit/seL4/src/object/interrupt.c
+Invalid IRQ state
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Spurious interrupt!>>
+tried to complete signal with inactive notification object
+sc->scTcb == NULL
+tcb->tcbSchedContext == NULL
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedContext_Bind: Truncated Message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedContext_Bind: sched context already bound.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedContext_Bind: tcb already bound.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedContext_Bind: tcb blocked and scheduling context not schedulable.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedContext_Bind: notification already bound>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedContext_Bind: invalid cap.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedContext_Unbind: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedContext UnbindObject: object not bound>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedContext UnbindObject: cannot unbind sc of current thread>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedContext_Unbind: invalid cap>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedContext_YieldTo: cannot yield to an inactive sched context>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedContext_YieldTo: cannot seL4_SchedContext_YieldTo on self>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedContext_YieldTo: insufficient mcp (%lu) to yield to a thread with prio (%lu)>>
+NODE_STATE(ksCurThread)->tcbYieldTo == NULL
+sc->scYieldFrom == NULL
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SchedContext invocation: Illegal operation attempted.>>
+cap_get_capType(cap) == cap_endpoint_cap
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Reply object already has unexecuted reply!>>
+sender
+sender->tcbSchedContext != NODE_STATE(ksCurSC)
+sender->tcbSchedContext == NULL || refill_sufficient(sender->tcbSchedContext, 0)
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Reply cap lookup failed>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Cap in reply slot is not a reply>>
+Invalid tcb state
+finaliseCap: failed to finalise immediately.
+call_stack_get_isHead(sc->scReply->replyNext)
+finaliseCap should only return Zombie or NullCap
+cap_get_capType(endSlot->cap) == cap_null_cap
+ptr2 == slot && ptr != slot
+Expected recursion to result in Zombie.
+ptr != CTE_PTR(cap_zombie_cap_get_capZombiePtr(ptr->cap))
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetSchedParams: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetTimeoutEndpoint: timeout endpoint cap invalid.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetSchedParams: authority cap not a TCB.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetSchedParams: Requested maximum controlled priority %lu too high (max %lu).>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetSchedParams: Requested priority %lu too high (max %lu).>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB Configure: tcb already has a scheduling context.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB Configure: sched contextext already bound.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB Configure: tcb blocked and scheduling context not schedulable.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetSchedParams: Cannot change sched_context of current thread>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB Configure: sched context cap invalid.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB Configure: fault endpoint cap invalid.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetIPCBuffer: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB Configure: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB Configure: CSpace or VSpace currently being deleted.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB Configure: CSpace cap is invalid.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB Configure: VSpace cap is invalid.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetSpace: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetSpace: CSpace or VSpace currently being deleted.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetSpace: Invalid CNode cap.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetSpace: Invalid VSpace cap.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetSpace: fault endpoint cap invalid.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB SetTLSBase: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: TCB: Illegal operation.>>
+cap_get_capType(cap) == cap_cnode_cap
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: CNodeCap: Illegal Operation attempted.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: CNode operation: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: CNode operation: Target slot invalid.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: CNode Copy/Mint/Move/Mutate: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: CNode Copy/Mint/Move/Mutate: Destination not empty.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: CNode Copy/Mint/Move/Mutate: Invalid source slot.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: CNode Copy/Mint/Move/Mutate: Source slot invalid or empty.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Truncated message for CNode Copy operation.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Error deriving cap for CNode Copy operation.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: CNode Mint: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Error deriving cap for CNode Mint operation.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: CNode Mutate: Truncated message.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: CNode Copy/Mint/Move/Mutate: Mutated cap would be invalid.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: CNode CancelBadgedSends: Target cap invalid.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: CNode Rotate: Pivot slot the same as source or dest slot.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: CNode Rotate: Source cap invalid.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: CNode Rotate: Pivot cap invalid.>>
+capRemovable(fc_ret.remainder, slot) && cap_get_capType(fc_ret.cleanupInfo) == cap_null_cap
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: IRQSetHandler: provided cap is not an notification capability.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: IRQSetHandler: caller does not have send rights on the endpoint.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: IRQHandler: Illegal operation.>>
+can't init sched_control for node %u, provide_cap() failed
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: VCPUAckVPPI: Invalid irq number.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: VCPU: Illegal operation.>>
+%p_tcb {
+cspace: %p_cnode 
+vspace: %p_pd
+fault_ep_slot: %p_ep 
+sc_slot: %p_sc
+temp_fault_ep_slot: %p_ep 
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Attempted to invoke a null cap #%lu.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Attempted to invoke a zombie cap #%lu.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Attempted to invoke a read-only endpoint cap #%lu.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Attempted to invoke a read-only notification cap #%lu.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Cannot invoke thread capabilities in the first phase of an invocation>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Cannot invoke domain capabilities in the first phase of an invocation>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Cannot invoke cnode capabilities in the first phase of an invocation>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Cannot invoke sched control capabilities in the first phase of an invocation>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Cannot invoke sched context capabilities in the first phase of an invocation>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Invocation of invalid cap #%lu.>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: Lookup of extra caps failed.>>
+/Users/tasfiaahmed/microkit/seL4/src/api/syscall.c
+ret == EXCEPTION_NONE
+Invalid syscall
+/Users/tasfiaahmed/microkit/seL4/include/kernel/boot.h
+rootserver.paging.start <= rootserver.paging.end
+(capPTMappedAddress & ~0xfffffff00000ull) == ((0 && (capPTMappedAddress & (1ull << 47))) ? 0x0 : 0)
+%p_ep 
+%p_notification 
+%p_untyped
+%p_tcb
+%p_reply
+%p_sc
+%lu_sched_control
+irq_control
+%p_%lu_irq
+%p_%lu_untyped = ut (%lu bits, paddr: %p) {
+%p_cnode = cnode 
+%p_tcb = tcb 
+((cap.words[0] >> 59) & 0x1f) == cap_irq_handler_cap
+0x%lx_%lu_irq {
+0x0: 
+%p_cnode {
+0x%x: 
+arch aarch64
+objects {
+caps {
+Dumping all tcbs!
+ InReleaseQueue
+Name                                    
+State          
+IP                  
+ Prio 
+ Core%s
+--------------------------------------------------------------------------------------
+%40s
+%15s
+%20lu
+/Users/tasfiaahmed/microkit/seL4/include/api/debug.h
+Unknown thread state
+Debug halt syscall from user thread %p "%s"
+Debug snapshot syscall from user thread %p "%s"
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SysDebugNameThread: cap is not a TCB, halting>>
+[1m<<
+[32mseL4(CPU %lu)
+[1m [%s/%d T%p "%s" @%lx]: SysDebugNameThread: Name too long, halting>>
+!thread_state_get_tcbQueued(ts)
+!thread_state_get_tcbInReleaseQueue(ts)
+Kernel init: Unaligned untyped pptr %p (alignment %lu)
+Kernel init: Non-device untyped pptr %p outside kernel window
+Kernel init: End of non-device untyped at %p outside kernel window (size %lu)
+(capIsDevice & ~0x1ull) == ((0 && (capIsDevice & (1ull << 47))) ? 0x0 : 0)
+Kernel init: Too many untyped regions for boot info
+ERROR: creation of untypeds for device region #%u at [%lx..%lx] failed
+ERROR: creation of untypeds for top device region [%lx..%lx] failed
+ERROR: creation of untypeds for recycled boot memory [%lx..%lx] failed
+ERROR: creation of untypeds for free memory region #%u at [%lx..%lx] failed
+Platform claims to have FP hardware, but does not!
+Bootstrapping kernel
+ERROR: CPU init failed
+ERROR: DTB location at %lx len %lu invalid
+ERROR: DTB at [%lx..%lx] exceeds PADDR_TOP (%lx)
+ERROR: userland image virt [%lx..%lx]exceeds USER_TOP (%lx)
+ERROR: free memory management initialization failed
+ERROR: root c-node creation failed
+ERROR: address space creation for initial thread failed
+ERROR: mapping extra boot info to initial thread failed
+ERROR: could not create IPC buffer for initial thread
+ERROR: could not create all userland image frames
+ERROR: could not create ASID pool for initial thread
+ERROR: could not create initial thread
+ERROR: could not create untypteds for kernel image boot memory
+Booting all finished, dropped to user space
+/Users/tasfiaahmed/microkit/seL4/src/arch/arm/kernel/boot.c
+ERROR: kernel init failed
+inactive
+running
+restart
+blocked on recv
+blocked on send
+blocked on reply
+blocked on ntfn
+idle
+Call
+ReplyRecv
+NBSendRecv
+NBSendWait
+Send
+NBSend
+Recv
+NBRecv
+Wait
+NBWait
+Yield
+kfzf
+qaza
+kfzf
+qhzh
+ h`8
+# @9
+#$@9
+*_@4
+T`rF
+T`vF
+<SB0
+h"8B
+#hb8
+kernel invocation should never have unwrapped caps
+ERROR: 
+  invocation idx: 
+invocation error
+false
+true
+(instruction fault)
+(data fault)
+<invalid EC>
+<unexpected DFSC>
+unknown reason
+MON|INFO: PD '
+' is now passive!
+MON|ERROR: could not bind scheduling context to notification object
+MON|ERROR: received message 
+  badge: 
+  tcb cap: 
+MON|ERROR: faulting PD: 
+MON|ERROR: unknown/invalid badge
+error reading registers
+Registers: 
+pc : 
+sp: 
+spsr : 
+x0 : 
+x1 : 
+x2 : 
+x3 : 
+x4 : 
+x5 : 
+x6 : 
+x7 : 
+x8 : 
+x16 : 
+x17 : 
+x18 : 
+x29 : 
+x30 : 
+x9 : 
+x10 : 
+x11 : 
+x12 : 
+x13 : 
+x14 : 
+x15 : 
+x19 : 
+x20 : 
+x21 : 
+x22 : 
+x23 : 
+x24 : 
+x25 : 
+x26 : 
+x27 : 
+x28 : 
+tpidr_el0 : 
+tpidrro_el0 : 
+MON|ERROR: CapFault: ip=
+  fault_addr=
+  in_recv_phase=
+  lookup_failure_type=
+seL4_NoFailure
+seL4_InvalidRoot
+seL4_MissingCapability
+  bits_left=
+seL4_DepthMismatch
+  depth_bits_found=
+seL4_GuardMismatch
+  guard_found=
+  guard_bits_found=
+MON|ERROR: UserException
+MON|ERROR: VMFault: ip=
+  fsr=
+MON|ERROR:   ec: 
+   il: 
+   iss: 
+MON|ERROR:   dfsc = 
+ -- external abort
+ -- cache maint
+ -- stage 2 fault for stage 1 page table walk
+ -- write not read
+MON|ERROR: potential stack overflow, fault address within one page outside of stack region
+MON|ERROR: received vCPU fault with ESR: 
+MON|ERROR: potential undefined behaviour detected by UBSAN for: '
+MON|ERROR: Unknown vCPU fault
+MON|ERROR: Unknown fault
+device
+normal
+Untyped Info Expected Memory Ranges
+                                     paddr: 
+MON|INFO: Microkit Bootstrap
+MON|ERROR: cap start mismatch. Expected cap start: 
+  boot info cap start: 
+cap start mismatch
+MON|ERROR: cap end mismatch. Expected cap end: 
+  boot info cap end: 
+cap end mismatch
+MON|ERROR: paddr mismatch for untyped region: 
+  expected paddr: 
+  boot info paddr: 
+paddr mismatch
+MON|ERROR: size_bits mismatch for untyped region: 
+  expected size_bits: 
+  boot info size_bits: 
+size_bits mismatch
+MON|ERROR: is_device mismatch for untyped region: 
+  expected is_device: 
+  boot info is_device: 
+is_device mismatch
+MON|INFO: bootinfo untyped list matches expected list
+MON|ERROR: found mismatch between boot info and untyped info
+MON|INFO: Number of bootstrap invocations: 
+MON|INFO: Number of system invocations:    
+MON|INFO: completed bootstrap invocations
+MON|INFO: completed system invocations
+add overflow
+builtin unreachable
+control-flow-integrity check fail
+division remainder overflow
+dynamic type cache miss
+float case overflow
+function type mismatch
+implicit conversion
+invalid builtin
+invalid objc cast
+load invalid value
+missing return
+multiplication overflow
+negate overlfow
+nullability argument
+nullability return
+non-null argument
+non-null return
+out of bounds access
+pointer overflow
+shift out of bounds
+subtraction overflow
+type mismatch
+alignment assumption
+variable-length-array bound not positive
+address size fault, level 0
+address size fault, level 1
+address size fault, level 2
+address size fault, level 3
+translation fault, level 0
+translation fault, level 1
+translation fault, level 2
+translation fault, level 3
+access flag fault, level 1
+access flag fault, level 2
+access flag fault, level 3
+permission fault, level 1
+permission fault, level 2
+permission fault, level 3
+synchronuos external abort
+synchronous tag check fault
+synchronous external abort, level 0
+synchronous external abort, level 1
+synchronous external abort, level 2
+synchronous external abort, level 3
+syncrhonous partity or ECC error
+syncrhonous partity or ECC error, level 0
+syncrhonous partity or ECC error, level 1
+syncrhonous partity or ECC error, level 2
+syncrhonous partity or ECC error, level 3
+alignment fault
+tlb conflict abort
+unsupported atomic hardware update fault
+Unknown reason
+Trapped WFI or WFE instruction execution
+Trapped MCR or MRC access with (coproc==0b1111) this is not reported using EC 0b000000
+Trapped MCRR or MRRC access with (coproc==0b1111) this is not reported using EC 0b000000
+Trapped MCR or MRC access with (coproc==0b1110)
+Trapped LDC or STC access
+Access to SVC, Advanced SIMD or floating-point functionality trapped
+Trapped MRRC access with (coproc==0b1110)
+Branch Target Exception
+SVC instruction execution in AArch32 state
+SVC instruction execution in AArch64 state
+Trapped MSR, MRS or System instruction exuection in AArch64 state, this is not reported using EC 0xb000000, 0b000001 or 0b000111
+Access to SVE functionality trapped
+Exception from a Pointer Authentication instruction authentication failure
+Instruction Abort from a lower Exception level
+Instruction Abort taken without a change in Exception level
+PC alignment fault exception
+Data Abort from a lower Exception level
+Data Abort taken without a change in Exception level
+SP alignment faultr exception
+Trapped floating-point exception taken from AArch32 state
+Trapped floating-point exception taken from AArch64 state
+SError interrupt
+Breakpoint exception from a lower Exception level
+Breakpoint exception taken without a change in Exception level
+Software Step exception from a lower Exception level
+Software Step exception taken without a change in Exception level
+Watchpoint exception from a lower Exception level
+Watchpoint exception taken without a change in Exception level
+BKPT instruction execution in AArch32 state
+BRK instruction execution in AArch64 state
+Bootinfo: 
+extraLen                = 
+nodeID                  = 
+numNodes                = 
+numIOPTLevels           = 
+ipcBuffer*              = 
+initThreadCNodeSizeBits = 
+initThreadDomain        = 
+userImagePaging         = 
+schedcontrol            = 
+userImageFrames         = 
+untyped                 = 
+empty                   = 
+sharedFrames            = 
+ioSpaceCaps             = 
+extraBIPages            = 
+Boot Info Untyped Memory Ranges
+untypedList[
+]        = slot: 
+, paddr: 
+) bits: 
+FAIL: 
+<invalid seL4 error>
+seL4_NoError
+seL4_InvalidArgument
+seL4_InvalidCapability
+seL4_IllegalOperation
+seL4_RangeError
+seL4_AlignmentError
+seL4_FailedLookup
+seL4_TruncatedMessage
+seL4_DeleteFirst
+seL4_RevokeFirst
+seL4_NotEnoughMemory
+double_elf
+hello, world
+assert failed: 
+ is missing the 'protected' entry point
+ is missing the 'fault' entry point
+double_elf
+hello, world
+assert failed: 
+ is missing the 'protected' entry point
+ is missing the 'fault' entry point
+double_elf

@@ -368,7 +368,7 @@ struct BuiltSystem {
     vm_tcb_caps: Vec<u64>,
     sched_caps: Vec<u64>,
     ntfn_caps: Vec<u64>,
-    pd_elf_regions: Vec<Vec<Region>>,
+    pd_elf_regions: Vec<Vec<Vec<Region>>>,
     pd_setvar_values: Vec<Vec<u64>>,
     pd_stack_addrs: Vec<u64>,
     kernel_objects: Vec<Object>,
@@ -379,51 +379,52 @@ struct BuiltSystem {
 pub fn pd_write_symbols(
     pds: &[ProtectionDomain],
     channels: &[Channel],
-    pd_elf_files: &mut [ElfFile],
+    pd_elf_files: &mut [Vec<ElfFile>],
     pd_setvar_values: &[Vec<u64>],
 ) -> Result<(), String> {
     for (i, pd) in pds.iter().enumerate() {
-        let elf = &mut pd_elf_files[i];
-        let name = pd.name.as_bytes();
-        let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
-        elf.write_symbol("microkit_name", &name[..name_length])?;
-        elf.write_symbol("microkit_passive", &[pd.passive as u8])?;
+        for elf in &mut pd_elf_files[i] {
+            // let elf = &mut pd_elf_files[i];
+            let name = pd.name.as_bytes();
+            let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
+            elf.write_symbol("microkit_name", &name[..name_length])?;
+            elf.write_symbol("microkit_passive", &[pd.passive as u8])?;
 
-        let mut notification_bits: u64 = 0;
-        let mut pp_bits: u64 = 0;
-        for channel in channels {
-            if channel.end_a.pd == i {
-                if channel.end_a.notify {
-                    notification_bits |= 1 << channel.end_a.id;
+            let mut notification_bits: u64 = 0;
+            let mut pp_bits: u64 = 0;
+            for channel in channels {
+                if channel.end_a.pd == i {
+                    if channel.end_a.notify {
+                        notification_bits |= 1 << channel.end_a.id;
+                    }
+                    if channel.end_a.pp {
+                        pp_bits |= 1 << channel.end_a.id;
+                    }
                 }
-                if channel.end_a.pp {
-                    pp_bits |= 1 << channel.end_a.id;
+                if channel.end_b.pd == i {
+                    if channel.end_b.notify {
+                        notification_bits |= 1 << channel.end_b.id;
+                    }
+                    if channel.end_b.pp {
+                        pp_bits |= 1 << channel.end_b.id;
+                    }
                 }
             }
-            if channel.end_b.pd == i {
-                if channel.end_b.notify {
-                    notification_bits |= 1 << channel.end_b.id;
-                }
-                if channel.end_b.pp {
-                    pp_bits |= 1 << channel.end_b.id;
-                }
-            }
-        }
 
-        elf.write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
-        elf.write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
-        elf.write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
+            elf.write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
+            elf.write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
+            elf.write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
 
-        for (setvar_idx, setvar) in pd.setvars.iter().enumerate() {
-            let value = pd_setvar_values[i][setvar_idx];
-            let result = elf.write_symbol(&setvar.symbol, &value.to_le_bytes());
-            if result.is_err() {
-                return Err(format!(
-                    "No symbol named '{}' in ELF '{}' for PD '{}'",
-                    setvar.symbol,
-                    pd.program_image.display(),
-                    pd.name
-                ));
+            for (setvar_idx, setvar) in pd.setvars.iter().enumerate() {
+                let value = pd_setvar_values[i][setvar_idx];
+                let result = elf.write_symbol(&setvar.symbol, &value.to_le_bytes());
+                if result.is_err() {
+                    return Err(format!(
+                        "No symbol named '{}' in ELF for PD '{}'",
+                        setvar.symbol,
+                        pd.name
+                    ));
+                }
             }
         }
     }
@@ -732,7 +733,7 @@ fn emulate_kernel_boot(
 
 fn build_system(
     config: &Config,
-    pd_elf_files: &Vec<ElfFile>,
+    pd_elf_files: &Vec<Vec<ElfFile>>,
     kernel_elf: &ElfFile,
     monitor_elf: &ElfFile,
     system: &SystemDescription,
@@ -766,9 +767,11 @@ fn build_system(
     // from this area, which can then be made available to the appropriate
     // protection domains
     let mut pd_elf_size = 0;
-    for pd_elf in pd_elf_files {
-        for r in phys_mem_regions_from_elf(pd_elf, config.minimum_page_size) {
-            pd_elf_size += r.size();
+    for pd_elfs in pd_elf_files {
+        for e in pd_elfs {
+            for r in phys_mem_regions_from_elf(e, config.minimum_page_size) {
+                pd_elf_size += r.size();
+            }
         }
     }
     let reserved_size = invocation_table_size + pd_elf_size;
@@ -1169,69 +1172,75 @@ fn build_system(
     //     as needed by protection domains based on mappings required
     let mut phys_addr_next = reserved_base + invocation_table_size;
     // Now we create additional MRs (and mappings) for the ELF files.
-    let mut pd_elf_regions: Vec<Vec<Region>> = Vec::with_capacity(system.protection_domains.len());
+
+    // pd_elf_regions - a vector (pds) of vectors (elfs) of vectors (regions for the elf)
+    let mut pd_elf_regions: Vec<Vec<Vec<Region>>> = Vec::with_capacity(system.protection_domains.len());
     let mut extra_mrs = Vec::new();
     let mut pd_extra_maps: HashMap<&ProtectionDomain, Vec<SysMap>> = HashMap::new();
     for (i, pd) in system.protection_domains.iter().enumerate() {
-        pd_elf_regions.push(Vec::with_capacity(pd_elf_files[i].segments.len()));
-        for (seg_idx, segment) in pd_elf_files[i].segments.iter().enumerate() {
-            if !segment.loadable {
-                continue;
-            }
+        pd_elf_regions.push(Vec::with_capacity(5)); // however many max_elfs is - need a better way to calc this
+        for (j, elf) in pd_elf_files[i].iter().enumerate() {
+            pd_elf_regions[i].push(Vec::with_capacity(elf.segments.len()));
+            for (seg_idx, segment) in elf.segments.iter().enumerate() {
+                if !segment.loadable {
+                    continue;
+                }
 
-            let segment_phys_addr = phys_addr_next + (segment.virt_addr % config.minimum_page_size);
-            pd_elf_regions[i].push(Region::new(
-                format!("PD-ELF {}-{}", pd.name, seg_idx),
-                segment_phys_addr,
-                segment.data.len() as u64,
-                seg_idx,
-            ));
+                let segment_phys_addr = phys_addr_next + (segment.virt_addr % config.minimum_page_size);
+                let region = Region::new(
+                    format!("PD-ELF {}-{}-{}", pd.name, seg_idx, j),
+                    segment_phys_addr,
+                    segment.data.len() as u64,
+                    seg_idx,
+                );
+                pd_elf_regions[i][j].push(region);
 
-            let mut perms = 0;
-            if segment.is_readable() {
-                perms |= SysMapPerms::Read as u8;
-            }
-            if segment.is_writable() {
-                perms |= SysMapPerms::Write as u8;
-            }
-            if segment.is_executable() {
-                perms |= SysMapPerms::Execute as u8;
-            }
+                let mut perms = 0;
+                if segment.is_readable() {
+                    perms |= SysMapPerms::Read as u8;
+                }
+                if segment.is_writable() {
+                    perms |= SysMapPerms::Write as u8;
+                }
+                if segment.is_executable() {
+                    perms |= SysMapPerms::Execute as u8;
+                }
 
-            let base_vaddr = util::round_down(segment.virt_addr, config.minimum_page_size);
-            let end_vaddr = util::round_up(
-                segment.virt_addr + segment.mem_size(),
-                config.minimum_page_size,
-            );
-            let aligned_size = end_vaddr - base_vaddr;
-            let name = format!("ELF:{}-{}", pd.name, seg_idx);
-            let mr = SysMemoryRegion {
-                name,
-                size: aligned_size,
-                page_size: PageSize::Small,
-                page_count: aligned_size / PageSize::Small as u64,
-                phys_addr: Some(phys_addr_next),
-                text_pos: None,
-                kind: SysMemoryRegionKind::Elf,
-            };
-            phys_addr_next += aligned_size;
+                let base_vaddr = util::round_down(segment.virt_addr, config.minimum_page_size);
+                let end_vaddr = util::round_up(
+                    segment.virt_addr + segment.mem_size(),
+                    config.minimum_page_size,
+                );
+                let aligned_size = end_vaddr - base_vaddr;
+                let name = format!("ELF:{}-{}-{}", pd.name, seg_idx, j);
+                let mr = SysMemoryRegion {
+                    name,
+                    size: aligned_size,
+                    page_size: PageSize::Small,
+                    page_count: aligned_size / PageSize::Small as u64,
+                    phys_addr: Some(phys_addr_next),
+                    text_pos: None,
+                    kind: SysMemoryRegionKind::Elf,
+                };
+                phys_addr_next += aligned_size;
 
-            let mp = SysMap {
-                mr: mr.name.clone(),
-                vaddr: base_vaddr,
-                perms,
-                cached: true,
-                text_pos: None,
-            };
-            if let Some(extra_maps) = pd_extra_maps.get_mut(pd) {
-                extra_maps.push(mp);
-            } else {
-                pd_extra_maps.insert(pd, vec![mp]);
+                let mp = SysMap {
+                    mr: mr.name.clone(),
+                    vaddr: base_vaddr,
+                    perms,
+                    cached: true,
+                    text_pos: None,
+                };
+                if let Some(extra_maps) = pd_extra_maps.get_mut(pd) {
+                    extra_maps.push(mp);
+                } else {
+                    pd_extra_maps.insert(pd, vec![mp]);
+                }
+
+                // Add to extra_mrs at the end to avoid movement issues with the MR since it's used in
+                // constructing the SysMap struct
+                extra_mrs.push(mr);
             }
-
-            // Add to extra_mrs at the end to avoid movement issues with the MR since it's used in
-            // constructing the SysMap struct
-            extra_mrs.push(mr);
         }
     }
 
@@ -1512,24 +1521,29 @@ fn build_system(
     let mut all_pd_ds: Vec<(usize, u64)> = Vec::new();
     let mut all_pd_pts: Vec<(usize, u64)> = Vec::new();
     for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
-        let (ipc_buffer_vaddr, _) = pd_elf_files[pd_idx]
-            .find_symbol(SYMBOL_IPC_BUFFER)
-            .unwrap_or_else(|_| panic!("Could not find {}", SYMBOL_IPC_BUFFER));
+
         let mut upper_directory_vaddrs = HashSet::new();
         let mut directory_vaddrs = HashSet::new();
         let mut page_table_vaddrs = HashSet::new();
+        let mut vaddrs = Vec::new();
 
-        // For each page, in each map determine we determine
-        // which upper directory, directory and page table is resides
-        // in, and then page sure this is set
-        let mut vaddrs = vec![(ipc_buffer_vaddr, PageSize::Small)];
-        for map_set in [&pd.maps, &pd_extra_maps[pd]] {
-            for map in map_set {
-                let mr = all_mr_by_name[map.mr.as_str()];
-                let mut vaddr = map.vaddr;
-                for _ in 0..mr.page_count {
-                    vaddrs.push((vaddr, mr.page_size));
-                    vaddr += mr.page_size_bytes();
+        for elf in &pd_elf_files[pd_idx] {
+            let (ipc_buffer_vaddr, _) = elf
+                .find_symbol(SYMBOL_IPC_BUFFER)
+                .unwrap_or_else(|_| panic!("Could not find {}", SYMBOL_IPC_BUFFER));
+
+            // For each page, in each map determine we determine
+            // which upper directory, directory and page table is resides
+            // in, and then page sure this is set
+            vaddrs = vec![(ipc_buffer_vaddr, PageSize::Small)];
+            for map_set in [&pd.maps, &pd_extra_maps[pd]] {
+                for map in map_set {
+                    let mr = all_mr_by_name[map.mr.as_str()];
+                    let mut vaddr = map.vaddr;
+                    for _ in 0..mr.page_count {
+                        vaddrs.push((vaddr, mr.page_size));
+                        vaddr += mr.page_size_bytes();
+                    }
                 }
             }
         }
@@ -2476,7 +2490,7 @@ fn build_system(
         Arch::Riscv64 => RiscvVmAttributes::default() | RiscvVmAttributes::ExecuteNever as u64,
     };
     for pd_idx in 0..system.protection_domains.len() {
-        let (vaddr, _) = pd_elf_files[pd_idx]
+        let (vaddr, _) = &pd_elf_files[pd_idx][0]
             .find_symbol(SYMBOL_IPC_BUFFER)
             .unwrap_or_else(|_| panic!("Could not find {}", SYMBOL_IPC_BUFFER));
         system_invocations.push(Invocation::new(
@@ -2484,7 +2498,7 @@ fn build_system(
             InvocationArgs::PageMap {
                 page: ipc_buffer_objs[pd_idx].cap_addr,
                 vspace: pd_vspace_objs[pd_idx].cap_addr,
-                vaddr,
+                vaddr: *vaddr,
                 rights: Rights::Read as u64 | Rights::Write as u64,
                 attr: ipc_buffer_attr,
             },
@@ -2641,7 +2655,7 @@ fn build_system(
 
     // Set IPC buffer
     for pd_idx in 0..system.protection_domains.len() {
-        let (ipc_buffer_vaddr, _) = pd_elf_files[pd_idx]
+        let (ipc_buffer_vaddr, _) = pd_elf_files[pd_idx][0]
             .find_symbol(SYMBOL_IPC_BUFFER)
             .unwrap_or_else(|_| panic!("Could not find {}", SYMBOL_IPC_BUFFER));
         system_invocations.push(Invocation::new(
@@ -2658,13 +2672,13 @@ fn build_system(
     for pd_idx in 0..system.protection_domains.len() {
         let regs = match config.arch {
             Arch::Aarch64 => Aarch64Regs {
-                pc: pd_elf_files[pd_idx].entry,
+                pc: pd_elf_files[pd_idx][0].entry,
                 sp: config.pd_stack_top(),
                 ..Default::default()
             }
             .field_names(),
             Arch::Riscv64 => Riscv64Regs {
-                pc: pd_elf_files[pd_idx].entry,
+                pc: pd_elf_files[pd_idx][0].entry,
                 sp: config.pd_stack_top(),
                 ..Default::default()
             }
@@ -2833,9 +2847,11 @@ fn write_report<W: std::io::Write>(
         comma_sep_usize(built_system.kernel_boot_info.untyped_objects.len())
     )?;
     writeln!(buf, "\n# Loader Regions\n")?;
-    for regions in &built_system.pd_elf_regions {
-        for region in regions {
-            writeln!(buf, "       {}", region)?;
+    for pds in &built_system.pd_elf_regions {
+        for elfs in pds {
+            for region in elfs {
+                writeln!(buf, "       {}", region)?;
+            }
         }
     }
     writeln!(buf, "\n# Monitor (Initial Task) Info\n")?;
@@ -3331,18 +3347,26 @@ fn main() -> Result<(), String> {
     // Get the elf files for each pd:
     let mut pd_elf_files = Vec::with_capacity(system.protection_domains.len());
     for pd in &system.protection_domains {
-        match get_full_path(&pd.program_image, &search_paths) {
-            Some(path) => {
-                let elf = ElfFile::from_path(&path).unwrap();
-                pd_elf_files.push(elf);
-            }
-            None => {
-                return Err(format!(
-                    "unable to find program image: '{}'",
-                    pd.program_image.display()
-                ))
+        let mut per_pd_elfs: Vec<ElfFile> = Vec::new();
+        for img in &pd.program_images {
+            match get_full_path(&img, &search_paths) {
+                Some(path) => {
+                    let elf = ElfFile::from_path(&path);
+                    match elf {
+                        // don't add elf to pd elfs if can't validate ELF
+                        Ok(el) => { per_pd_elfs.push(el) }
+                        Err(e) => { return Err(e) }
+                    }
+                }
+                None => {
+                    return Err(format!(
+                        "unable to find program image: '{}'",
+                        img.display()
+                    ))
+                }
             }
         }
+        pd_elf_files.push(per_pd_elfs);
     }
 
     let mut invocation_table_size = kernel_config.minimum_page_size;
@@ -3518,7 +3542,7 @@ fn main() -> Result<(), String> {
     pd_write_symbols(
         &system.protection_domains,
         &system.channels,
-        &mut pd_elf_files,
+        pd_elf_files.as_mut_slice(),
         &built_system.pd_setvar_values,
     )?;
 
@@ -3554,9 +3578,16 @@ fn main() -> Result<(), String> {
         built_system.reserved_region.base,
         &built_system.invocation_data,
     )];
-    for (i, regions) in built_system.pd_elf_regions.iter().enumerate() {
-        for r in regions {
-            loader_regions.push((r.addr, r.data(&pd_elf_files[i])));
+
+    // for every elf FILE
+        // for every REGION in the elf file
+            // push a region with the data of that specific elf file.
+
+    for (i, pds) in built_system.pd_elf_regions.iter().enumerate() {
+        for (e, elf_regions) in pds.iter().enumerate() {
+            for r in elf_regions {
+                loader_regions.push((r.addr, r.data(&pd_elf_files[i][e])));
+            }
         }
     }
 

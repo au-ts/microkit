@@ -591,6 +591,13 @@ def build_lib_component(
     copy(link_script, dest)
     # Make output read-only
     dest.chmod(0o744)
+    
+    link_script = Path(component_name) / "microkit_secondary.ld"
+    dest = lib_dir / "microkit_secondary.ld"
+    dest.unlink(missing_ok=True)
+    copy(link_script, dest)
+    # Make output read-only
+    dest.chmod(0o744)
 
     include_dir = root_dir / "board" / board.name / config.name / "include"
     source_dir = Path(component_name) / "include"

@@ -173,13 +173,14 @@ mod protection_domain {
         )
     }
 
-    #[test]
-    fn test_duplicate_program_image() {
-        check_error(
-            "pd_duplicate_program_image.system",
-            "Error: program_image must only be specified once on element 'protection_domain': ",
-        )
-    }
+    // note this shouldn't fail now that multi elf loading is possible
+    // #[test]
+    // fn test_duplicate_program_image() {
+    //     check_error(
+    //         "pd_duplicate_program_image.system",
+    //         "Error: program_image must only be specified once on element 'protection_domain': ",
+    //     )
+    // }
 
     #[test]
     fn test_invalid_attrs() {

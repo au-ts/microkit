@@ -177,7 +177,7 @@ pub struct ProtectionDomain {
     pub passive: bool,
     pub stack_size: u64,
     pub smc: bool,
-    pub program_image: PathBuf,
+    pub program_images: Vec<PathBuf>,
     pub maps: Vec<SysMap>,
     pub irqs: Vec<SysIrq>,
     pub setvars: Vec<SysSetVar>,
@@ -481,7 +481,7 @@ impl ProtectionDomain {
         let mut setvars: Vec<SysSetVar> = Vec::new();
         let mut child_pds = Vec::new();
 
-        let mut program_image = None;
+        let mut program_images: Vec<PathBuf> = Vec::new();
         let mut virtual_machine = None;
 
         // Default to minimum priority
@@ -507,16 +507,21 @@ impl ProtectionDomain {
             match child.tag_name().name() {
                 "program_image" => {
                     check_attributes(xml_sdf, &child, &["path"])?;
-                    if program_image.is_some() {
-                        return Err(value_error(
-                            xml_sdf,
-                            node,
-                            "program_image must only be specified once".to_string(),
-                        ));
-                    }
+                    // if program_image.is_some() {
+                    //     return Err(value_error(
+                    //         xml_sdf,
+                    //         node,
+                    //         "program_image must only be specified once".to_string(),
+                    //     ));
+                    // }
+
+                    // some other checks: check that the paths aren't the same
+                    // 
 
                     let program_image_path = checked_lookup(xml_sdf, &child, "path")?;
-                    program_image = Some(Path::new(program_image_path).to_path_buf());
+                    // program_image = Some(Path::new(program_image_path).to_path_buf());
+
+                    program_images.push(Path::new(program_image_path).to_path_buf());
                 }
                 "map" => {
                     let map_max_vaddr = config.pd_map_max_vaddr(stack_size);
@@ -647,7 +652,14 @@ impl ProtectionDomain {
             }
         }
 
-        if program_image.is_none() {
+        // if program_image.is_none() {
+        //     return Err(format!(
+        //         "Error: missing 'program_image' element on protection_domain: '{}'",
+        //         name
+        //     ));
+        // }
+
+        if program_images.len() == 0 {
             return Err(format!(
                 "Error: missing 'program_image' element on protection_domain: '{}'",
                 name
@@ -667,7 +679,8 @@ impl ProtectionDomain {
             passive,
             stack_size,
             smc,
-            program_image: program_image.unwrap(),
+            // program_image: program_image.unwrap(),
+            program_images,
             maps,
             irqs,
             setvars,
