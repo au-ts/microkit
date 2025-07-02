@@ -4,7 +4,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 use core::ops::Range;
-use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use sel4_capdl_initializer_types::{Word};
 
@@ -14,15 +13,7 @@ pub type CPtr = Word;
 pub type CapSlot = usize;
 pub type CapTableEntry = (CapSlot, Cap);
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
-pub struct CapDLSpec {
-    pub objects: HashSet<NamedObject>,
-    pub irqs: HashSet<IrqEntry>,
-    pub asid_slots: HashSet<AsidSlotEntry>,
-    pub root_objects: Range<ObjectId>,
-    pub untyped_covers: HashSet<UntypedCover>
-}
-
+// CapDL Spec objects
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
 pub struct IrqEntry {
     pub irq: Word,
@@ -364,71 +355,3 @@ mod cap {
         pub object: ObjectId,
     }
 }
-
-// use std::vec::Vec;
-
-// use sel4_capdl_initializer_types::{ object::{Tcb, TcbExtraInfo}, AsidSlotEntry, CapTableEntry, Content, GetEmbeddedFrame, Indirect, IrqEntry, NamedObject, ObjectName, UntypedCover};
-// use serde::Serialize;
-
-// use crate::{elf::ElfFile};
-
-// #[derive(Debug, Serialize)]
-// pub struct CapDLSpec<'a, N, D, M> {
-//     objects: Vec<NamedObject<'a, N, D, M>>,
-//     irqs: Vec<IrqEntry>,
-//     asid_slots: Vec<AsidSlotEntry>,
-//     untyped_covers: Vec<UntypedCover>,
-// }
-
-// fn create_indirect_vec<'a, T>() -> Indirect<'a, [T]> {
-//     Indirect::from_owned(Vec::new().into_boxed_slice())
-// }
-
-// fn create_tcb<'a>() -> Tcb<'a> {
-//     Tcb {
-//         slots: create_indirect_vec(),
-//         extra: Indirect::from_owned(Box::new(TcbExtraInfo {
-//             ipc_buffer_addr: 0,
-//             affinity: 0,
-//             prio: 0,
-//             max_prio: 0,
-//             resume: true,
-//             ip: 0,
-//             sp: 0,
-//             gprs: create_indirect_vec(),
-//             master_fault_ep: None,
-//         }))
-//     }
-// }
-
-// impl<'a, N: ObjectName, D: Content, M: GetEmbeddedFrame> CapDLSpec<'a, N, D, M> {
-//     // Create a CapDL spec for the given ELF file, infer as much information as possible.
-//     pub fn from_elf(
-//         name: &String,
-//         elf: &ElfFile,
-//         infer_tcb: bool,
-//     ) -> Result<Self, String> {
-//         let mut spec = Self{
-//             objects: Vec::new(),
-//             irqs: Vec::new(),
-//             asid_slots: Vec::new(),
-//             untyped_covers: Vec::new(),
-//         };
-
-//         if infer_tcb {
-//             let mut tcb = create_tcb();
-//             let entry_point = elf.find_symbol("e_entry")?.0;
-
-//             // tcb.extra.ip = entry_point;
-//         }
-
-//         Ok(spec)
-//     }
-
-//     pub fn merge(&mut self, mut from_spec: Self) {
-//         self.objects.append(&mut from_spec.objects);
-//         self.irqs.append(&mut from_spec.irqs);
-//         self.asid_slots.append(&mut from_spec.asid_slots);
-//         self.untyped_covers.append(&mut from_spec.untyped_covers);
-//     }
-// }
