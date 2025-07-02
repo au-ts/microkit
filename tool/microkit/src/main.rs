@@ -7,10 +7,11 @@
 // we want our asserts, even if the compiler figures out they hold true already during compile-time
 #![allow(clippy::assertions_on_constants)]
 
+use capdl::CapDLSpec;
 use elf::ElfFile;
 use loader::Loader;
 use microkit_tool::{
-    elf, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError, MemoryRegion,
+    capdl, elf, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError, MemoryRegion,
     ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH,
     VM_MAX_NAME_LENGTH,
 };
@@ -3140,6 +3141,7 @@ fn main() -> Result<(), String> {
     let loader_elf_path = elf_path.join("loader.elf");
     let kernel_elf_path = elf_path.join("sel4.elf");
     let monitor_elf_path = elf_path.join("monitor.elf");
+    let capdl_init_elf_path = elf_path.join("monitor.elf");
 
     let kernel_config_path = sdk_dir
         .join("board")
@@ -3184,6 +3186,13 @@ fn main() -> Result<(), String> {
         eprintln!(
             "Error: monitor ELF '{}' does not exist",
             monitor_elf_path.display()
+        );
+        std::process::exit(1);
+    }
+    if !capdl_init_elf_path.exists() {
+        eprintln!(
+            "Error: CapDL initialiser ELF '{}' does not exist",
+            capdl_init_elf_path.display()
         );
         std::process::exit(1);
     }

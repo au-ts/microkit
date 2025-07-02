@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
+pub mod capdl;
 pub mod elf;
 pub mod loader;
 pub mod sdf;
