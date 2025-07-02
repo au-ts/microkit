@@ -7,7 +7,7 @@
 use crate::util::bytes_to_struct;
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[repr(C, packed)]
 struct ElfHeader32 {
@@ -97,6 +97,8 @@ struct ElfHeader64 {
 const ELF_MAGIC: &[u8; 4] = b"\x7FELF";
 
 pub struct ElfSegment {
+    pub p_filesz: u64,
+    pub p_offset: u64,
     pub data: Vec<u8>,
     pub phys_addr: u64,
     pub virt_addr: u64,
@@ -132,6 +134,7 @@ enum ElfSegmentAttributes {
 }
 
 pub struct ElfFile {
+    pub path: PathBuf,
     pub word_size: usize,
     pub entry: u64,
     pub segments: Vec<ElfSegment>,
@@ -216,6 +219,8 @@ impl ElfFile {
                 virt_addr: phent.vaddr,
                 loadable: phent.type_ == 1,
                 attrs: phent.flags,
+                p_filesz: phent.filesz,
+                p_offset: phent.offset
             };
 
             segments.push(segment)
@@ -295,6 +300,7 @@ impl ElfFile {
         }
 
         Ok(ElfFile {
+            path: path.to_owned(),
             word_size,
             entry,
             segments,
