@@ -33,30 +33,21 @@ fn map_intermediary_level_helper(
     cur_level: u8,
     cur_level_slot: u64,
 ) -> ObjectId {
-    match spec.get_root_object_mut(cur_level_obj_id) {
-        Some(vspace_obj) => {
-            match &mut vspace_obj.object {
-                Object::PageTable(page_table_object) => {
-                    match page_table_object
-                        .slots
-                        .iter()
-                        .find(|cte| cte.0 == cur_level_slot as usize)
-                    {
-                        Some(cte_unwrapped) => {
-                            // Next level object already created, nothing to do
-                            return cte_unwrapped.1.obj();
-                        }
-                        None => {
-                            // We need to create the next level paging structure, get out of this scope for now
-                            // so we don't get a double mutable borrow of spec when we need to insert the next level object
-                        }
-                    }
-                }
-                _ => todo!(),
+    let page_table_level_obj_wrapper = spec.get_root_object(cur_level_obj_id).unwrap();
+    if let Object::PageTable(page_table_object) = &page_table_level_obj_wrapper.object {
+        match page_table_object
+            .slots
+            .iter()
+            .find(|cte| cte.0 == cur_level_slot as usize)
+        {
+            Some(cte_unwrapped) => {
+                // Next level object already created, nothing to do here
+                return cte_unwrapped.1.obj();
             }
-        }
-        None => {
-            eprintln!("map_intermediary_level_helper(): object ID {} not found when trying to map at level #{}", cur_level_obj_id, cur_level);
+            None => {
+                // We need to create the next level paging structure, get out of this scope for now
+                // so we don't get a double mutable borrow of spec when we need to insert the next level object
+            }
         }
     }
 
@@ -71,54 +62,25 @@ fn map_intermediary_level_helper(
         object: Object::PageTable(next_level_inner_obj),
     };
     let next_level_obj_id = spec.add_root_object(next_level_object);
+    let next_level_cap = Cap::PageTable(cap::PageTable {
+        object: next_level_obj_id,
+    });
 
-    // @billn revisit, looks a bit strange, refactor to insert_frame_cap_into_level()
-    match spec.get_root_object_mut(cur_level_obj_id) {
-        Some(vspace_obj) => {
-            match &mut vspace_obj.object {
-                Object::PageTable(page_table_object) => {
-                    match page_table_object
-                        .slots
-                        .iter()
-                        .find(|cte| cte.0 == cur_level_slot as usize)
-                    {
-                        Some(_) => {}
-                        None => {
-                            // Then create a Cap to it and insert it into the required slot
-                            let next_level_cap = Cap::PageTable(cap::PageTable {
-                                object: next_level_obj_id,
-                            });
-                            page_table_object
-                                .slots
-                                .push((cur_level_slot as usize, next_level_cap));
-                        }
-                    }
-                }
-                _ => todo!(),
-            }
-        }
-        None => todo!(),
-    }
+    // Then insert into the correct slot at the current level, return and continue mapping
+    insert_cap_into_page_table_level(spec, cur_level_obj_id, cur_level_slot, next_level_cap);
 
     next_level_obj_id
 }
 
-fn insert_frame_cap_into_level(
+fn insert_cap_into_page_table_level(
     spec: &mut CapDLSpec,
-    last_level_paging_obj_id: ObjectId,
-    last_level_slot: u64,
-    frame_cap: Cap,
+    cur_level_obj_id: ObjectId,
+    cur_level_slot: u64,
+    cap: Cap,
 ) {
-    match spec.get_root_object_mut(last_level_paging_obj_id) {
-        Some(last_level_paging_obj) => match &mut last_level_paging_obj.object {
-            Object::PageTable(last_level_paging_inner_obj) => {
-                last_level_paging_inner_obj
-                    .slots
-                    .push((last_level_slot as usize, frame_cap));
-            }
-            _ => todo!(),
-        },
-        None => todo!(),
+    let page_table_level_obj_wrapper = spec.get_root_object_mut(cur_level_obj_id).unwrap();
+    if let Object::PageTable(page_table_object) = &mut page_table_level_obj_wrapper.object {
+        page_table_object.slots.push((cur_level_slot as usize, cap));
     }
 }
 
@@ -137,7 +99,7 @@ impl ArchMethods for X86_64 {
     fn map_page(
         spec: &mut CapDLSpec,
         pd_name: &str,
-        vspace_id: ObjectId,
+        vspace_obj_id: ObjectId,
         frame_cap: Cap,
         frame_size: PageSize,
         vaddr: u64,
@@ -154,12 +116,12 @@ impl ArchMethods for X86_64 {
 
                 // @billn handle huge page
                 let pdpt_obj_id: ObjectId =
-                    map_intermediary_level_helper(spec, pd_name, "pdpt", vspace_id, 0, pml4_slot);
+                    map_intermediary_level_helper(spec, pd_name, "pdpt", vspace_obj_id, 0, pml4_slot);
                 let pd_obj_id: ObjectId =
                     map_intermediary_level_helper(spec, pd_name, "pd", pdpt_obj_id, 1, pdpt_slot);
                 let pt_obj_id: ObjectId =
                     map_intermediary_level_helper(spec, pd_name, "pt", pd_obj_id, 2, pd_slot);
-                insert_frame_cap_into_level(spec, pt_obj_id, pt_slot, frame_cap);
+                insert_cap_into_page_table_level(spec, pt_obj_id, pt_slot, frame_cap);
             }
             _ => {
                 eprintln!(
