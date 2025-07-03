@@ -6,6 +6,6 @@
 
 pub mod capdl;
 mod spec;
-mod page_collection;
+mod memory;
 
 pub use self::capdl::*;

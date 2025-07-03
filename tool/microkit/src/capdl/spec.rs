@@ -259,7 +259,7 @@ pub mod object {
     }
 }
 
-mod cap {
+pub mod cap {
     use super::*;
 
     #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
