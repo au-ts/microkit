@@ -12,7 +12,10 @@ use crate::{
 };
 
 pub trait ArchMethods {
+    // Create an architecture specific VSpace object for insertion into a CapDL spec.
     fn vspace(pd_name: &str) -> NamedObject;
+
+    // Map the given frame into the given VSpace object ID.
     fn map_page(
         spec: &mut CapDLSpec,
         pd_name: &str,
@@ -49,6 +52,16 @@ fn map_intermediary_level_helper(
                 // so we don't get a double mutable borrow of spec when we need to insert the next level object
             }
         }
+    } else {
+        eprintln!(
+            "CapDL spec up to point of error: {}",
+            serde_json::to_string_pretty(spec).unwrap()
+        );
+        eprintln!(
+            "microkit: capdl: error: map_intermediary_level_helper() received a non-Page Table cap: {}, for mapping at level {}, to pd {}.",
+            cur_level_obj_id, cur_level, pd_name
+        );
+        std::process::exit(1);
     }
 
     // Next level object not already created, create it.
@@ -67,7 +80,7 @@ fn map_intermediary_level_helper(
     });
 
     // Then insert into the correct slot at the current level, return and continue mapping
-    insert_cap_into_page_table_level(spec, cur_level_obj_id, cur_level_slot, next_level_cap);
+    insert_cap_into_page_table_level(spec, cur_level_obj_id, cur_level, cur_level_slot, next_level_cap);
 
     next_level_obj_id
 }
@@ -75,12 +88,44 @@ fn map_intermediary_level_helper(
 fn insert_cap_into_page_table_level(
     spec: &mut CapDLSpec,
     cur_level_obj_id: ObjectId,
+    cur_level: u8,
     cur_level_slot: u64,
     cap: Cap,
 ) {
+    // @billn revisit the error handling, not very transparent
     let page_table_level_obj_wrapper = spec.get_root_object_mut(cur_level_obj_id).unwrap();
     if let Object::PageTable(page_table_object) = &mut page_table_level_obj_wrapper.object {
-        page_table_object.slots.push((cur_level_slot as usize, cap));
+        // Sanity check that this slot is free
+        match page_table_object
+            .slots
+            .iter()
+            .find(|cte| cte.0 == cur_level_slot as usize)
+        {
+            Some(cte_unwrapped) => {
+                page_table_object.slots.push((cur_level_slot as usize, cap));
+            }
+            None => {
+                eprintln!(
+                    "CapDL spec up to point of error: {}",
+                    serde_json::to_string_pretty(spec).unwrap()
+                );
+                eprintln!(
+                    "microkit: capdl: error: insert_cap_into_page_table_level() slot {} at level {} already filled",
+                    cur_level_slot, cur_level
+                );
+                std::process::exit(1);
+            }
+        }
+    } else {
+        eprintln!(
+            "CapDL spec up to point of error: {}",
+            serde_json::to_string_pretty(spec).unwrap()
+        );
+        eprintln!(
+            "microkit: capdl: error: insert_cap_into_page_table_level() received a non-Page Table cap: {}",
+            cur_level_obj_id
+        );
+        std::process::exit(1);
     }
 }
 
@@ -121,9 +166,13 @@ impl ArchMethods for X86_64 {
                     map_intermediary_level_helper(spec, pd_name, "pd", pdpt_obj_id, 1, pdpt_slot);
                 let pt_obj_id: ObjectId =
                     map_intermediary_level_helper(spec, pd_name, "pt", pd_obj_id, 2, pd_slot);
-                insert_cap_into_page_table_level(spec, pt_obj_id, pt_slot, frame_cap);
+                insert_cap_into_page_table_level(spec, pt_obj_id, 3, pt_slot, frame_cap);
             }
             _ => {
+                eprintln!(
+                    "CapDL spec up to point of error: {}",
+                    serde_json::to_string_pretty(spec).unwrap()
+                );
                 eprintln!(
                     "microkit: capdl: error: ArchMethods::map_page() received a non-Frame cap: {:?}, for mapping at 0x{:x}, to pd {}",
                     frame_cap, vaddr, pd_name
