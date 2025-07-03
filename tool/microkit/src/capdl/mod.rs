@@ -7,5 +7,6 @@
 pub mod capdl;
 mod spec;
 mod memory;
+mod util;
 
 pub use self::capdl::*;

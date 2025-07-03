@@ -4,8 +4,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 use core::ops::Range;
+use sel4_capdl_initializer_types::Word;
 use serde::{Deserialize, Serialize};
-use sel4_capdl_initializer_types::{Word};
 
 pub type ObjectId = usize;
 pub type Badge = Word;
