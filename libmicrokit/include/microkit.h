@@ -1,5 +1,6 @@
 /*
  * Copyright 2021, Breakaway Consulting Pty. Ltd.
+ * Copyright 2025, UNSW
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -110,7 +111,13 @@ static inline void microkit_pd_restart(microkit_child pd, seL4_Word entry_point)
 {
     seL4_Error err;
     seL4_UserContext ctxt = {0};
+#if defined(CONFIG_ARCH_X86_64)
+    ctxt.rip = entry_point;
+#elif defined(CONFIG_ARCH_AARCH64) || defined(CONFIG_ARCH_RISCV)
     ctxt.pc = entry_point;
+#else
+    #error "Unsupported architecture for 'microkit_pd_restart'"
+#endif
     err = seL4_TCB_WriteRegisters(
               BASE_TCB_CAP + pd,
               seL4_True,
