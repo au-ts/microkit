@@ -145,6 +145,7 @@ impl ArchMethods for X86_64 {
                 let frame_obj_id = frame_cap.obj();
 
                 // Get slot indexes for the 4 levels of the page table
+                // @billn use get_arch_n_paging
                 let pml4_slot = (vaddr >> (12 + 9 + 9 + 9)) & ((1 << 9) - 1);
                 let pdpt_slot = (vaddr >> (12 + 9 + 9)) & ((1 << 9) - 1);
                 let pd_slot = (vaddr >> (12 + 9)) & ((1 << 9) - 1);
