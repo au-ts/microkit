@@ -18,7 +18,10 @@ use crate::{
             AsidSlotEntry, Cap, FileContentRange, Fill, FillEntry, FrameInit, IrqEntry,
             NamedObject, Object, ObjectId, UntypedCover,
         },
-        util::{capdl_util_make_frame_cap, capdl_util_make_frame_obj},
+        util::{
+            capdl_util_get_vspace_id_from_tcb_id, capdl_util_make_frame_cap,
+            capdl_util_make_frame_obj,
+        },
     },
     elf::ElfFile,
     sdf::SystemDescription,
@@ -35,7 +38,6 @@ pub struct CapDLSpec {
     pub untyped_covers: Vec<UntypedCover>,
 }
 
-// impl<'a, N: ObjectName, D: Content, M: GetEmbeddedFrame> CapDLSpec<'a, N, D, M> {
 impl CapDLSpec {
     pub fn new() -> Self {
         Self {
@@ -76,12 +78,11 @@ impl CapDLSpec {
     /// Returns the object ID of the TCB
     ///
     pub fn add_elf_to_spec(&mut self, pd_name: &str, elf: &ElfFile) -> Result<ObjectId, String> {
-        let vspace_obj = X86_64::vspace(pd_name);
-        let vspace_id = self.add_root_object(vspace_obj);
+        let vspace_id = X86_64::create_vspace(self, pd_name);
         let vspace_cap = Cap::PageTable(cap::PageTable { object: vspace_id });
 
         // For each loadable segment in the ELF, map it into the address space of this PD.
-        let mut frame_number = 0; // For object naming purpose only.
+        let mut frame_sequence = 0; // For object naming purpose only.
         for segment in elf.loadable_segments() {
             if segment.data.len() == 0 {
                 continue;
@@ -138,7 +139,7 @@ impl CapDLSpec {
                 let frame_obj_id = capdl_util_make_frame_obj(
                     self,
                     frame_fill,
-                    &format!("{}_elf_{}", pd_name, frame_number),
+                    &format!("{}_elf_{}", pd_name, frame_sequence),
                 );
                 let frame_cap = capdl_util_make_frame_cap(
                     frame_obj_id,
@@ -148,11 +149,21 @@ impl CapDLSpec {
                     true,
                 );
 
-                // @billn print error detail
-                memory::X86_64::map_page(self, pd_name, vspace_id, frame_cap, page_size, cur_vaddr)?;
-
-                frame_number += 1;
-                cur_vaddr += page_size_bytes;
+                // @billn make arch agnostic
+                match memory::X86_64::map_page(
+                    self, pd_name, vspace_id, frame_cap, page_size, cur_vaddr,
+                ) {
+                    Ok(_) => {
+                        frame_sequence += 1;
+                        cur_vaddr += page_size_bytes;
+                    }
+                    Err(map_err_reason) => {
+                        return Err(format!(
+                            "add_elf_to_spec(): failed to map segment page to ELF because: {}",
+                            map_err_reason
+                        ))
+                    }
+                };
             }
         }
 
@@ -188,9 +199,9 @@ impl CapDLSpec {
 /// Build a CapDL Spec according to the System Description File.
 fn build_capdl_spec(
     config: &Config,
-    pd_elf_files: &Vec<ElfFile>,
     capdl_initialiser_elf: &ElfFile,
     monitor_elf: &ElfFile,
+    pd_elf_files: &Vec<ElfFile>,
     system: &SystemDescription,
 ) -> Result<CapDLSpec, String> {
     let mut spec = CapDLSpec::new();
@@ -199,10 +210,42 @@ fn build_capdl_spec(
     // Step 1. Create the monitor's spec.
     // *********************************
     let monitor_tcb_obj_id = spec.add_elf_to_spec("monitor", monitor_elf)?; // @billn check error
+    let monitor_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec, monitor_tcb_obj_id);
 
-    // Create a 4K stack frame
+    // Create and map a 4K stack frame
+    let mon_stack_frame_obj_id = capdl_util_make_frame_obj(
+        &mut spec,
+        FrameInit::Fill(Fill {
+            entries: [].to_vec(),
+        }),
+        "monitor_stack",
+    );
+    let mon_stack_frame_cap =
+        capdl_util_make_frame_cap(mon_stack_frame_obj_id, true, true, false, true);
 
-    // `add_elf_to_spec` doesn't fill all the details in the TCB as most details come from the SDF, we
+    // @billn make arch agnostic
+    let sp = 0x7ffffffff000;
+    match memory::X86_64::map_page(
+        &mut spec,
+        "monitor",
+        monitor_vspace_obj_id,
+        mon_stack_frame_cap,
+        PageSize::Small,
+        sp,
+    ) {
+        Ok(_) => {}
+        Err(map_err_reason) => {
+            return Err(format!(
+                "build_capdl_spec(): failed to map stack frame to monitor because: {}",
+                map_err_reason
+            ))
+        }
+    };
+
+    // // Set TCB parameters
+    // monitor_tcb.unwrap().extra.sp = sp;
+
+    // `add_elf_to_spec()` doesn't fill all the details in the TCB as most details come from the SDF, we
     // now fill them in.
 
     // *********************************

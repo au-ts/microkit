@@ -50,3 +50,26 @@ pub fn capdl_util_make_frame_cap(
         cached,
     })
 }
+
+pub fn capdl_util_get_vspace_id_from_tcb_id(spec: &CapDLSpec, tcb_obj_id: ObjectId) -> ObjectId {
+    let tcb = match spec.get_root_object(tcb_obj_id) {
+        Some(named_object) => {
+            if let Object::Tcb(tcb) = &named_object.object {
+                Some(tcb)
+            } else {
+                unreachable!("internal bug: get_vspace_id_from_tcb_id() got a non TCB object ID.");
+            }
+        }
+        None => {
+            unreachable!();
+        }
+    };
+    let vspace_cap = tcb.unwrap().slots.iter().find(|&cte| {
+        if let Cap::PageTable(_) = &cte.1 {
+            true
+        } else {
+            false
+        }
+    });
+    vspace_cap.unwrap().1.obj()
+}
