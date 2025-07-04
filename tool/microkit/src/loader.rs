@@ -229,6 +229,7 @@ impl<'a> Loader<'a> {
                 kernel_first_vaddr.unwrap(),
                 kernel_first_paddr.unwrap(),
             ),
+            Arch::X86_64 => unreachable!("x86_64 does not support legacy microkit")
         };
 
         let image_segment = elf

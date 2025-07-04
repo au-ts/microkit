@@ -69,9 +69,10 @@ pub struct Config {
     pub arm_smc: Option<bool>,
     /// RISC-V specific, what kind of virtual memory system (e.g Sv39)
     pub riscv_pt_levels: Option<RiscvVirtualMemory>,
+    /// x86 specific, user context size
+    pub x86_xsave_size: Option<usize>,
     pub invocations_labels: serde_json::Value,
-    pub device_regions: Vec<PlatformConfigRegion>,
-    pub normal_regions: Vec<PlatformConfigRegion>,
+    pub platform_config: Option<PlatformConfig>
 }
 
 impl Config {
@@ -86,25 +87,26 @@ impl Config {
                 false => 0x800000000000,
             },
             Arch::Riscv64 => 0x0000003ffffff000,
+            Arch::X86_64 => 0x7ffffffff000,
         }
     }
 
     pub fn virtual_base(&self) -> u64 {
-        // These match the PPTR_BASE define in the kernel source.
         match self.arch {
             Arch::Aarch64 => match self.hypervisor {
                 true => 0x0000008000000000,
-                false => 0xffffff8000000000,
-            },
+                false => u64::pow(2, 64) - u64::pow(2, 39),
+            }
             Arch::Riscv64 => match self.riscv_pt_levels.unwrap() {
-                RiscvVirtualMemory::Sv39 => 0xffffffc000000000,
-            },
+                RiscvVirtualMemory::Sv39 => u64::pow(2, 64) - u64::pow(2,38),
+            }
+            Arch::X86_64 => u64::pow(2, 64) - u64::pow(2,39),
         }
     }
 
     pub fn page_sizes(&self) -> [u64; 2] {
         match self.arch {
-            Arch::Aarch64 | Arch::Riscv64 => [0x1000, 0x200_000],
+            Arch::Aarch64 | Arch::Riscv64 | Arch::X86_64 => [0x1000, 0x200_000],
         }
     }
 
@@ -153,6 +155,7 @@ impl Config {
 pub enum Arch {
     Aarch64,
     Riscv64,
+    X86_64,
 }
 
 /// RISC-V supports multiple virtual memory systems and so we use this enum
@@ -199,6 +202,14 @@ impl ObjectType {
                     true => Some(11),
                     false => Some(10),
                 },
+                Arch::X86_64 => {
+                    // matches seL4/libsel4/sel4_arch_include/x86_64/sel4/sel4_arch/constants.h
+                    if config.x86_xsave_size.unwrap() >= 832 {
+                        Some(12)
+                    } else {
+                        Some(11)
+                    }
+                }
             },
             ObjectType::Endpoint => Some(4),
             ObjectType::Notification => Some(6),
@@ -214,7 +225,7 @@ impl ObjectType {
                     },
                     false => Some(12),
                 },
-                Arch::Riscv64 => Some(12),
+                _ => Some(12),
             },
             ObjectType::PageTable => Some(12),
             ObjectType::HugePage => Some(30),
@@ -267,18 +278,22 @@ impl ObjectType {
             ObjectType::VSpace => match config.arch {
                 Arch::Aarch64 => 8,
                 Arch::Riscv64 => 10,
+                Arch::X86_64 => unreachable!("legacy")
             },
             ObjectType::SmallPage => match config.arch {
                 Arch::Aarch64 => 9,
                 Arch::Riscv64 => 8,
+                Arch::X86_64 => unreachable!("legacy")
             },
             ObjectType::LargePage => match config.arch {
                 Arch::Aarch64 => 10,
                 Arch::Riscv64 => 9,
+                Arch::X86_64 => unreachable!("legacy")
             },
             ObjectType::PageTable => match config.arch {
                 Arch::Aarch64 => 11,
                 Arch::Riscv64 => 10,
+                Arch::X86_64 => unreachable!("legacy")
             },
             ObjectType::Vcpu => match config.arch {
                 Arch::Aarch64 => 12,
@@ -355,6 +370,7 @@ pub fn default_vm_attr(config: &Config) -> u64 {
     match config.arch {
         Arch::Aarch64 => ArmVmAttributes::default(),
         Arch::Riscv64 => RiscvVmAttributes::default(),
+        Arch::X86_64 => unreachable!("legacy")
     }
 }
 
@@ -1146,19 +1162,23 @@ impl InvocationArgs {
             InvocationArgs::AsidPoolAssign { .. } => match config.arch {
                 Arch::Aarch64 => InvocationLabel::ARMASIDPoolAssign,
                 Arch::Riscv64 => InvocationLabel::RISCVASIDPoolAssign,
+                Arch::X86_64 => unreachable!("legacy")
             },
             InvocationArgs::IrqControlGetTrigger { .. } => match config.arch {
                 Arch::Aarch64 => InvocationLabel::ARMIRQIssueIRQHandlerTrigger,
                 Arch::Riscv64 => InvocationLabel::RISCVIRQIssueIRQHandlerTrigger,
+                Arch::X86_64 => unreachable!("legacy")
             },
             InvocationArgs::IrqHandlerSetNotification { .. } => InvocationLabel::IRQSetIRQHandler,
             InvocationArgs::PageTableMap { .. } => match config.arch {
                 Arch::Aarch64 => InvocationLabel::ARMPageTableMap,
                 Arch::Riscv64 => InvocationLabel::RISCVPageTableMap,
+                Arch::X86_64 => unreachable!("legacy")
             },
             InvocationArgs::PageMap { .. } => match config.arch {
                 Arch::Aarch64 => InvocationLabel::ARMPageMap,
                 Arch::Riscv64 => InvocationLabel::RISCVPageMap,
+                Arch::X86_64 => unreachable!("legacy")
             },
             InvocationArgs::CnodeCopy { .. } => InvocationLabel::CNodeCopy,
             InvocationArgs::CnodeMint { .. } => InvocationLabel::CNodeMint,

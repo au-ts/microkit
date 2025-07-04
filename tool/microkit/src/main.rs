@@ -10,6 +10,7 @@
 use capdl::CapDLSpec;
 use elf::ElfFile;
 use loader::Loader;
+use microkit_tool::capdl::build_capdl_spec;
 use microkit_tool::{
     capdl, elf, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError, MemoryRegion,
     ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH,
@@ -544,10 +545,10 @@ fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile) -> KernelPa
     let mut device_memory = DisjointMemoryRegion::default();
     let mut normal_memory = DisjointMemoryRegion::default();
 
-    for r in &kernel_config.device_regions {
+    for r in &kernel_config.platform_config.as_ref().unwrap().devices {
         device_memory.insert_region(r.start, r.end);
     }
-    for r in &kernel_config.normal_regions {
+    for r in &kernel_config.platform_config.as_ref().unwrap().memory {
         normal_memory.insert_region(r.start, r.end);
     }
 
@@ -606,6 +607,7 @@ fn get_arch_n_paging(config: &Config, region: MemoryRegion) -> u64 {
                 get_n_paging(region, LVL2_INDEX_OFFSET) + get_n_paging(region, LVL1_INDEX_OFFSET)
             }
         },
+        Arch::X86_64 => todo!()
     }
 }
 
@@ -697,6 +699,7 @@ fn emulate_kernel_boot(
     let max_bits = match config.arch {
         Arch::Aarch64 => 47,
         Arch::Riscv64 => 38,
+        Arch::X86_64 => unreachable!("x86_64 does not support legacy Microkit"),
     };
     let device_regions: Vec<MemoryRegion> = [
         reserved_region.aligned_power_of_two_regions(config, max_bits),
@@ -1102,6 +1105,7 @@ fn build_system(
     let bootstrap_pt_attr = match config.arch {
         Arch::Aarch64 => ArmVmAttributes::default(),
         Arch::Riscv64 => RiscvVmAttributes::default(),
+        Arch::X86_64 => unreachable!("x86_64 does not support legacy Microkit"),
     };
     let mut pt_map_invocation = Invocation::new(
         config,
@@ -1128,6 +1132,7 @@ fn build_system(
     let bootstrap_page_attr = match config.arch {
         Arch::Aarch64 => ArmVmAttributes::default() | ArmVmAttributes::ExecuteNever as u64,
         Arch::Riscv64 => RiscvVmAttributes::default() | RiscvVmAttributes::ExecuteNever as u64,
+        Arch::X86_64 => unreachable!("x86_64 does not support legacy Microkit"),
     };
     let mut map_invocation = Invocation::new(
         config,
@@ -1543,6 +1548,7 @@ fn build_system(
                     }
                 }
                 Arch::Riscv64 => {}
+                Arch::X86_64 => unreachable!("x86_64 does not support legacy Microkit"),
             }
 
             directory_vaddrs.insert(util::mask_bits(vaddr, 12 + 9 + 9));
@@ -1809,6 +1815,7 @@ fn build_system(
                 let mut attrs = match config.arch {
                     Arch::Aarch64 => ArmVmAttributes::ParityEnabled as u64,
                     Arch::Riscv64 => 0,
+                    Arch::X86_64 => unreachable!("x86_64 does not support legacy Microkit"),
                 };
                 if mp.perms & SysMapPerms::Read as u8 != 0 {
                     rights |= Rights::Read as u64;
@@ -1820,12 +1827,14 @@ fn build_system(
                     match config.arch {
                         Arch::Aarch64 => attrs |= ArmVmAttributes::ExecuteNever as u64,
                         Arch::Riscv64 => attrs |= RiscvVmAttributes::ExecuteNever as u64,
+                        Arch::X86_64 => unreachable!("x86_64 does not support legacy Microkit"),
                     }
                 }
                 if mp.cached {
                     match config.arch {
                         Arch::Aarch64 => attrs |= ArmVmAttributes::Cacheable as u64,
                         Arch::Riscv64 => {}
+                        Arch::X86_64 => unreachable!("x86_64 does not support legacy Microkit"),
                     }
                 }
 
@@ -1895,6 +1904,7 @@ fn build_system(
             let mut attrs = match config.arch {
                 Arch::Aarch64 => ArmVmAttributes::ParityEnabled as u64,
                 Arch::Riscv64 => 0,
+                Arch::X86_64 => unreachable!("x86_64 does not support legacy Microkit"),
             };
             if mp.perms & SysMapPerms::Read as u8 != 0 {
                 rights |= Rights::Read as u64;
@@ -1906,12 +1916,14 @@ fn build_system(
                 match config.arch {
                     Arch::Aarch64 => attrs |= ArmVmAttributes::ExecuteNever as u64,
                     Arch::Riscv64 => attrs |= RiscvVmAttributes::ExecuteNever as u64,
+                    Arch::X86_64 => unreachable!("x86_64 does not support legacy Microkit"),
                 }
             }
             if mp.cached {
                 match config.arch {
                     Arch::Aarch64 => attrs |= ArmVmAttributes::Cacheable as u64,
                     Arch::Riscv64 => {}
+                    Arch::X86_64 => unreachable!("x86_64 does not support legacy Microkit"),
                 }
             }
 
@@ -2475,6 +2487,7 @@ fn build_system(
     let ipc_buffer_attr = match config.arch {
         Arch::Aarch64 => ArmVmAttributes::default() | ArmVmAttributes::ExecuteNever as u64,
         Arch::Riscv64 => RiscvVmAttributes::default() | RiscvVmAttributes::ExecuteNever as u64,
+        Arch::X86_64 => unreachable!("x86_64 does not support legacy Microkit"),
     };
     for pd_idx in 0..system.protection_domains.len() {
         let (vaddr, _) = pd_elf_files[pd_idx]
@@ -2659,17 +2672,18 @@ fn build_system(
     for pd_idx in 0..system.protection_domains.len() {
         let regs = match config.arch {
             Arch::Aarch64 => Aarch64Regs {
-                pc: pd_elf_files[pd_idx].entry,
-                sp: config.pd_stack_top(),
-                ..Default::default()
-            }
-            .field_names(),
+                        pc: pd_elf_files[pd_idx].entry,
+                        sp: config.pd_stack_top(),
+                        ..Default::default()
+                    }
+                    .field_names(),
             Arch::Riscv64 => Riscv64Regs {
-                pc: pd_elf_files[pd_idx].entry,
-                sp: config.pd_stack_top(),
-                ..Default::default()
-            }
-            .field_names(),
+                        pc: pd_elf_files[pd_idx].entry,
+                        sp: config.pd_stack_top(),
+                        ..Default::default()
+                    }
+                    .field_names(),
+            Arch::X86_64 => unreachable!("x86_64 does not support legacy Microkit"),
         };
 
         system_invocations.push(Invocation::new(
@@ -2929,6 +2943,7 @@ struct Args<'a> {
     report: &'a str,
     output: &'a str,
     search_paths: Vec<&'a String>,
+    use_capdl: bool,
 }
 
 impl<'a> Args<'a> {
@@ -2941,6 +2956,7 @@ impl<'a> Args<'a> {
         let mut system = None;
         let mut board = None;
         let mut config = None;
+        let mut use_capdl = true;
 
         if args.len() <= 1 {
             print_usage();
@@ -2996,6 +3012,9 @@ impl<'a> Args<'a> {
                         std::process::exit(1);
                     }
                 }
+                "--legacy" => {
+                    use_capdl = false;
+                }
                 "--search-path" => {
                     in_search_path = true;
                 }
@@ -3045,6 +3064,7 @@ impl<'a> Args<'a> {
         }
 
         Args {
+            use_capdl,
             system: system.unwrap(),
             board: board.unwrap(),
             config: config.unwrap(),
@@ -3141,7 +3161,8 @@ fn main() -> Result<(), String> {
     let loader_elf_path = elf_path.join("loader.elf");
     let kernel_elf_path = elf_path.join("sel4.elf");
     let monitor_elf_path = elf_path.join("monitor.elf");
-    let capdl_init_elf_path = elf_path.join("monitor.elf");
+    let capdl_monitor_elf_path = elf_path.join("capdl_monitor.elf");
+    let capdl_init_elf_path = elf_path.join("capdl_initialiser.elf"); 
 
     let kernel_config_path = sdk_dir
         .join("board")
@@ -3168,7 +3189,8 @@ fn main() -> Result<(), String> {
         );
         std::process::exit(1);
     }
-    if !loader_elf_path.exists() {
+    // @billn make more user frenly by announcing that the platform does not support non-capdl loading rather than the onminous error
+    if !args.use_capdl && !loader_elf_path.exists() {
         eprintln!(
             "Error: loader ELF '{}' does not exist",
             loader_elf_path.display()
@@ -3182,9 +3204,16 @@ fn main() -> Result<(), String> {
         );
         std::process::exit(1);
     }
-    if !monitor_elf_path.exists() {
+    if !args.use_capdl && !monitor_elf_path.exists() {
         eprintln!(
             "Error: monitor ELF '{}' does not exist",
+            monitor_elf_path.display()
+        );
+        std::process::exit(1);
+    }
+    if args.use_capdl && !capdl_monitor_elf_path.exists() {
+        eprintln!(
+            "Error: CapDL monitor ELF '{}' does not exist",
             monitor_elf_path.display()
         );
         std::process::exit(1);
@@ -3203,14 +3232,14 @@ fn main() -> Result<(), String> {
         );
         std::process::exit(1);
     }
-    if !kernel_platform_config_path.exists() {
+    if !args.use_capdl && !kernel_platform_config_path.exists() {
         eprintln!(
             "Error: kernel platform configuration file '{}' does not exist",
             kernel_platform_config_path.display()
         );
         std::process::exit(1);
     }
-    if !invocations_all_path.exists() {
+    if !args.use_capdl && !invocations_all_path.exists() {
         eprintln!(
             "Error: invocations JSON file '{}' does not exist",
             invocations_all_path.display()
@@ -3232,8 +3261,10 @@ fn main() -> Result<(), String> {
     let kernel_config_json: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(kernel_config_path).unwrap()).unwrap();
 
-    let kernel_platform_config: PlatformConfig =
-        serde_json::from_str(&fs::read_to_string(kernel_platform_config_path).unwrap()).unwrap();
+    let mut kernel_platform_config: Option<PlatformConfig> = None;
+    if !args.use_capdl {
+        kernel_platform_config = Some(serde_json::from_str(&fs::read_to_string(kernel_platform_config_path).unwrap()).unwrap());
+    }
 
     let invocations_labels: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(invocations_all_path).unwrap()).unwrap();
@@ -3241,26 +3272,27 @@ fn main() -> Result<(), String> {
     let arch = match json_str(&kernel_config_json, "SEL4_ARCH")? {
         "aarch64" => Arch::Aarch64,
         "riscv64" => Arch::Riscv64,
+        "x86_64" => Arch::X86_64,
         _ => panic!("Unsupported kernel config architecture"),
     };
 
     let hypervisor = match arch {
         Arch::Aarch64 => json_str_as_bool(&kernel_config_json, "ARM_HYPERVISOR_SUPPORT")?,
-        // Hypervisor mode is not available on RISC-V
-        Arch::Riscv64 => false,
+        // Hypervisor mode is not available on RISC-V and x86_64
+        _ => false,
     };
 
     let arm_pa_size_bits = match arch {
         Arch::Aarch64 => {
-            if json_str_as_bool(&kernel_config_json, "ARM_PA_SIZE_BITS_40")? {
-                Some(40)
-            } else if json_str_as_bool(&kernel_config_json, "ARM_PA_SIZE_BITS_44")? {
-                Some(44)
-            } else {
-                panic!("Expected ARM platform to have 40 or 44 physical address bits")
+                        if json_str_as_bool(&kernel_config_json, "ARM_PA_SIZE_BITS_40")? {
+                            Some(40)
+                        } else if json_str_as_bool(&kernel_config_json, "ARM_PA_SIZE_BITS_44")? {
+                            Some(44)
+                        } else {
+                            panic!("Expected ARM platform to have 40 or 44 physical address bits")
+                        }
             }
-        }
-        Arch::Riscv64 => None,
+        _ => None,
     };
 
     let arm_smc = match arch {
@@ -3268,9 +3300,12 @@ fn main() -> Result<(), String> {
         _ => None,
     };
 
+    let x86_xsave_size = None; // @billn fix
+
     let kernel_frame_size = match arch {
         Arch::Aarch64 => 1 << 12,
         Arch::Riscv64 => 1 << 21,
+        Arch::X86_64 => 1 << 12,
     };
 
     let kernel_config = Config {
@@ -3288,9 +3323,9 @@ fn main() -> Result<(), String> {
         arm_pa_size_bits,
         arm_smc,
         riscv_pt_levels: Some(RiscvVirtualMemory::Sv39),
+        x86_xsave_size,
         invocations_labels,
-        device_regions: kernel_platform_config.devices,
-        normal_regions: kernel_platform_config.memory,
+        platform_config: kernel_platform_config,
     };
 
     if let Arch::Aarch64 = kernel_config.arch {
@@ -3321,16 +3356,17 @@ fn main() -> Result<(), String> {
     };
 
     let kernel_elf = ElfFile::from_path(&kernel_elf_path)?;
-    let mut monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
+    // let mut monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
+    let capdl_monitor_elf = ElfFile::from_path(&capdl_monitor_elf_path)?;
 
-    if monitor_elf.segments.iter().filter(|s| s.loadable).count() > 1 {
-        eprintln!(
-            "Monitor ({}) has {} segments, it must only have one",
-            monitor_elf_path.display(),
-            monitor_elf.segments.len()
-        );
-        std::process::exit(1);
-    }
+    // if monitor_elf.segments.iter().filter(|s| s.loadable).count() > 1 {
+    //     eprintln!(
+    //         "Monitor ({}) has {} segments, it must only have one",
+    //         monitor_elf_path.display(),
+    //         monitor_elf.segments.len()
+    //     );
+    //     std::process::exit(1);
+    // }
 
     let mut search_paths = vec![std::env::current_dir().unwrap()];
     for path in args.search_paths {
@@ -3357,228 +3393,235 @@ fn main() -> Result<(), String> {
     let mut invocation_table_size = kernel_config.minimum_page_size;
     let mut system_cnode_size = 2;
 
-    let mut built_system;
-    loop {
-        built_system = build_system(
-            &kernel_config,
-            &pd_elf_files,
-            &kernel_elf,
-            &monitor_elf,
-            &system,
-            invocation_table_size,
-            system_cnode_size,
-        )?;
-        println!("BUILT: system_cnode_size={} built_system.number_of_system_caps={} invocation_table_size={} built_system.invocation_data_size={}",
-                 system_cnode_size, built_system.number_of_system_caps, invocation_table_size, built_system.invocation_data_size);
+    if args.use_capdl {
+        let spec = build_capdl_spec(&kernel_config, &capdl_init_elf_path, &capdl_monitor_elf, &pd_elf_files, &system);
+        println!("{}", serde_json::to_string_pretty(&spec).unwrap());
 
-        if built_system.number_of_system_caps <= system_cnode_size
-            && built_system.invocation_data_size <= invocation_table_size
-        {
-            break;
-        }
+        Ok(())
+    } else {
+        // let mut built_system;
+        // loop {
+        //     built_system = build_system(
+        //         &kernel_config,
+        //         &pd_elf_files,
+        //         &kernel_elf,
+        //         &monitor_elf,
+        //         &system,
+        //         invocation_table_size,
+        //         system_cnode_size,
+        //     )?;
+        //     println!("BUILT: system_cnode_size={} built_system.number_of_system_caps={} invocation_table_size={} built_system.invocation_data_size={}",
+        //             system_cnode_size, built_system.number_of_system_caps, invocation_table_size, built_system.invocation_data_size);
 
-        // Recalculate the sizes for the next iteration
-        let new_invocation_table_size = util::round_up(
-            built_system.invocation_data_size,
-            kernel_config.minimum_page_size,
-        );
-        let new_system_cnode_size = 2_u64.pow(
-            built_system
-                .number_of_system_caps
-                .next_power_of_two()
-                .ilog2(),
-        );
+        //     if built_system.number_of_system_caps <= system_cnode_size
+        //         && built_system.invocation_data_size <= invocation_table_size
+        //     {
+        //         break;
+        //     }
 
-        invocation_table_size = max(invocation_table_size, new_invocation_table_size);
-        system_cnode_size = max(system_cnode_size, new_system_cnode_size);
+        //     // Recalculate the sizes for the next iteration
+        //     let new_invocation_table_size = util::round_up(
+        //         built_system.invocation_data_size,
+        //         kernel_config.minimum_page_size,
+        //     );
+        //     let new_system_cnode_size = 2_u64.pow(
+        //         built_system
+        //             .number_of_system_caps
+        //             .next_power_of_two()
+        //             .ilog2(),
+        //     );
+
+        //     invocation_table_size = max(invocation_table_size, new_invocation_table_size);
+        //     system_cnode_size = max(system_cnode_size, new_system_cnode_size);
+        // }
+
+        // // At this point we just need to patch the files (in memory) and write out the final image.
+
+        // // A: The monitor
+
+        // // A.1: As part of emulated boot we determined exactly how the kernel would
+        // // create untyped objects. Through testing we know that this matches, but
+        // // we could have a bug, or the kernel could change. It that happens we are
+        // // in a bad spot! Things will break. So we write out this information so that
+        // // the monitor can double check this at run time.
+        // let (_, untyped_info_size) = monitor_elf
+        //     .find_symbol(monitor_config.untyped_info_symbol_name)
+        //     .unwrap_or_else(|_| {
+        //         panic!(
+        //             "Could not find '{}' symbol",
+        //             monitor_config.untyped_info_symbol_name
+        //         )
+        //     });
+        // let max_untyped_objects = monitor_config.max_untyped_objects(untyped_info_size);
+        // if built_system.kernel_boot_info.untyped_objects.len() as u64 > max_untyped_objects {
+        //     eprintln!(
+        //         "Too many untyped objects: monitor ({}) supports {} regions. System has {} objects.",
+        //         monitor_elf_path.display(),
+        //         max_untyped_objects,
+        //         built_system.kernel_boot_info.untyped_objects.len()
+        //     );
+        //     std::process::exit(1);
+        // }
+
+        // let untyped_info_header = MonitorUntypedInfoHeader64 {
+        //     cap_start: built_system.kernel_boot_info.untyped_objects[0].cap,
+        //     cap_end: built_system
+        //         .kernel_boot_info
+        //         .untyped_objects
+        //         .last()
+        //         .unwrap()
+        //         .cap
+        //         + 1,
+        // };
+        // let untyped_info_object_data: Vec<MonitorRegion64> = built_system
+        //     .kernel_boot_info
+        //     .untyped_objects
+        //     .iter()
+        //     .map(|ut| MonitorRegion64 {
+        //         paddr: ut.base(),
+        //         size_bits: ut.size_bits(),
+        //         is_device: ut.is_device as u64,
+        //     })
+        //     .collect();
+        // let mut untyped_info_data: Vec<u8> =
+        //     Vec::from(unsafe { struct_to_bytes(&untyped_info_header) });
+        // for o in &untyped_info_object_data {
+        //     untyped_info_data.extend(unsafe { struct_to_bytes(o) });
+        // }
+        // monitor_elf.write_symbol(monitor_config.untyped_info_symbol_name, &untyped_info_data)?;
+
+        // let mut bootstrap_invocation_data: Vec<u8> = Vec::new();
+        // for invocation in &built_system.bootstrap_invocations {
+        //     invocation.add_raw_invocation(&kernel_config, &mut bootstrap_invocation_data);
+        // }
+
+        // let (_, bootstrap_invocation_data_size) =
+        //     monitor_elf.find_symbol(monitor_config.bootstrap_invocation_data_symbol_name)?;
+        // if bootstrap_invocation_data.len() as u64 > bootstrap_invocation_data_size {
+        //     eprintln!(
+        //         "bootstrap invocation array size   : {}",
+        //         bootstrap_invocation_data_size
+        //     );
+        //     eprintln!(
+        //         "bootstrap invocation required size: {}",
+        //         bootstrap_invocation_data.len()
+        //     );
+        //     let mut stderr = BufWriter::new(std::io::stderr());
+        //     for bootstrap_invocation in &built_system.bootstrap_invocations {
+        //         bootstrap_invocation.report_fmt(&mut stderr, &kernel_config, &built_system.cap_lookup);
+        //     }
+        //     stderr.flush().unwrap();
+
+        //     eprintln!("Internal error: bootstrap invocations too large");
+        // }
+
+        // monitor_elf.write_symbol(
+        //     monitor_config.bootstrap_invocation_count_symbol_name,
+        //     &built_system.bootstrap_invocations.len().to_le_bytes(),
+        // )?;
+        // monitor_elf.write_symbol(
+        //     monitor_config.system_invocation_count_symbol_name,
+        //     &built_system.system_invocations.len().to_le_bytes(),
+        // )?;
+        // monitor_elf.write_symbol(
+        //     monitor_config.bootstrap_invocation_data_symbol_name,
+        //     &bootstrap_invocation_data,
+        // )?;
+
+        // let pd_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.pd_tcb_caps);
+        // let vm_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.vm_tcb_caps);
+        // let sched_cap_bytes = monitor_serialise_u64_vec(&built_system.sched_caps);
+        // let ntfn_cap_bytes = monitor_serialise_u64_vec(&built_system.ntfn_caps);
+        // let pd_stack_addrs_bytes = monitor_serialise_u64_vec(&built_system.pd_stack_addrs);
+
+        // monitor_elf.write_symbol("fault_ep", &built_system.fault_ep_cap_address.to_le_bytes())?;
+        // monitor_elf.write_symbol("reply", &built_system.reply_cap_address.to_le_bytes())?;
+        // monitor_elf.write_symbol("pd_tcbs", &pd_tcb_cap_bytes)?;
+        // monitor_elf.write_symbol("vm_tcbs", &vm_tcb_cap_bytes)?;
+        // monitor_elf.write_symbol("scheduling_contexts", &sched_cap_bytes)?;
+        // monitor_elf.write_symbol("notification_caps", &ntfn_cap_bytes)?;
+        // monitor_elf.write_symbol("pd_stack_addrs", &pd_stack_addrs_bytes)?;
+        // let pd_names = system
+        //     .protection_domains
+        //     .iter()
+        //     .map(|pd| &pd.name)
+        //     .collect();
+        // monitor_elf.write_symbol(
+        //     "pd_names",
+        //     &monitor_serialise_names(pd_names, MAX_PDS, PD_MAX_NAME_LENGTH),
+        // )?;
+        // monitor_elf.write_symbol(
+        //     "pd_names_len",
+        //     &system.protection_domains.len().to_le_bytes(),
+        // )?;
+        // let vm_names: Vec<&String> = system
+        //     .protection_domains
+        //     .iter()
+        //     .filter_map(|pd| pd.virtual_machine.as_ref().map(|vm| &vm.name))
+        //     .collect();
+        // monitor_elf.write_symbol("vm_names_len", &vm_names.len().to_le_bytes())?;
+        // monitor_elf.write_symbol(
+        //     "vm_names",
+        //     &monitor_serialise_names(vm_names, MAX_VMS, VM_MAX_NAME_LENGTH),
+        // )?;
+
+        // // Write out all the symbols for each PD
+        // pd_write_symbols(
+        //     &system.protection_domains,
+        //     &system.channels,
+        //     &mut pd_elf_files,
+        //     &built_system.pd_setvar_values,
+        // )?;
+
+        // // Generate the report
+        // let report = match std::fs::File::create(args.report) {
+        //     Ok(file) => file,
+        //     Err(e) => {
+        //         return Err(format!(
+        //             "Could not create report file '{}': {}",
+        //             args.report, e
+        //         ))
+        //     }
+        // };
+
+        // let mut report_buf = BufWriter::new(report);
+        // match write_report(
+        //     &mut report_buf,
+        //     &kernel_config,
+        //     &built_system,
+        //     &bootstrap_invocation_data,
+        // ) {
+        //     Ok(()) => report_buf.flush().unwrap(),
+        //     Err(err) => {
+        //         return Err(format!(
+        //             "Could not write out report file '{}': {}",
+        //             args.report, err
+        //         ))
+        //     }
+        // }
+        // report_buf.flush().unwrap();
+
+        // let mut loader_regions: Vec<(u64, &[u8])> = vec![(
+        //     built_system.reserved_region.base,
+        //     &built_system.invocation_data,
+        // )];
+        // for (i, regions) in built_system.pd_elf_regions.iter().enumerate() {
+        //     for r in regions {
+        //         loader_regions.push((r.addr, r.data(&pd_elf_files[i])));
+        //     }
+        // }
+
+        // let loader = Loader::new(
+        //     &kernel_config,
+        //     Path::new(&loader_elf_path),
+        //     &kernel_elf,
+        //     &monitor_elf,
+        //     Some(built_system.initial_task_phys_region.base),
+        //     built_system.reserved_region,
+        //     loader_regions,
+        // );
+        // loader.write_image(Path::new(args.output));
+
+        Ok(())
     }
-
-    // At this point we just need to patch the files (in memory) and write out the final image.
-
-    // A: The monitor
-
-    // A.1: As part of emulated boot we determined exactly how the kernel would
-    // create untyped objects. Through testing we know that this matches, but
-    // we could have a bug, or the kernel could change. It that happens we are
-    // in a bad spot! Things will break. So we write out this information so that
-    // the monitor can double check this at run time.
-    let (_, untyped_info_size) = monitor_elf
-        .find_symbol(monitor_config.untyped_info_symbol_name)
-        .unwrap_or_else(|_| {
-            panic!(
-                "Could not find '{}' symbol",
-                monitor_config.untyped_info_symbol_name
-            )
-        });
-    let max_untyped_objects = monitor_config.max_untyped_objects(untyped_info_size);
-    if built_system.kernel_boot_info.untyped_objects.len() as u64 > max_untyped_objects {
-        eprintln!(
-            "Too many untyped objects: monitor ({}) supports {} regions. System has {} objects.",
-            monitor_elf_path.display(),
-            max_untyped_objects,
-            built_system.kernel_boot_info.untyped_objects.len()
-        );
-        std::process::exit(1);
-    }
-
-    let untyped_info_header = MonitorUntypedInfoHeader64 {
-        cap_start: built_system.kernel_boot_info.untyped_objects[0].cap,
-        cap_end: built_system
-            .kernel_boot_info
-            .untyped_objects
-            .last()
-            .unwrap()
-            .cap
-            + 1,
-    };
-    let untyped_info_object_data: Vec<MonitorRegion64> = built_system
-        .kernel_boot_info
-        .untyped_objects
-        .iter()
-        .map(|ut| MonitorRegion64 {
-            paddr: ut.base(),
-            size_bits: ut.size_bits(),
-            is_device: ut.is_device as u64,
-        })
-        .collect();
-    let mut untyped_info_data: Vec<u8> =
-        Vec::from(unsafe { struct_to_bytes(&untyped_info_header) });
-    for o in &untyped_info_object_data {
-        untyped_info_data.extend(unsafe { struct_to_bytes(o) });
-    }
-    monitor_elf.write_symbol(monitor_config.untyped_info_symbol_name, &untyped_info_data)?;
-
-    let mut bootstrap_invocation_data: Vec<u8> = Vec::new();
-    for invocation in &built_system.bootstrap_invocations {
-        invocation.add_raw_invocation(&kernel_config, &mut bootstrap_invocation_data);
-    }
-
-    let (_, bootstrap_invocation_data_size) =
-        monitor_elf.find_symbol(monitor_config.bootstrap_invocation_data_symbol_name)?;
-    if bootstrap_invocation_data.len() as u64 > bootstrap_invocation_data_size {
-        eprintln!(
-            "bootstrap invocation array size   : {}",
-            bootstrap_invocation_data_size
-        );
-        eprintln!(
-            "bootstrap invocation required size: {}",
-            bootstrap_invocation_data.len()
-        );
-        let mut stderr = BufWriter::new(std::io::stderr());
-        for bootstrap_invocation in &built_system.bootstrap_invocations {
-            bootstrap_invocation.report_fmt(&mut stderr, &kernel_config, &built_system.cap_lookup);
-        }
-        stderr.flush().unwrap();
-
-        eprintln!("Internal error: bootstrap invocations too large");
-    }
-
-    monitor_elf.write_symbol(
-        monitor_config.bootstrap_invocation_count_symbol_name,
-        &built_system.bootstrap_invocations.len().to_le_bytes(),
-    )?;
-    monitor_elf.write_symbol(
-        monitor_config.system_invocation_count_symbol_name,
-        &built_system.system_invocations.len().to_le_bytes(),
-    )?;
-    monitor_elf.write_symbol(
-        monitor_config.bootstrap_invocation_data_symbol_name,
-        &bootstrap_invocation_data,
-    )?;
-
-    let pd_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.pd_tcb_caps);
-    let vm_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.vm_tcb_caps);
-    let sched_cap_bytes = monitor_serialise_u64_vec(&built_system.sched_caps);
-    let ntfn_cap_bytes = monitor_serialise_u64_vec(&built_system.ntfn_caps);
-    let pd_stack_addrs_bytes = monitor_serialise_u64_vec(&built_system.pd_stack_addrs);
-
-    monitor_elf.write_symbol("fault_ep", &built_system.fault_ep_cap_address.to_le_bytes())?;
-    monitor_elf.write_symbol("reply", &built_system.reply_cap_address.to_le_bytes())?;
-    monitor_elf.write_symbol("pd_tcbs", &pd_tcb_cap_bytes)?;
-    monitor_elf.write_symbol("vm_tcbs", &vm_tcb_cap_bytes)?;
-    monitor_elf.write_symbol("scheduling_contexts", &sched_cap_bytes)?;
-    monitor_elf.write_symbol("notification_caps", &ntfn_cap_bytes)?;
-    monitor_elf.write_symbol("pd_stack_addrs", &pd_stack_addrs_bytes)?;
-    let pd_names = system
-        .protection_domains
-        .iter()
-        .map(|pd| &pd.name)
-        .collect();
-    monitor_elf.write_symbol(
-        "pd_names",
-        &monitor_serialise_names(pd_names, MAX_PDS, PD_MAX_NAME_LENGTH),
-    )?;
-    monitor_elf.write_symbol(
-        "pd_names_len",
-        &system.protection_domains.len().to_le_bytes(),
-    )?;
-    let vm_names: Vec<&String> = system
-        .protection_domains
-        .iter()
-        .filter_map(|pd| pd.virtual_machine.as_ref().map(|vm| &vm.name))
-        .collect();
-    monitor_elf.write_symbol("vm_names_len", &vm_names.len().to_le_bytes())?;
-    monitor_elf.write_symbol(
-        "vm_names",
-        &monitor_serialise_names(vm_names, MAX_VMS, VM_MAX_NAME_LENGTH),
-    )?;
-
-    // Write out all the symbols for each PD
-    pd_write_symbols(
-        &system.protection_domains,
-        &system.channels,
-        &mut pd_elf_files,
-        &built_system.pd_setvar_values,
-    )?;
-
-    // Generate the report
-    let report = match std::fs::File::create(args.report) {
-        Ok(file) => file,
-        Err(e) => {
-            return Err(format!(
-                "Could not create report file '{}': {}",
-                args.report, e
-            ))
-        }
-    };
-
-    let mut report_buf = BufWriter::new(report);
-    match write_report(
-        &mut report_buf,
-        &kernel_config,
-        &built_system,
-        &bootstrap_invocation_data,
-    ) {
-        Ok(()) => report_buf.flush().unwrap(),
-        Err(err) => {
-            return Err(format!(
-                "Could not write out report file '{}': {}",
-                args.report, err
-            ))
-        }
-    }
-    report_buf.flush().unwrap();
-
-    let mut loader_regions: Vec<(u64, &[u8])> = vec![(
-        built_system.reserved_region.base,
-        &built_system.invocation_data,
-    )];
-    for (i, regions) in built_system.pd_elf_regions.iter().enumerate() {
-        for r in regions {
-            loader_regions.push((r.addr, r.data(&pd_elf_files[i])));
-        }
-    }
-
-    let loader = Loader::new(
-        &kernel_config,
-        Path::new(&loader_elf_path),
-        &kernel_elf,
-        &monitor_elf,
-        Some(built_system.initial_task_phys_region.base),
-        built_system.reserved_region,
-        loader_regions,
-    );
-    loader.write_image(Path::new(args.output));
-
-    Ok(())
 }
