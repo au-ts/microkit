@@ -33,6 +33,7 @@ MICROKIT_EPOCH = 1616367257
 
 TOOLCHAIN_AARCH64 = "aarch64-none-elf"
 TOOLCHAIN_RISCV = "riscv64-unknown-elf"
+TOOLCHAIN_X86_64 = "x86_64-linux-gnu"
 
 KERNEL_CONFIG_TYPE = Union[bool, str]
 KERNEL_OPTIONS = Dict[str, Union[bool, str]]
@@ -41,12 +42,15 @@ KERNEL_OPTIONS = Dict[str, Union[bool, str]]
 class KernelArch(IntEnum):
     AARCH64 = 1
     RISCV64 = 2
+    X86_64 = 3
 
     def c_toolchain(self) -> str:
         if self == KernelArch.AARCH64:
             return TOOLCHAIN_AARCH64
         elif self == KernelArch.RISCV64:
             return TOOLCHAIN_RISCV
+        elif self == KernelArch.X86_64:
+            return TOOLCHAIN_X86_64
         else:
             raise Exception(f"Unsupported toolchain architecture '{self}'")
 
@@ -55,12 +59,17 @@ class KernelArch(IntEnum):
 
     def is_arm(self) -> bool:
         return self == KernelArch.AARCH64
+    
+    def is_x86(self) -> bool:
+        return self == KernelArch.X86_64
 
     def to_str(self) -> str:
         if self == KernelArch.AARCH64:
             return "aarch64"
         elif self == KernelArch.RISCV64:
             return "riscv64"
+        elif self == KernelArch.X86_64:
+            return "x86_64"
         else:
             raise Exception(f"Unsupported arch {self}")
 
@@ -308,6 +317,23 @@ SUPPORTED_BOARDS = (
             "KernelRiscvExtF": True,
         },
     ),
+    BoardInfo(
+        name="x86_64_nehalem",
+        arch=KernelArch.X86_64,
+        gcc_cpu="nehalem",
+        loader_link_address=0x10000000,
+        kernel_options = {
+            "KernelIsMCS": True,
+            "KernelPlatform": "pc99",
+            # @billn make vm work
+            # "KernelVTX": True,
+            "KernelX86MicroArch": "nehalem",
+            "KernelSupportPCID": False,
+            "KernelFSGSBaseInst": False,
+            "KernelFPU": "FXSAVE",
+            "KernelIOMMU": False,
+        },
+    ),
 )
 
 SUPPORTED_CONFIGS = (
@@ -497,11 +523,13 @@ def build_sel4(
             copy(p, dest)
             dest.chmod(0o744)
 
-    platform_gen = sel4_build_dir / "gen_headers" / "plat" / "machine" / "platform_gen.json"
-    dest = root_dir / "board" / board.name / config.name / "platform_gen.json"
-    dest.unlink(missing_ok=True)
-    copy(platform_gen, dest)
-    dest.chmod(0o744)
+    if not board.arch.is_x86():
+        # only non-x86 platforms have this file to describe memory regions
+        platform_gen = sel4_build_dir / "gen_headers" / "plat" / "machine" / "platform_gen.json"
+        dest = root_dir / "board" / board.name / config.name / "platform_gen.json"
+        dest.unlink(missing_ok=True)
+        copy(platform_gen, dest)
+        dest.chmod(0o744)
 
     gen_config_path = sel4_install_dir / "libsel4/include/kernel/gen_config.json"
     with open(gen_config_path, "r") as f:
@@ -611,6 +639,35 @@ def build_lib_component(
         copy(p, dest)
         dest.chmod(0o744)
 
+def build_capdl_initialiser(
+    component_name: str,
+    rust_sel4_dir: Path,
+    root_dir: Path,
+    build_dir: Path,
+    board: BoardInfo,
+    config: ConfigInfo,
+) -> None:
+    # @billn check that the git submodule is initalised and updated
+    sel4_src_dir = build_dir / board.name / config.name / "sel4" / "install"
+
+    cargo_cross_options = "-Z build-std=core,alloc,compiler_builtins -Z build-std-features=compiler-builtins-mem"
+    cargo_target = f"{board.arch.to_str()}-sel4-minimal"
+
+    cmd = f"cd {rust_sel4_dir} && SEL4_PREFIX={sel4_src_dir.absolute()} cargo build {cargo_cross_options} --target {cargo_target} --release -p sel4-capdl-initializer"
+    r = system(cmd)
+    if r != 0:
+        raise Exception(
+            f"Error building: {component_name} for board: {board.name} config: {config.name}"
+        )
+
+    capdl_init_elf = rust_sel4_dir / "target" / cargo_target / "release" / "sel4-capdl-initializer.elf"
+    dest = (
+        root_dir / "board" / board.name / config.name / "elf" / f"{component_name}.elf"
+    )
+    dest.unlink(missing_ok=True)
+    copy(capdl_init_elf, dest)
+    # Make output read-only
+    dest.chmod(0o744)
 
 def main() -> None:
     parser = ArgumentParser()
@@ -635,8 +692,10 @@ def main() -> None:
 
     global TOOLCHAIN_AARCH64
     global TOOLCHAIN_RISCV
+    global TOOLCHAIN_X86_64
     TOOLCHAIN_AARCH64 = args.toolchain_prefix_aarch64
     TOOLCHAIN_RISCV = args.toolchain_prefix_riscv64
+    TOOLCHAIN_X86_64 = args.toolchain_prefix_x86_64
 
     version = args.version
 
@@ -735,9 +794,15 @@ def main() -> None:
                     raise Exception("Unexpected ARM physical address bits defines")
                 loader_defines.append(("PHYSICAL_ADDRESS_BITS", arm_pa_size_bits))
 
-            build_elf_component("loader", root_dir, build_dir, board, config, loader_defines)
-            build_elf_component("monitor", root_dir, build_dir, board, config, [])
+            # @billn, do we need the ukit bootloader on real x86 machines? or rely on grub?
+            # @billn, come back to when adding CapDL support for aarch64 and riscv
+            if not board.arch.is_x86():
+                build_elf_component("loader", root_dir, build_dir, board, config, loader_defines)
+                build_elf_component("monitor", root_dir, build_dir, board, config, [])
             build_lib_component("libmicrokit", root_dir, build_dir, board, config)
+            # @billn make the rust sel4 path thing less hacky
+            build_capdl_initialiser("capdl_initialiser", Path("dep/rust-sel4").absolute(), root_dir, build_dir, board, config)
+            build_elf_component("capdl_monitor", root_dir, build_dir, board, config, [])
 
     # Setup the examples
     for example, example_path in EXAMPLES.items():
