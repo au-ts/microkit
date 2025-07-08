@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
-use microkit_tool::{sdf, sel4::{self, PlatformConfig}};
+use microkit_tool::{sdf, sel4::{self}};
 use serde_json::json;
 
 const DEFAULT_KERNEL_CONFIG: sel4::Config = sel4::Config {
@@ -25,10 +25,10 @@ const DEFAULT_KERNEL_CONFIG: sel4::Config = sel4::Config {
     x86_xsave_size: None,
     // Not necessary for SDF parsing
     invocations_labels: json!(null),
-    platform_config: Some(PlatformConfig {
-        devices: vec![],
-        memory: vec![],
-    }),
+    // platform_config: Some(PlatformConfig {
+    //     devices: vec![],
+    //     memory: vec![],
+    // }),
 };
 
 fn check_error(test_name: &str, expected_err: &str) {
