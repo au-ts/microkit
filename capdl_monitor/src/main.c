@@ -38,7 +38,7 @@
 #include "util.h"
 
 #define FAULT_EP_CAP_IDX 2
-#define REPLY_CAP_IDX 3
+#define REPLY_CAP_IDX 4
 
 #define MAX_PDS 64
 #define MAX_NAME_LEN 16
@@ -348,6 +348,7 @@ monitor(void)
 void
 main()
 {
+    puts("MON|INFO: running init functions\n");
     run_init_funcs();
     puts("MON|INFO: started, waiting for faults to come in\n");
     monitor();
