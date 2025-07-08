@@ -13,10 +13,7 @@ use crate::{
     capdl::{
         memory::{self, ArchMethods, X86_64},
         spec::{
-            cap,
-            object::{self},
-            AsidSlotEntry, Cap, FileContentRange, Fill, FillEntry, FrameInit, IrqEntry,
-            NamedObject, Object, ObjectId, UntypedCover,
+            cap, object::{self, SchedContextExtraInfo}, AsidSlotEntry, Cap, CapTableEntry, FileContentRange, Fill, FillEntry, FillEntryContent, FrameInit, IrqEntry, NamedObject, Object, ObjectId, Rights, UntypedCover
         },
         util::{
             capdl_util_get_vspace_id_from_tcb_id, capdl_util_make_frame_cap,
@@ -35,6 +32,18 @@ const SYMBOL_IPC_BUFFER: &str = "__sel4_ipc_buffer_obj";
 const FAULT_BADGE: u64 = 1 << 62;
 const PPC_BADGE: u64 = 1 << 63;
 
+// The sel4-capdl-initialiser crate expects caps that you want to bind to a TCB to be at
+// certain slots. From dep/rust-sel4/crates/sel4-capdl-initializer/types/src/cap_table.rs
+const TCB_SLOT_CSPACE: u64 = 0;
+const TCB_SLOT_VSPACE: u64 = 1;
+const TCB_SLOT_IPC_BUFFER: u64 = 4;
+const TCB_SLOT_FAULT_EP: u64 = 5;
+const TCB_SLOT_SC: u64 = 6;
+// const TCB_SLOT_TEMP_FAULT_EP: u64 = 7;
+const TCB_SLOT_BOUND_NOTIFICATION: u64 = 8;
+const SLOT_VCPU: u64 = 9; // @billn revisit sel4-capdl-initialiser. it doesnt support multiple vCPUs
+
+// Where caps must be in a PD's CSpace
 const INPUT_CAP_IDX: u64 = 1;
 const FAULT_EP_CAP_IDX: u64 = 2;
 const VSPACE_CAP_IDX: u64 = 3;
@@ -70,6 +79,8 @@ const SLOT_SIZE: u64 = 1 << SLOT_BITS;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct CapDLSpec {
+    /// Whatever you do, DO NOT SORT! DO NOT SORT! DO NOT SORT!!!!!
+    /// Because object IDs are index into the vectors
     pub objects: Vec<NamedObject>,
     pub irqs: Vec<IrqEntry>,
     pub asid_slots: Vec<AsidSlotEntry>,
@@ -129,14 +140,15 @@ impl CapDLSpec {
 
             let seg_base_vaddr = segment.virt_addr;
             let seg_file_off = segment.p_offset;
-            let seg_size: u64 = segment.p_filesz;
+            let seg_file_size: u64 = segment.p_filesz;
+            let seg_mem_size: u64 = segment.mem_size();
 
             let page_size = PageSize::Small;
             let page_size_bytes = page_size as u64;
 
             // Starts from the page boundary
             let mut cur_vaddr = round_down(seg_base_vaddr, page_size_bytes);
-            while cur_vaddr < seg_base_vaddr + seg_size {
+            while cur_vaddr < seg_base_vaddr + seg_mem_size {
                 let mut frame_fill = FrameInit::Fill(Fill {
                     entries: [].to_vec(),
                 });
@@ -153,9 +165,9 @@ impl CapDLSpec {
 
                 let target_vaddr_start = cur_vaddr + dest_offset;
                 let section_offset = target_vaddr_start - seg_base_vaddr;
-                if section_offset < seg_size {
+                if section_offset < seg_file_size {
                     // Have data to load
-                    let len_to_cpy = min(page_size_bytes - dest_offset, seg_size - section_offset);
+                    let len_to_cpy = min(page_size_bytes - dest_offset, seg_file_size - section_offset);
                     let src_off = seg_file_off + section_offset;
                     match &mut frame_fill {
                         FrameInit::Fill(fill) => {
@@ -164,11 +176,12 @@ impl CapDLSpec {
                                     start: dest_offset as usize,
                                     end: (dest_offset + len_to_cpy) as usize,
                                 },
-                                content: FileContentRange {
-                                    file: elf.path.to_string_lossy().into_owned(),
-                                    file_offset: src_off as usize,
-                                    file_length: len_to_cpy as usize,
-                                },
+                                content: FillEntryContent::Data(
+                                    FileContentRange {
+                                        file: elf.path.to_string_lossy().into_owned(),
+                                        file_offset: src_off as usize,
+                                    },
+                                )
                             });
                         }
                     }
@@ -179,6 +192,7 @@ impl CapDLSpec {
                     self,
                     frame_fill,
                     &format!("{}_elf_{}", pd_name, frame_sequence),
+                    None
                 );
                 let frame_cap = capdl_util_make_frame_cap(
                     frame_obj_id,
@@ -188,6 +202,7 @@ impl CapDLSpec {
                     true,
                 );
 
+                println!("elf make frame at {:#x}", cur_vaddr);
                 // @billn make arch agnostic
                 match memory::X86_64::map_page(
                     self, pd_name, vspace_id, frame_cap, page_size, cur_vaddr,
@@ -222,7 +237,8 @@ impl CapDLSpec {
         };
 
         let tcb_inner_obj = object::Tcb {
-            slots: [(0, vspace_cap)].to_vec(),
+            // Bind the VSpace into the TCB
+            slots: [(TCB_SLOT_VSPACE as usize, vspace_cap)].to_vec(),
             extra: tcb_extra_info,
         };
 
@@ -251,34 +267,36 @@ pub fn build_capdl_spec(
     let monitor_tcb_obj_id = spec.add_elf_to_spec("monitor", monitor_elf)?; // @billn check error
     let monitor_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec, monitor_tcb_obj_id);
 
-    // Create and map a 4K stack frame for monitor
-    let mon_stack_frame_obj_id = capdl_util_make_frame_obj(
-        &mut spec,
-        FrameInit::Fill(Fill {
-            entries: [].to_vec(),
-        }),
-        "monitor_stack",
-    );
-    let mon_stack_frame_cap =
-        capdl_util_make_frame_cap(mon_stack_frame_obj_id, true, true, false, true);
-    // @billn make arch agnostic
-    let sp = 0x7ffffffff000;
-    match memory::X86_64::map_page(
-        &mut spec,
-        "monitor",
-        monitor_vspace_obj_id,
-        mon_stack_frame_cap,
-        PageSize::Small,
-        sp,
-    ) {
-        Ok(_) => {}
-        Err(map_err_reason) => {
-            unreachable!(
-                "build_capdl_spec(): failed to map stack frame to monitor because: {}",
-                map_err_reason
-            );
-        }
-    };
+    // // Create and map a 4K stack frame for monitor
+    // let mon_stack_frame_obj_id = capdl_util_make_frame_obj(
+    //     &mut spec,
+    //     FrameInit::Fill(Fill {
+    //         entries: [].to_vec(),
+    //     }),
+    //     "monitor_stack",
+    //     None
+    // );
+    // let mon_stack_frame_cap =
+    //     capdl_util_make_frame_cap(mon_stack_frame_obj_id, true, true, false, true);
+    // // @billn make arch agnostic
+    // let sp = monitor_elf.find_symbol("_stack").unwrap().0;
+    // println!("sp {:#x}", sp);
+    // match memory::X86_64::map_page(
+    //     &mut spec,
+    //     "monitor",
+    //     monitor_vspace_obj_id,
+    //     mon_stack_frame_cap,
+    //     PageSize::Small,
+    //     sp,
+    // ) {
+    //     Ok(_) => {}
+    //     Err(map_err_reason) => {
+    //         unreachable!(
+    //             "build_capdl_spec(): failed to map stack frame to monitor because: {}",
+    //             map_err_reason
+    //         );
+    //     }
+    // };
 
     // Create and map the IPC buffer for monitor
     let mon_ipcbuf_frame_obj_id = capdl_util_make_frame_obj(
@@ -287,13 +305,17 @@ pub fn build_capdl_spec(
             entries: [].to_vec(),
         }),
         "monitor_ipcbuf",
+        None
     );
     let mon_ipcbuf_frame_cap =
         capdl_util_make_frame_cap(mon_ipcbuf_frame_obj_id, true, true, false, true);
+    // We need to clone the IPC buf cap because in addition to mapping the frame into the VSpace, we need to bind
+    // this frame to the TCB as well.
+    let mon_ipcbuf_frame_cap_for_tcb = mon_ipcbuf_frame_cap.clone();
     let mon_ipcbuf_vaddr = monitor_elf
         .find_symbol(SYMBOL_IPC_BUFFER)
         .unwrap_or_else(|_| panic!("Could not find {}", SYMBOL_IPC_BUFFER))
-        .1;
+        .0;
     match memory::X86_64::map_page(
         &mut spec,
         "monitor",
@@ -311,15 +333,62 @@ pub fn build_capdl_spec(
         }
     };
 
-    // Create monitor CSpace
+    // Create monitor fault endpoint object + cap
+    let mon_fault_ep_obj = NamedObject {
+        name: "ep_fault_monitor".to_string(),
+        object: Object::Endpoint
+    };
+    let mon_fault_ep_obj_id = spec.add_root_object(mon_fault_ep_obj);
+    let mon_fault_ep_cap = Cap::Endpoint(cap::Endpoint {
+        object: mon_fault_ep_obj_id,
+        badge: 0,
+        rights: Rights {
+            read: true,
+            write: true,
+            grant: false,
+            grant_reply: false,
+        },
+    });
+
+    // Create monitor reply object object + cap
+    let mon_reply_obj = NamedObject {
+        name: "reply_monitor".to_string(),
+        object: Object::Reply
+    };
+    let mon_reply_obj_id = spec.add_root_object(mon_reply_obj);
+    let mon_reply_cap = Cap::Reply(cap::Reply {
+        object: mon_reply_obj_id,
+    });
+
+    // Create monitor scheduling context
+    let mon_sc_inner_obj = Object::SchedContext(object::SchedContext {
+        size_bits: 7, // @billn fix
+        extra: SchedContextExtraInfo {
+            period: 100, // @billn work out where these magic numbers come from
+            budget: 100,
+            badge: 0,
+        },
+    });
+    let mon_sc_obj = NamedObject {
+        name: "sched_context_monitor".to_string(),
+        object: mon_sc_inner_obj
+    };
+    let mon_sc_obj_id = spec.add_root_object(mon_sc_obj);
+    let mon_sc_cap = Cap::SchedContext(cap::SchedContext{ object: mon_sc_obj_id });
+
+    // Create monitor CSpace and insert the fault EP and reply caps into the correct slots in CSpace.
     let mon_cnode_inner_obj = Object::CNode(object::CNode {
         size_bits: PD_CAP_BITS as usize,
-        slots: [].to_vec(),
+        slots: [
+            (FAULT_EP_CAP_IDX as usize, mon_fault_ep_cap),
+            (REPLY_CAP_IDX as usize, mon_reply_cap),
+        ].to_vec(),
     });
     let mon_cnode_obj = NamedObject {
         name: "cspace_monitor".to_string(),
         object: mon_cnode_inner_obj,
     };
+    // Move monitor CSpace into spec and make a cap for it to insert into TCB later.
     let mon_cnode_obj_id = spec.add_root_object(mon_cnode_obj);
     let mon_cnode_cap = Cap::CNode(cap::CNode {
         object: mon_cnode_obj_id,
@@ -328,17 +397,24 @@ pub fn build_capdl_spec(
         // guard_size: kernel_config.cap_address_bits - PD_CAP_BITS,
         guard_size: 55,
     });
-    // `add_elf_to_spec()` doesn't fill all the details in the TCB as most details come from the SDF, we
-    // now fill them in: stack ptr, priority, ipc buf vaddr, and various caps needed for this TCB.
+
+    // At this point, all of the required objects for the monitor have been created and it caps inserted into
+    // the correct slot in the CSpace. We need to bind those objects into the TCB for the monitor to use them.
+    // In addition, `add_elf_to_spec()` doesn't fill most the details in the TCB.
+    // Now fill them in: stack ptr, priority, ipc buf vaddr, etc.
     {
         let monitor_tcb_wrapper_obj = spec.get_root_object_mut(monitor_tcb_obj_id).unwrap();
         if let Object::Tcb(monitor_tcb) = &mut monitor_tcb_wrapper_obj.object {
-            monitor_tcb.extra.sp = sp;
+            monitor_tcb.extra.sp = monitor_elf.find_symbol("_stack").unwrap().0;
             monitor_tcb.extra.ipc_buffer_addr = mon_ipcbuf_vaddr;
-            // monitor_tcb.extra.master_fault_ep = todo!();
-            monitor_tcb.extra.prio = u8::MAX;
-            monitor_tcb.extra.max_prio = u8::MAX;
+            monitor_tcb.extra.master_fault_ep = None;
+            monitor_tcb.extra.prio = u8::MAX - 1;
+            monitor_tcb.extra.max_prio = u8::MAX - 1;
             monitor_tcb.extra.resume = true;
+
+            monitor_tcb.slots.push((TCB_SLOT_CSPACE as usize, mon_cnode_cap));
+            monitor_tcb.slots.push((TCB_SLOT_IPC_BUFFER as usize, mon_ipcbuf_frame_cap_for_tcb));
+            monitor_tcb.slots.push((TCB_SLOT_SC as usize, mon_sc_cap));
         } else {
             unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
         }
@@ -353,12 +429,12 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 3. Create the PDs' spec
     // *********************************
-    for (i, pd) in system.protection_domains.iter().enumerate() {
-        let elf = &pd_elf_files[i];
-        let pd_tcb_obj_id = spec.add_elf_to_spec(&pd.name, elf)?; // @billn check error
+    // for (i, pd) in system.protection_domains.iter().enumerate() {
+    //     let elf = &pd_elf_files[i];
+    //     let pd_tcb_obj_id = spec.add_elf_to_spec(&pd.name, elf)?; // @billn check error
 
-        // Same as the monitor, we must pull in extra details for the TCB from the SDF.
-    }
+    //     // Same as the monitor, we must pull in extra details for the TCB from the SDF.
+    // }
 
     // *********************************
     // Step 4. Serialise the spec to JSON
