@@ -323,15 +323,15 @@ SUPPORTED_BOARDS = (
         gcc_cpu="nehalem",
         loader_link_address=0x10000000,
         kernel_options = {
+            # @billn make vm work
             "KernelIsMCS": True,
             "KernelPlatform": "pc99",
-            # @billn make vm work
-            # "KernelVTX": True,
+            "KernelSel4Arch": "x86_64",
+            "KernelVTX": False,
             "KernelX86MicroArch": "nehalem",
             "KernelSupportPCID": False,
             "KernelFSGSBaseInst": False,
             "KernelFPU": "FXSAVE",
-            "KernelIOMMU": False,
         },
     ),
 )
@@ -438,6 +438,21 @@ def build_tool(tool_target: Path, target_triple: str) -> None:
 
     tool_target.chmod(0o755)
 
+def build_capdl_add_spec_tool(
+    rust_sel4_dir: Path,
+    tool_target: Path,
+    target_triple: str
+):
+    r = system(
+        f"cd {rust_sel4_dir} && cargo build --target {target_triple} -p sel4-capdl-initializer-add-spec"
+    )
+    assert r == 0
+
+    tool_output = f"{rust_sel4_dir}/target/{target_triple}/debug/sel4-capdl-initializer-add-spec"
+
+    copy(tool_output, tool_target)
+
+    tool_target.chmod(0o755)
 
 def build_sel4(
     sel4_dir: Path,
@@ -767,6 +782,8 @@ def main() -> None:
         tool_target = root_dir / "bin" / "microkit"
         test_tool()
         build_tool(tool_target, args.tool_target_triple)
+        capdl_add_spec_tool_target = root_dir / "bin" / "sel4-capdl-initializer-add-spec"
+        build_capdl_add_spec_tool(Path("dep/rust-sel4").absolute(), capdl_add_spec_tool_target, args.tool_target_triple)
 
     if not args.skip_docs:
         build_doc(root_dir)
