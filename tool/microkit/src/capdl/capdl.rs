@@ -7,7 +7,8 @@ use core::ops::Range;
 
 use std::{
     cmp::min,
-    path::{Path, PathBuf},
+    collections::{HashMap},
+    path::{PathBuf},
     u8,
 };
 
@@ -18,13 +19,11 @@ use crate::{
         memory::{self, ArchMethods, X86_64},
         spec::{
             cap,
-            object::{self, SchedContextExtraInfo},
-            AsidSlotEntry, Cap, CapTableEntry, FileContentRange, Fill, FillEntry, FillEntryContent,
-            FrameInit, IrqEntry, NamedObject, Object, ObjectId, Rights, UntypedCover,
+            object::{self},
+            AsidSlotEntry, Cap, FileContentRange, Fill, FillEntry, FillEntryContent,
+            FrameInit, IrqEntry, NamedObject, Object, ObjectId, UntypedCover,
         },
-        util::{
-            capdl_util_get_vspace_id_from_tcb_id, capdl_util_make_cnode_cap, capdl_util_make_cnode_obj, capdl_util_make_endpoint_cap, capdl_util_make_endpoint_obj, capdl_util_make_frame_cap, capdl_util_make_frame_obj, capdl_util_make_reply_cap, capdl_util_make_reply_obj, capdl_util_make_sc_cap, capdl_util_make_sc_obj
-        },
+        util::*,
     },
     elf::ElfFile,
     sdf::SystemDescription,
@@ -85,8 +84,6 @@ const SLOT_SIZE: u64 = 1 << SLOT_BITS;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct CapDLSpec {
-    /// Whatever you do, DO NOT SORT! DO NOT SORT! DO NOT SORT!!!!!
-    /// Because object IDs are index into the vectors
     pub objects: Vec<NamedObject>,
     pub irqs: Vec<IrqEntry>,
     pub asid_slots: Vec<AsidSlotEntry>,
@@ -201,7 +198,7 @@ impl CapDLSpec {
                 let frame_obj_id = capdl_util_make_frame_obj(
                     self,
                     frame_fill,
-                    &format!("{}_elf_{}", pd_name, frame_sequence),
+                    &format!("elf_{}_{}", pd_name, frame_sequence),
                     None,
                     12, // @billn fix use ObjectType::fixed_size_bits
                 );
@@ -376,18 +373,39 @@ pub fn build_capdl_spec(
     }
 
     // *********************************
-    // Step 2. Create the memory regions' spec. Result is a hashmap keyed on MR name, value is Vec of frame caps
+    // Step 2. Create the memory regions' spec. Result is a hashmap keyed on MR name, value is Vec of frame object IDs
     // *********************************
+    let mut mr_to_frame_obj_ids: HashMap<&String, Vec<ObjectId>> = HashMap::new();
+    for mr in system.memory_regions.iter() {
+        mr_to_frame_obj_ids.insert(&mr.name, [].to_vec());
+        let frame_size_bits = mr.page_size.fixed_size_bits(kernel_config);
+
+        for frame_sequence in 0..mr.page_count {
+            let paddr = match mr.phys_addr {
+                Some(base_paddr) => Some((base_paddr + (frame_sequence * mr.page_size_bytes())) as usize),
+                None => None,
+            };
+            mr_to_frame_obj_ids.get_mut(&mr.name).unwrap().push(capdl_util_make_frame_obj(
+                &mut spec,
+                FrameInit::Fill(Fill {
+                    entries: [].to_vec(),
+                }),
+                &format!("mr_{}_{}", mr.name, frame_sequence),
+                paddr,
+                frame_size_bits as usize,
+            ));
+        }
+    }
 
     // *********************************
     // Step 3. Create the PDs' spec
     // *********************************
-    // for (i, pd) in system.protection_domains.iter().enumerate() {
-    //     let elf = &pd_elf_files[i];
-    //     let pd_tcb_obj_id = spec.add_elf_to_spec(&pd.name, elf)?; // @billn check error
+    for (i, pd) in system.protection_domains.iter().enumerate() {
+        let elf = &pd_elf_files[i];
+        let pd_tcb_obj_id = spec.add_elf_to_spec(&pd.name, elf)?; // @billn check error
 
-    //     // Same as the monitor, we must pull in extra details for the TCB from the SDF.
-    // }
+        // Same as the monitor, we must pull in extra details for the TCB from the SDF.
+    }
 
     // *********************************
     // Step 4. Serialise the spec to JSON
