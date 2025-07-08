@@ -18,10 +18,11 @@ pub fn capdl_util_make_frame_obj(
     spec: &mut CapDLSpec,
     frame_init: FrameInit,
     name: &str,
+    paddr: Option<usize>
 ) -> ObjectId {
     let frame_inner_obj = Object::Frame(object::Frame {
         size_bits: 12, // @billn fix use ObjectType::fixed_size_bits
-        paddr: None,
+        paddr,
         init: frame_init,
     });
     let frame_obj = NamedObject {
