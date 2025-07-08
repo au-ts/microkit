@@ -336,6 +336,15 @@ impl From<u64> for PageSize {
     }
 }
 
+impl PageSize {
+    pub fn fixed_size_bits(&self, sel4_config: &Config) -> u64 {
+        match self {
+            PageSize::Small => ObjectType::SmallPage.fixed_size_bits(sel4_config).unwrap(),
+            PageSize::Large => ObjectType::LargePage.fixed_size_bits(sel4_config).unwrap(),
+        }
+    }
+}
+
 /// Virtual memory attributes for ARM
 /// The values for each enum variant corresponds to what seL4
 /// expects when doing a virtual memory invocation.
