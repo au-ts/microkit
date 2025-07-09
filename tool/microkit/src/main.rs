@@ -3304,7 +3304,10 @@ fn main() -> Result<(), String> {
         _ => None,
     };
 
-    let x86_xsave_size = None; // @billn fix
+    let x86_xsave_size = match arch {
+        Arch::X86_64 => Some(json_str_as_u64(&kernel_config_json, "XSAVE_SIZE").unwrap() as usize),
+        _ => None
+    };
 
     let kernel_frame_size = match arch {
         Arch::Aarch64 => 1 << 12,
