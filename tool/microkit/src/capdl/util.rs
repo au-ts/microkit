@@ -53,7 +53,7 @@ pub fn capdl_util_make_frame_cap(
             read,
             write,
             grant: execute,
-            grant_reply: false, // @billn what is this used for?? seems like the old Py impl have this true for IPC buf, but then grant reply should just be a subset of reply??????
+            grant_reply: false
         },
         cached,
     })
@@ -129,7 +129,7 @@ pub fn capdl_util_make_sc_obj(
     badge: u64,
 ) -> ObjectId {
     let sc_inner_obj = Object::SchedContext(object::SchedContext {
-        size_bits, // @billn fix
+        size_bits,
         extra: SchedContextExtraInfo {
             period,
             budget,

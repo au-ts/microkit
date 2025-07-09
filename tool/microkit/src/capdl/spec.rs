@@ -7,6 +7,8 @@ use core::ops::Range;
 use sel4_capdl_initializer_types::Word;
 use serde::{Deserialize, Serialize};
 
+use crate::sel4::{Config, ObjectType};
+
 pub type ObjectId = usize;
 pub type Badge = Word;
 pub type CPtr = Word;
@@ -63,7 +65,7 @@ pub struct FileContentRange {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Object {
-    Untyped(object::Untyped),
+    // Untyped(object::Untyped),
     Endpoint,
     Notification,
     CNode(object::CNode),
@@ -84,8 +86,42 @@ pub enum Object {
 impl Object {
     pub fn paddr(&self) -> Option<usize> {
         match self {
-            Object::Untyped(obj) => obj.paddr,
+            // Object::Untyped(obj) => obj.paddr,
             Object::Frame(obj) => obj.paddr,
+            _ => None,
+        }
+    }
+    
+    /// CNode and SchedContext are quirky as they have variable size.
+    pub fn physical_size_bits(&self, sel4_config: &Config) -> u64 {
+        match self {
+            Object::Endpoint => ObjectType::Endpoint.fixed_size_bits(sel4_config).unwrap(),
+            Object::Notification => ObjectType::Notification.fixed_size_bits(sel4_config).unwrap(),
+            Object::CNode(cnode) => cnode.size_bits as u64 + 5, // @billn figure out where RHS come from
+            Object::Tcb(_) => ObjectType::Tcb.fixed_size_bits(sel4_config).unwrap(),
+            Object::Irq(_) => 0,
+            Object::VCpu => ObjectType::Vcpu.fixed_size_bits(sel4_config).unwrap(),
+            Object::Frame(frame) => frame.size_bits as u64,
+            Object::PageTable(_) => ObjectType::PageTable.fixed_size_bits(sel4_config).unwrap(),
+            Object::AsidPool(_) => 0, // This isn't zero on x86, is it also zero on arm?? @billn revisit
+            Object::ArmIrq(_) => 0,
+            Object::IrqMsi(_) => 0,
+            Object::IrqIOApic(_) => 0,
+            Object::IOPorts(_) => 0,
+            Object::SchedContext(sched_context) => sched_context.size_bits as u64, // @billn fix, there should be a base size
+            Object::Reply => ObjectType::Reply.fixed_size_bits(sel4_config).unwrap(),
+        }
+    }
+
+    pub fn get_cap_entries_mut(&mut self) -> Option<&mut Vec<CapTableEntry>> {
+        match self {
+            Object::CNode(cnode) => Some(&mut cnode.slots),
+            Object::Tcb(tcb) => Some(&mut tcb.slots),
+            Object::Irq(irq) => Some(&mut irq.slots),
+            Object::PageTable(page_table) => Some(&mut page_table.slots),
+            Object::ArmIrq(arm_irq) => Some(&mut arm_irq.slots),
+            Object::IrqMsi(irq_msi) => Some(&mut irq_msi.slots),
+            Object::IrqIOApic(irq_ioapic) => Some(&mut irq_ioapic.slots),
             _ => None,
         }
     }
@@ -93,7 +129,7 @@ impl Object {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Cap {
-    Untyped(cap::Untyped),
+    // Untyped(cap::Untyped),
     Endpoint(cap::Endpoint),
     Notification(cap::Notification),
     CNode(cap::CNode),
@@ -114,7 +150,8 @@ pub enum Cap {
 impl Cap {
     pub fn obj(&self) -> ObjectId {
         match self {
-            Cap::Untyped(cap) => cap.object,
+            // @billn do we ever need to use the untyped object in spec generation?
+            // Cap::Untyped(cap) => cap.object,
             Cap::Endpoint(cap) => cap.object,
             Cap::Notification(cap) => cap.object,
             Cap::CNode(cap) => cap.object,
@@ -132,6 +169,28 @@ impl Cap {
             Cap::Reply(cap) => cap.object,
         }
     }
+
+    pub fn set_id(&mut self, new_id: ObjectId) {
+        match self {
+            // @billn do we ever need to use the untyped object in spec generation?
+            // Cap::Untyped(cap) => cap.object,
+            Cap::Endpoint(cap) => cap.object = new_id,
+            Cap::Notification(cap) => cap.object = new_id,
+            Cap::CNode(cap) => cap.object = new_id,
+            Cap::Frame(cap) => cap.object = new_id,
+            Cap::Tcb(cap) => cap.object = new_id,
+            Cap::IrqHandler(cap) => cap.object = new_id,
+            Cap::VCpu(cap) => cap.object = new_id,
+            Cap::PageTable(cap) => cap.object = new_id,
+            Cap::AsidPool(cap) => cap.object = new_id,
+            Cap::ArmIrqHandler(cap) => cap.object = new_id,
+            Cap::IrqMsiHandler(cap) => cap.object = new_id,
+            Cap::IrqIOApicHandler(cap) => cap.object = new_id,
+            Cap::IOPorts(cap) => cap.object = new_id,
+            Cap::SchedContext(cap) => cap.object = new_id,
+            Cap::Reply(cap) => cap.object = new_id,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
@@ -145,14 +204,15 @@ pub struct Rights {
 pub mod object {
     use super::*;
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
-    pub struct Untyped {
-        pub size_bits: usize,
-        pub paddr: Option<usize>,
-    }
+    // #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    // pub struct Untyped {
+    //     pub size_bits: usize,
+    //     pub paddr: Option<usize>,
+    // }
 
     #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
     pub struct CNode {
+        /// This is in addition to 
         pub size_bits: usize,
         pub slots: Vec<CapTableEntry>,
     }

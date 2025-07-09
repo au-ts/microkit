@@ -6,9 +6,9 @@
 use core::ops::Range;
 
 use std::{
-    cmp::min,
-    collections::{HashMap},
-    path::{PathBuf},
+    cmp::{min, Ordering},
+    collections::HashMap,
+    path::PathBuf,
     u8,
 };
 
@@ -20,13 +20,13 @@ use crate::{
         spec::{
             cap,
             object::{self},
-            AsidSlotEntry, Cap, FileContentRange, Fill, FillEntry, FillEntryContent,
-            FrameInit, IrqEntry, NamedObject, Object, ObjectId, UntypedCover,
+            AsidSlotEntry, Cap, FileContentRange, Fill, FillEntry, FillEntryContent, FrameInit,
+            IrqEntry, NamedObject, Object, ObjectId, UntypedCover,
         },
         util::*,
     },
     elf::ElfFile,
-    sdf::SystemDescription,
+    sdf::{SysMapPerms, SystemDescription},
     sel4::{Config, PageSize},
     util::{self, round_down},
 };
@@ -351,68 +351,218 @@ pub fn build_capdl_spec(
     // the correct slot in the CSpace. We need to bind those objects into the TCB for the monitor to use them.
     // In addition, `add_elf_to_spec()` doesn't fill most the details in the TCB.
     // Now fill them in: stack ptr, priority, ipc buf vaddr, etc.
-    {
-        let monitor_tcb_wrapper_obj = spec.get_root_object_mut(monitor_tcb_obj_id).unwrap();
-        if let Object::Tcb(monitor_tcb) = &mut monitor_tcb_wrapper_obj.object {
-            // Special case, monitor have its stack statically allocated.
-            monitor_tcb.extra.sp = monitor_elf.find_symbol("_stack").unwrap().0;
-            monitor_tcb.extra.master_fault_ep = None;
-            // Monitor must run at the highest priority
-            monitor_tcb.extra.prio = u8::MAX - 1;
-            monitor_tcb.extra.max_prio = u8::MAX - 1;
-            monitor_tcb.extra.resume = true;
+    if let Object::Tcb(monitor_tcb) = &mut spec.get_root_object_mut(monitor_tcb_obj_id).unwrap().object {
+        // Special case, monitor have its stack statically allocated.
+        monitor_tcb.extra.sp = monitor_elf.find_symbol("_stack").unwrap().0;
+        // Monitor must run at the highest priority
+        monitor_tcb.extra.prio = u8::MAX;
+        monitor_tcb.extra.max_prio = u8::MAX;
+        monitor_tcb.extra.resume = true;
 
-            monitor_tcb
-                .slots
-                .push((TCB_SLOT_CSPACE as usize, mon_cnode_cap));
+        monitor_tcb
+            .slots
+            .push((TCB_SLOT_CSPACE as usize, mon_cnode_cap));
 
-            monitor_tcb.slots.push((TCB_SLOT_SC as usize, mon_sc_cap));
-        } else {
-            unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
-        }
+        monitor_tcb.slots.push((TCB_SLOT_SC as usize, mon_sc_cap));
+    } else {
+        unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
     }
+    
 
     // *********************************
     // Step 2. Create the memory regions' spec. Result is a hashmap keyed on MR name, value is Vec of frame object IDs
     // *********************************
     let mut mr_to_frame_obj_ids: HashMap<&String, Vec<ObjectId>> = HashMap::new();
+    let mut mr_to_page_size: HashMap<&String, PageSize> = HashMap::new();
     for mr in system.memory_regions.iter() {
         mr_to_frame_obj_ids.insert(&mr.name, [].to_vec());
+        mr_to_page_size.insert(&mr.name, mr.page_size);
         let frame_size_bits = mr.page_size.fixed_size_bits(kernel_config);
 
         for frame_sequence in 0..mr.page_count {
             let paddr = match mr.phys_addr {
-                Some(base_paddr) => Some((base_paddr + (frame_sequence * mr.page_size_bytes())) as usize),
+                Some(base_paddr) => {
+                    Some((base_paddr + (frame_sequence * mr.page_size_bytes())) as usize)
+                }
                 None => None,
             };
-            mr_to_frame_obj_ids.get_mut(&mr.name).unwrap().push(capdl_util_make_frame_obj(
-                &mut spec,
-                FrameInit::Fill(Fill {
-                    entries: [].to_vec(),
-                }),
-                &format!("mr_{}_{}", mr.name, frame_sequence),
-                paddr,
-                frame_size_bits as usize,
-            ));
+            mr_to_frame_obj_ids
+                .get_mut(&mr.name)
+                .unwrap()
+                .push(capdl_util_make_frame_obj(
+                    &mut spec,
+                    FrameInit::Fill(Fill {
+                        entries: [].to_vec(),
+                    }),
+                    &format!("mr_{}_{}", mr.name, frame_sequence),
+                    paddr,
+                    frame_size_bits as usize,
+                ));
         }
     }
 
     // *********************************
     // Step 3. Create the PDs' spec
     // *********************************
-    for (i, pd) in system.protection_domains.iter().enumerate() {
-        let elf = &pd_elf_files[i];
-        let pd_tcb_obj_id = spec.add_elf_to_spec(&pd.name, elf)?; // @billn check error
+    // for (i, pd) in system.protection_domains.iter().enumerate() {
+    //     // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
+    //     let elf = &pd_elf_files[i];
+    //     let pd_tcb_obj_id = spec.add_elf_to_spec(&pd.name, elf).unwrap();
+    //     let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec, pd_tcb_obj_id);
 
-        // Same as the monitor, we must pull in extra details for the TCB from the SDF.
+    //     // Step 3-2: Map in all Memory Regions
+    //     for map in pd.maps.iter() {
+    //         let cur_vaddr = map.vaddr;
+    //         let page_size = *mr_to_page_size.get(&map.mr).unwrap();
+    //         let read = map.perms & SysMapPerms::Read as u8 != 0;
+    //         let write = map.perms & SysMapPerms::Write as u8 != 0;
+    //         let execute = map.perms & SysMapPerms::Execute as u8 != 0;
+    //         let cached = map.cached;
+    //         for frame_obj_id in mr_to_frame_obj_ids.get(&map.mr).unwrap() {
+    //             // Make a cap for this frame.
+    //             let frame_cap =
+    //                 capdl_util_make_frame_cap(*frame_obj_id, read, write, execute, cached);
+    //             // Map it into this PD address space. @billn make arch agnositc
+    //             memory::X86_64::map_page(
+    //                 &mut spec,
+    //                 &pd.name,
+    //                 pd_vspace_obj_id,
+    //                 frame_cap,
+    //                 page_size,
+    //                 cur_vaddr,
+    //             )
+    //             .unwrap();
+    //         }
+    //     }
+
+    //     // Step 3-3: Create and map in the stack (bottom up)
+    //     let mut cur_stack_vaddr = kernel_config.pd_stack_bottom(pd.stack_size);
+    //     let num_stack_frames = pd.stack_size / PageSize::Small as u64;
+    //     for stack_frame_seq in 0..num_stack_frames {
+    //         let stack_frame_obj_id = capdl_util_make_frame_obj(
+    //             &mut spec,
+    //             FrameInit::Fill(Fill {
+    //                 entries: [].to_vec(),
+    //             }),
+    //             &format!("{}_stack_{}", pd.name, stack_frame_seq),
+    //             None,
+    //             PageSize::Small.fixed_size_bits(kernel_config) as usize,
+    //         );
+    //         let stack_frame_cap = capdl_util_make_frame_cap(stack_frame_obj_id, true, true, false, true);
+    //         memory::X86_64::map_page(&mut spec, &pd.name, pd_vspace_obj_id, stack_frame_cap, PageSize::Small, cur_stack_vaddr).unwrap();
+    //         cur_stack_vaddr += PageSize::Small as u64;
+    //     }
+
+    //     // Create Scheduling Context
+
+    //     // Create fault Endpoint
+
+    //     // Create spec and caps to IRQs
+    //     let mut irq_caps: Vec<Cap> = Vec::new();
+    //     for irq in pd.irqs.iter() {}
+
+    //     // Create channels
+
+    //     // Create CSpace and add all the IRQs and Channel caps.
+
+    //     // Set the TCB parameters and all the various caps that we need to bind to this TCB.
+    //     if let Object::Tcb(pc_tcb) = &mut spec.get_root_object_mut(pd_tcb_obj_id).unwrap().object {
+    //         pc_tcb.extra.sp = kernel_config.pd_stack_top();
+    //         pc_tcb.extra.master_fault_ep = Some(FAULT_EP_CAP_IDX);
+    //         pc_tcb.extra.prio = pd.priority;
+    //         pc_tcb.extra.max_prio = pd.priority; // @billn what is this used for?
+    //         pc_tcb.extra.resume = true;
+
+    //         // pc_tcb
+    //         //     .slots
+    //         //     .push((TCB_SLOT_CSPACE as usize, mon_cnode_cap));
+
+    //         // pc_tcb.slots.push((TCB_SLOT_SC as usize, mon_sc_cap));
+    //     } else {
+    //         unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
+    //     }
+    // }
+
+    // *********************************
+    // Step 4. Sort the root objects
+    // *********************************
+    // The CapDL loader expects objects with paddr to come first, then sorted by size so that the
+    // allocation algorithm at run-time can run more efficiently.
+    // Capabilities to objects in CapDL are referenced by the object's index in the root objects
+    // vector. Since sorting the objects will shuffle them, we need to:
+    // 1. Record all root objects name + original index.
+    // 2. Sort size bits descending, break tie alphabetically.
+    // 3. Record all of the root objects new index.
+    // 4. Recurse through every cap, for any cap bearing the original object ID, write the new object ID.
+
+    // Step 4-1
+    let mut obj_name_to_old_id: HashMap<String, ObjectId> = HashMap::new();
+    for (id, obj) in spec.objects.iter().enumerate() {
+        obj_name_to_old_id.insert(obj.name.clone(), id);
+    }
+
+    // Step 4-2
+    spec.objects.sort_by(|a, b| {
+        // Objects with paddrs come first.
+        if a.object.paddr().is_none() && a.object.paddr().is_some() {
+            return Ordering::Less;
+        } else if a.object.paddr().is_some() && a.object.paddr().is_none() {
+            return Ordering::Greater;
+        }
+
+        // If both have paddrs and not equal, make the lower paddr comes first.
+        if a.object.paddr().is_some() && b.object.paddr().is_some() {
+            let a_paddr = a.object.paddr().unwrap();
+            let b_paddr = b.object.paddr().unwrap();
+            if a_paddr != b_paddr {
+                return a_paddr.cmp(&b_paddr);
+            }
+            // Both have equal paddr, break tie by object size and name.
+        }
+
+        let size_cmp = a
+            .object
+            .physical_size_bits(kernel_config)
+            .cmp(&b.object.physical_size_bits(kernel_config))
+            .reverse();
+        if size_cmp == Ordering::Equal {
+            let name_cmp = a.name.cmp(&b.name);
+            if name_cmp == Ordering::Equal {
+                // Make sure the sorting function implement a total order to comply with .sort_by()'s doc.
+                unreachable!("internal bug: object names must be unique!");
+            }
+            name_cmp
+        } else {
+            size_cmp
+        }
+    });
+
+    // Step 4-3
+    let mut obj_old_id_to_new_id: HashMap<ObjectId, ObjectId> = HashMap::new();
+    for (new_id, obj) in spec.objects.iter().enumerate() {
+        obj_old_id_to_new_id.insert(*obj_name_to_old_id.get(&obj.name).unwrap(), new_id);
+    }
+
+    // Step 4-4
+    for obj in spec.objects.iter_mut() {
+        match obj.object.get_cap_entries_mut() {
+            Some(caps) => {
+                for cap in caps {
+                    let old_id = cap.1.obj();
+                    let new_id = obj_old_id_to_new_id.get(&old_id).unwrap();
+                    cap.1.set_id(*new_id);
+                }
+            }
+            None => continue,
+        }
     }
 
     // *********************************
-    // Step 4. Serialise the spec to JSON
+    // Step 5. Serialise the spec to JSON
     // *********************************
 
     // *********************************
-    // Step 4. Embed the serialised spec to the CapDL loader
+    // Step 6. Embed the serialised spec to the CapDL loader
     // *********************************
 
     Ok(spec)
