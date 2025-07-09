@@ -313,6 +313,8 @@ pub fn build_capdl_spec(
 ) -> Result<CapDLSpec, String> {
     let mut spec = CapDLSpec::new();
 
+    // @billn revisit: does every caps need grant rights?
+
     // *********************************
     // Step 1. Create the monitor's spec.
     // *********************************
@@ -475,7 +477,9 @@ pub fn build_capdl_spec(
         // Step 3-5 Create fault Endpoint cap to monitor
         let pd_fault_ep_cap =
             capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, pd_id as u64);
+        let pd_fault_ep_cap_clone = pd_fault_ep_cap.clone();
         caps_to_insert_to_cspace.push((FAULT_EP_CAP_IDX as usize, pd_fault_ep_cap));
+        caps_to_bind_to_tcb.push((TCB_SLOT_FAULT_EP as usize, pd_fault_ep_cap_clone));
 
         // Step 3-6 Create spec and caps to IRQs
         let mut irq_caps: Vec<Cap> = Vec::new();
