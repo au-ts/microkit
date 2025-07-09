@@ -18,10 +18,7 @@ use crate::{
     capdl::{
         memory::{self, ArchMethods, X86_64},
         spec::{
-            cap,
-            object::{self},
-            AsidSlotEntry, Cap, FileContentRange, Fill, FillEntry, FillEntryContent, FrameInit,
-            IrqEntry, NamedObject, Object, ObjectId, UntypedCover,
+            cap, object::{self}, AsidSlotEntry, Cap, CapTableEntry, FileContentRange, Fill, FillEntry, FillEntryContent, FrameInit, IrqEntry, NamedObject, Object, ObjectId, UntypedCover
         },
         util::*,
     },
@@ -322,7 +319,7 @@ pub fn build_capdl_spec(
 
     // Create monitor fault endpoint object + cap
     let mon_fault_ep_obj_id = capdl_util_make_endpoint_obj(&mut spec, "monitor");
-    let mon_fault_ep_cap = capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, 0);
+    let mon_fault_ep_cap = capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, 0);
 
     // Create monitor reply object object + cap
     let mon_reply_obj_id = capdl_util_make_reply_obj(&mut spec, "monitor");
@@ -404,84 +401,98 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 3. Create the PDs' spec
     // *********************************
-    // for (i, pd) in system.protection_domains.iter().enumerate() {
-    //     // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
-    //     let elf = &pd_elf_files[i];
-    //     let pd_tcb_obj_id = spec.add_elf_to_spec(&pd.name, elf).unwrap();
-    //     let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec, pd_tcb_obj_id);
+    for (pd_id, pd) in system.protection_domains.iter().enumerate() {
+        let mut caps_to_bind_to_tcb: Vec<CapTableEntry> = Vec::new();
+        let mut caps_to_insert_to_cspace: Vec<CapTableEntry> = Vec::new();
 
-    //     // Step 3-2: Map in all Memory Regions
-    //     for map in pd.maps.iter() {
-    //         let cur_vaddr = map.vaddr;
-    //         let page_size = *mr_to_page_size.get(&map.mr).unwrap();
-    //         let read = map.perms & SysMapPerms::Read as u8 != 0;
-    //         let write = map.perms & SysMapPerms::Write as u8 != 0;
-    //         let execute = map.perms & SysMapPerms::Execute as u8 != 0;
-    //         let cached = map.cached;
-    //         for frame_obj_id in mr_to_frame_obj_ids.get(&map.mr).unwrap() {
-    //             // Make a cap for this frame.
-    //             let frame_cap =
-    //                 capdl_util_make_frame_cap(*frame_obj_id, read, write, execute, cached);
-    //             // Map it into this PD address space. @billn make arch agnositc
-    //             memory::X86_64::map_page(
-    //                 &mut spec,
-    //                 &pd.name,
-    //                 pd_vspace_obj_id,
-    //                 frame_cap,
-    //                 page_size,
-    //                 cur_vaddr,
-    //             )
-    //             .unwrap();
-    //         }
-    //     }
+        // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
+        let elf = &pd_elf_files[pd_id];
+        let pd_tcb_obj_id = spec.add_elf_to_spec(&pd.name, elf).unwrap();
+        let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec, pd_tcb_obj_id);
 
-    //     // Step 3-3: Create and map in the stack (bottom up)
-    //     let mut cur_stack_vaddr = kernel_config.pd_stack_bottom(pd.stack_size);
-    //     let num_stack_frames = pd.stack_size / PageSize::Small as u64;
-    //     for stack_frame_seq in 0..num_stack_frames {
-    //         let stack_frame_obj_id = capdl_util_make_frame_obj(
-    //             &mut spec,
-    //             FrameInit::Fill(Fill {
-    //                 entries: [].to_vec(),
-    //             }),
-    //             &format!("{}_stack_{}", pd.name, stack_frame_seq),
-    //             None,
-    //             PageSize::Small.fixed_size_bits(kernel_config) as usize,
-    //         );
-    //         let stack_frame_cap = capdl_util_make_frame_cap(stack_frame_obj_id, true, true, false, true);
-    //         memory::X86_64::map_page(&mut spec, &pd.name, pd_vspace_obj_id, stack_frame_cap, PageSize::Small, cur_stack_vaddr).unwrap();
-    //         cur_stack_vaddr += PageSize::Small as u64;
-    //     }
+        // Step 3-2: Map in all Memory Regions
+        for map in pd.maps.iter() {
+            let cur_vaddr = map.vaddr;
+            let page_size = *mr_to_page_size.get(&map.mr).unwrap();
+            let read = map.perms & SysMapPerms::Read as u8 != 0;
+            let write = map.perms & SysMapPerms::Write as u8 != 0;
+            let execute = map.perms & SysMapPerms::Execute as u8 != 0;
+            let cached = map.cached;
+            for frame_obj_id in mr_to_frame_obj_ids.get(&map.mr).unwrap() {
+                // Make a cap for this frame.
+                let frame_cap =
+                    capdl_util_make_frame_cap(*frame_obj_id, read, write, execute, cached);
+                // Map it into this PD address space. @billn make arch agnositc
+                memory::X86_64::map_page(
+                    &mut spec,
+                    &pd.name,
+                    pd_vspace_obj_id,
+                    frame_cap,
+                    page_size,
+                    cur_vaddr,
+                )
+                .unwrap();
+            }
+        }
 
-    //     // Create Scheduling Context
+        // Step 3-3: Create and map in the stack (bottom up)
+        let mut cur_stack_vaddr = kernel_config.pd_stack_bottom(pd.stack_size);
+        let num_stack_frames = pd.stack_size / PageSize::Small as u64;
+        for stack_frame_seq in 0..num_stack_frames {
+            let stack_frame_obj_id = capdl_util_make_frame_obj(
+                &mut spec,
+                FrameInit::Fill(Fill {
+                    entries: [].to_vec(),
+                }),
+                &format!("{}_stack_{}", pd.name, stack_frame_seq),
+                None,
+                PageSize::Small.fixed_size_bits(kernel_config) as usize,
+            );
+            let stack_frame_cap = capdl_util_make_frame_cap(stack_frame_obj_id, true, true, false, true);
+            memory::X86_64::map_page(&mut spec, &pd.name, pd_vspace_obj_id, stack_frame_cap, PageSize::Small, cur_stack_vaddr).unwrap();
+            cur_stack_vaddr += PageSize::Small as u64;
+        }
 
-    //     // Create fault Endpoint
+        // Step 3-4 Create Scheduling Context
+        // @billn work out where these magic numbers come from and fix size bits
+        let pd_sc_obj_id = capdl_util_make_sc_obj(&mut spec, &pd.name, 7, pd.period, pd.budget, 0);
+        let pd_sc_cap = capdl_util_make_sc_cap(pd_sc_obj_id);
+        caps_to_bind_to_tcb.push((TCB_SLOT_SC as usize, pd_sc_cap));
 
-    //     // Create spec and caps to IRQs
-    //     let mut irq_caps: Vec<Cap> = Vec::new();
-    //     for irq in pd.irqs.iter() {}
+        // Step 3-5 Create fault Endpoint cap to monitor
+        let pd_fault_ep_cap = capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, pd_id as u64);
+        caps_to_insert_to_cspace.push((FAULT_EP_CAP_IDX as usize, pd_fault_ep_cap));
 
-    //     // Create channels
+        // Create spec and caps to IRQs
+        let mut irq_caps: Vec<Cap> = Vec::new();
+        for irq in pd.irqs.iter() {}
 
-    //     // Create CSpace and add all the IRQs and Channel caps.
+        // Create channels
 
-    //     // Set the TCB parameters and all the various caps that we need to bind to this TCB.
-    //     if let Object::Tcb(pc_tcb) = &mut spec.get_root_object_mut(pd_tcb_obj_id).unwrap().object {
-    //         pc_tcb.extra.sp = kernel_config.pd_stack_top();
-    //         pc_tcb.extra.master_fault_ep = Some(FAULT_EP_CAP_IDX);
-    //         pc_tcb.extra.prio = pd.priority;
-    //         pc_tcb.extra.max_prio = pd.priority; // @billn what is this used for?
-    //         pc_tcb.extra.resume = true;
+        // Create CSpace and add all caps that the PD code and libmicrokit need to access.
+        let pd_cnode_obj_id = capdl_util_make_cnode_obj(
+            &mut spec,
+            &pd.name,
+            PD_CAP_BITS as usize,
+            caps_to_insert_to_cspace
+        );
+        // @billn understand???: guard_size: kernel_config.cap_address_bits - PD_CAP_BITS,
+        let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, 55);
+        caps_to_bind_to_tcb.push((TCB_SLOT_CSPACE as usize, pd_cnode_cap));
 
-    //         // pc_tcb
-    //         //     .slots
-    //         //     .push((TCB_SLOT_CSPACE as usize, mon_cnode_cap));
+        // Set the TCB parameters and all the various caps that we need to bind to this TCB.
+        if let Object::Tcb(pc_tcb) = &mut spec.get_root_object_mut(pd_tcb_obj_id).unwrap().object {
+            pc_tcb.extra.sp = kernel_config.pd_stack_top();
+            pc_tcb.extra.master_fault_ep = Some(FAULT_EP_CAP_IDX);
+            pc_tcb.extra.prio = pd.priority;
+            pc_tcb.extra.max_prio = pd.priority; // @billn what is this used for?
+            pc_tcb.extra.resume = true;
 
-    //         // pc_tcb.slots.push((TCB_SLOT_SC as usize, mon_sc_cap));
-    //     } else {
-    //         unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
-    //     }
-    // }
+            pc_tcb.slots.extend(caps_to_bind_to_tcb);
+        } else {
+            unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
+        }
+    }
 
     // *********************************
     // Step 4. Sort the root objects

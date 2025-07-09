@@ -93,14 +93,14 @@ pub fn capdl_util_make_endpoint_obj(spec: &mut CapDLSpec, pd_name: &str) -> Obje
     spec.add_root_object(fault_ep_obj)
 }
 
-pub fn capdl_util_make_endpoint_cap(ep_obj_id: ObjectId, badge: u64) -> Cap {
+pub fn capdl_util_make_endpoint_cap(ep_obj_id: ObjectId, read: bool, write: bool, grant: bool, badge: u64) -> Cap {
     Cap::Endpoint(cap::Endpoint {
         object: ep_obj_id,
         badge,
         rights: Rights {
-            read: true,
-            write: true,
-            grant: false,
+            read,
+            write,
+            grant,
             grant_reply: false,
         },
     })
