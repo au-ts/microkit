@@ -18,7 +18,10 @@ use crate::{
     capdl::{
         memory::{self, ArchMethods, X86_64},
         spec::{
-            cap, object::{self}, AsidSlotEntry, Cap, CapTableEntry, FileContentRange, Fill, FillEntry, FillEntryContent, FrameInit, IrqEntry, NamedObject, Object, ObjectId, UntypedCover
+            cap,
+            object::{self},
+            AsidSlotEntry, Cap, CapTableEntry, FileContentRange, Fill, FillEntry, FillEntryContent,
+            FrameInit, IrqEntry, NamedObject, Object, ObjectId, UntypedCover,
         },
         util::*,
     },
@@ -348,7 +351,9 @@ pub fn build_capdl_spec(
     // the correct slot in the CSpace. We need to bind those objects into the TCB for the monitor to use them.
     // In addition, `add_elf_to_spec()` doesn't fill most the details in the TCB.
     // Now fill them in: stack ptr, priority, ipc buf vaddr, etc.
-    if let Object::Tcb(monitor_tcb) = &mut spec.get_root_object_mut(monitor_tcb_obj_id).unwrap().object {
+    if let Object::Tcb(monitor_tcb) =
+        &mut spec.get_root_object_mut(monitor_tcb_obj_id).unwrap().object
+    {
         // Special case, monitor have its stack statically allocated.
         monitor_tcb.extra.sp = monitor_elf.find_symbol("_stack").unwrap().0;
         // Monitor must run at the highest priority
@@ -364,7 +369,6 @@ pub fn build_capdl_spec(
     } else {
         unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
     }
-    
 
     // *********************************
     // Step 2. Create the memory regions' spec. Result is a hashmap keyed on MR name, value is Vec of frame object IDs
@@ -448,8 +452,17 @@ pub fn build_capdl_spec(
                 None,
                 PageSize::Small.fixed_size_bits(kernel_config) as usize,
             );
-            let stack_frame_cap = capdl_util_make_frame_cap(stack_frame_obj_id, true, true, false, true);
-            memory::X86_64::map_page(&mut spec, &pd.name, pd_vspace_obj_id, stack_frame_cap, PageSize::Small, cur_stack_vaddr).unwrap();
+            let stack_frame_cap =
+                capdl_util_make_frame_cap(stack_frame_obj_id, true, true, false, true);
+            memory::X86_64::map_page(
+                &mut spec,
+                &pd.name,
+                pd_vspace_obj_id,
+                stack_frame_cap,
+                PageSize::Small,
+                cur_stack_vaddr,
+            )
+            .unwrap();
             cur_stack_vaddr += PageSize::Small as u64;
         }
 
@@ -460,21 +473,20 @@ pub fn build_capdl_spec(
         caps_to_bind_to_tcb.push((TCB_SLOT_SC as usize, pd_sc_cap));
 
         // Step 3-5 Create fault Endpoint cap to monitor
-        let pd_fault_ep_cap = capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, pd_id as u64);
+        let pd_fault_ep_cap =
+            capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, pd_id as u64);
         caps_to_insert_to_cspace.push((FAULT_EP_CAP_IDX as usize, pd_fault_ep_cap));
 
-        // Create spec and caps to IRQs
+        // Step 3-6 Create spec and caps to IRQs
         let mut irq_caps: Vec<Cap> = Vec::new();
         for irq in pd.irqs.iter() {}
-
-        // Create channels
 
         // Create CSpace and add all caps that the PD code and libmicrokit need to access.
         let pd_cnode_obj_id = capdl_util_make_cnode_obj(
             &mut spec,
             &pd.name,
             PD_CAP_BITS as usize,
-            caps_to_insert_to_cspace
+            caps_to_insert_to_cspace,
         );
         // @billn understand???: guard_size: kernel_config.cap_address_bits - PD_CAP_BITS,
         let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, 55);
@@ -528,8 +540,8 @@ pub fn build_capdl_spec(
             if a_paddr != b_paddr {
                 return a_paddr.cmp(&b_paddr);
             }
-            // Both have equal paddr, break tie by object size and name.
         }
+        // Both have no paddr or equal paddr, break tie by object size and name.
 
         let size_cmp = a
             .object

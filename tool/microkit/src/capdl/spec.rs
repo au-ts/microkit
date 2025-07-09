@@ -65,7 +65,6 @@ pub struct FileContentRange {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Object {
-    // Untyped(object::Untyped),
     Endpoint,
     Notification,
     CNode(object::CNode),
@@ -86,7 +85,6 @@ pub enum Object {
 impl Object {
     pub fn paddr(&self) -> Option<usize> {
         match self {
-            // Object::Untyped(obj) => obj.paddr,
             Object::Frame(obj) => obj.paddr,
             _ => None,
         }
@@ -203,16 +201,10 @@ pub struct Rights {
 
 pub mod object {
     use super::*;
-
-    // #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
-    // pub struct Untyped {
-    //     pub size_bits: usize,
-    //     pub paddr: Option<usize>,
-    // }
+    /// Any object that takes a size bits is in addition to the base size
 
     #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
     pub struct CNode {
-        /// This is in addition to 
         pub size_bits: usize,
         pub slots: Vec<CapTableEntry>,
     }
