@@ -416,6 +416,17 @@ pub fn build_capdl_spec(
         let pd_tcb_obj_id = spec.add_elf_to_spec(&pd.name, elf).unwrap();
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec, pd_tcb_obj_id);
 
+        // In the benchmark configuration, we allow PDs to access their own TCB.
+        // This is necessary for accessing kernel's benchmark API.
+        if kernel_config.benchmark {
+            caps_to_insert_to_cspace.push((
+                TCB_CAP_IDX as usize,
+                Cap::Tcb(cap::Tcb {
+                    object: pd_tcb_obj_id,
+                }),
+            ));
+        }
+
         // Step 3-2: Map in all Memory Regions
         for map in pd.maps.iter() {
             let cur_vaddr = map.vaddr;
@@ -518,7 +529,7 @@ pub fn build_capdl_spec(
     // Capabilities to objects in CapDL are referenced by the object's index in the root objects
     // vector. Since sorting the objects will shuffle them, we need to:
     // 1. Record all root objects name + original index.
-    // 2. Sort size bits descending, break tie alphabetically.
+    // 2. Sort paddr first, size bits descending and break tie alphabetically.
     // 3. Record all of the root objects new index.
     // 4. Recurse through every cap, for any cap bearing the original object ID, write the new object ID.
 
