@@ -24,17 +24,23 @@ ifeq ($(ARCH),aarch64)
 else ifeq ($(ARCH),riscv64)
 	ASM_CPP_FLAGS := -x assembler-with-cpp -c -g -march=rv64imac_zicsr_zifencei -mabi=lp64
 	ASM_FLAGS := -march=rv64imac_zicsr_zifencei -mabi=lp64
-	CFLAGS_ARCH := -mcmodel=medany -march=rv64imac_zicsr_zifencei -mabi=lp64 -DARCH_riscv64
+	CFLAGS_ARCH := -mcmodel=medany -march=rv64imac_zicsr_zifencei -mabi=lp64
 
 	ARCH_DIR := riscv
+else ifeq ($(ARCH),x86_64)
+	CFLAGS_ARCH := -mtune=$(GCC_CPU) -mabi=sysv -mcmodel=large
+	ASM_CPP_FLAGS := -x assembler-with-cpp -c -g
+	ASM_FLAGS := -g -march=generic64
+
+	ARCH_DIR := x86_64
 else
 	$(error ARCH is unsupported)
 endif
 
-CFLAGS := -std=gnu11 -g -O3 -nostdlib -ffreestanding -Wall -Wno-maybe-uninitialized -Werror -I$(SEL4_SDK)/include $(CFLAGS_ARCH) -DARCH_$(ARCH)
+CFLAGS = -std=gnu11 -g -O3 -nostdlib -ffreestanding -Wall -Wno-maybe-uninitialized -Werror -I$(SEL4_SDK)/include $(CFLAGS_ARCH) -DARCH_$(ARCH)
 
 PROGS := monitor.elf
-OBJECTS := main.o crt0.o debug.o util.o
+OBJECTS := main.o crt0.o util.o
 LINKSCRIPT := monitor.ld
 
 $(BUILD_DIR)/%.o : src/$(ARCH_DIR)/%.S
@@ -51,4 +57,4 @@ OBJPROG = $(addprefix $(BUILD_DIR)/, $(PROGS))
 all: $(OBJPROG)
 
 $(OBJPROG): $(addprefix $(BUILD_DIR)/, $(OBJECTS)) $(LINKSCRIPT)
-	$(TOOLCHAIN)ld -T$(LINKSCRIPT) $(addprefix $(BUILD_DIR)/, $(OBJECTS)) -o $@
+	$(TOOLCHAIN)ld -z noexecstack -T$(LINKSCRIPT) $(addprefix $(BUILD_DIR)/, $(OBJECTS)) -o $@
