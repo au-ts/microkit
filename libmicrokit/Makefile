@@ -26,7 +26,7 @@ else ifeq ($(ARCH),riscv64)
 	CFLAGS_ARCH := $(CFLAGS_RISCV64)
 	ARCH_DIR := riscv
 else ifeq ($(ARCH),x86_64)
-	CFLAGS_ARCH := -march=$(GCC_CPU)
+	CFLAGS_ARCH := -march=x86-64 -mtune=$(GCC_CPU)
 	ASM_FLAGS := -march=generic64
 	ARCH_DIR := x86_64
 endif
