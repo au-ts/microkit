@@ -53,8 +53,9 @@ seL4_Word pd_names_len;
 char vm_names[MAX_VMS][MAX_NAME_LEN] __attribute__((unused));
 seL4_Word vm_names_len;
 
-seL4_Word fault_ep;
-seL4_Word reply;
+// @billn use ELF symbol patching from tool
+seL4_Word fault_ep = 2;
+seL4_Word reply = 4;
 seL4_Word pd_tcbs[MAX_PDS];
 seL4_Word vm_tcbs[MAX_VMS];
 seL4_Word scheduling_contexts[MAX_PDS];
