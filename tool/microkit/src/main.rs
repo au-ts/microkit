@@ -3346,7 +3346,7 @@ fn main() -> Result<(), String> {
     // };
 
     let kernel_elf: ElfFile = ElfFile::from_path(&kernel_elf_path)?;
-    let mut monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
+    let monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
 
     // if monitor_elf.segments.iter().filter(|s| s.loadable).count() > 1 {
     //     eprintln!(
@@ -3379,75 +3379,51 @@ fn main() -> Result<(), String> {
         }
     }
 
+    // Now we have the parsed the XML and all ELF files, create the CapDL spec of the system described in the XML.
     let spec = build_capdl_spec(&kernel_config, &capdl_init_elf_path, &monitor_elf, &pd_elf_files, &system)?;
 
-    {
-        // A re-implementation of dep/rust-sel4/crates/sel4-capdl-initializer/add-spec/src/main.rs
-        // so we don't have to call out to it as a subprocess.
-        let spec_as_json = serde_json::to_string(&spec).unwrap();
-        // Reserialise it into a type that can be understood by rust-sel4.
-        let spec_reserialised = InputSpec::parse(&spec_as_json);
+    // Now embed the built spec into the CapDL initialiser.
+    // A re-implementation of dep/rust-sel4/crates/sel4-capdl-initializer/add-spec/src/main.rs
+    // so we don't have to call out to it as a subprocess.
+    let spec_as_json = serde_json::to_string(&spec).unwrap();
+    // Reserialise it into a type that can be understood by rust-sel4.
+    let spec_reserialised = InputSpec::parse(&spec_as_json);
 
-        // @billn revisit where this comes from
-        let granule_size_bits = 12;
+    // @billn revisit where this comes from
+    let granule_size_bits = 12;
 
-        let (final_spec, serialized_spec) = reserialize_spec::reserialize_spec(
-            &spec_reserialised,
-            "",
-            &ObjectNamesLevel::All,
-            false,
-            granule_size_bits,
-            true,
-        );
+    // This is empty because the spec we built reference all ELF by absolute path, so this can be empty.
+    let fill_dir_path = "";
 
-        let footprint = final_spec.total_footprint();
-        // TODO make configurable
-        let heap_size = footprint * 2 + 16 * 4096;
+    let (final_spec, serialized_spec) = reserialize_spec::reserialize_spec(
+        &spec_reserialised,
+        fill_dir_path,
+        &ObjectNamesLevel::All,
+        false,
+        granule_size_bits,
+        true,
+    );
 
-        let render_elf_args = render_elf::RenderElfArgs {
-            data: &serialized_spec,
-            granule_size_bits: granule_size_bits,
-            heap_size,
-        };
+    let footprint = final_spec.total_footprint();
+    // @billn this was from the original impl, do we need it to be configurable though? : TODO make configurable
+    let heap_size = footprint * 2 + 16 * 4096;
 
-        let initializer_elf_buf = fs::read(capdl_init_elf_path).unwrap();
-        let rendered_initializer_elf_buf = match object::File::parse(&*initializer_elf_buf).unwrap() {
-            object::File::Elf32(initializer_elf) => render_elf_args.call_with(&initializer_elf),
-            object::File::Elf64(initializer_elf) => render_elf_args.call_with(&initializer_elf),
-            _ => {
-                panic!()
-            }
-        };
+    let render_elf_args = render_elf::RenderElfArgs {
+        data: &serialized_spec,
+        granule_size_bits: granule_size_bits,
+        heap_size,
+    };
 
-        fs::write(args.output, rendered_initializer_elf_buf).unwrap();
-    }
+    let initializer_elf_buf = fs::read(capdl_init_elf_path).unwrap();
+    let rendered_initializer_elf_buf = match object::File::parse(&*initializer_elf_buf).unwrap() {
+        object::File::Elf32(initializer_elf) => render_elf_args.call_with(&initializer_elf),
+        object::File::Elf64(initializer_elf) => render_elf_args.call_with(&initializer_elf),
+        _ => {
+            panic!()
+        }
+    };
 
-    // let spec_file = File::create("capdl_spec.json").unwrap();
-    // let mut writer = BufWriter::new(spec_file);
-    // serde_json::to_writer_pretty(&mut writer, &spec).unwrap();
-    // writer.flush().unwrap();
-
-    // // @billn make proper
-    // let spec_pack_status = std::process::Command::new(format!("{}/sel4-capdl-initializer-add-spec", exe_path.parent().unwrap().to_string_lossy()))
-    // .args([
-    //     "-e", capdl_init_elf_path.to_str().unwrap(),
-    //     "-f", "/Users/dreamliner787-9/TS/microkit-capdl-dev/example/x86_64_ioport/capdl_spec.json",
-    //     "-o", "/Users/dreamliner787-9/TS/microkit-capdl-dev/example/x86_64_ioport/build/capdl_initializer_with_spec.elf",
-    //     "-d", "/Users/dreamliner787-9/TS/microkit-capdl-dev/example/x86_64_ioport/buildddddd",
-    //     "--embed-frames"
-    // ]).output();
-
-    // match spec_pack_status {
-    //     Ok(result) => {
-    //         println!("{}{}", std::str::from_utf8(&result.stdout).unwrap(), std::str::from_utf8(&result.stderr).unwrap());
-    //         println!("Built CapDL spec with {} root objects.", spec.root_objects.end - 1);
-    //     },
-    //     Err(result) => {
-    //         println!("fail {}", result);
-    //     },
-    // }
-
-
+    fs::write(args.output, rendered_initializer_elf_buf).unwrap();
 
     Ok(())
 

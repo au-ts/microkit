@@ -12,7 +12,7 @@ use std::{
     u8,
 };
 
-use serde::{Deserialize, Serialize};
+use serde::{Serialize};
 
 use crate::{
     capdl::{
@@ -34,6 +34,7 @@ use crate::{
 // Corresponds to the IPC buffer symbol in libmicrokit and the monitor
 const SYMBOL_IPC_BUFFER: &str = "__sel4_ipc_buffer_obj";
 
+// @billn figure out where these are used
 const FAULT_BADGE: u64 = 1 << 62;
 const PPC_BADGE: u64 = 1 << 63;
 
@@ -64,8 +65,6 @@ const BASE_PD_TCB_CAP: u64 = BASE_IRQ_CAP + 64;
 const BASE_VM_TCB_CAP: u64 = BASE_PD_TCB_CAP + 64;
 const BASE_VCPU_CAP: u64 = BASE_VM_TCB_CAP + 64;
 
-const MAX_SYSTEM_INVOCATION_SIZE: u64 = util::mb(128);
-
 const PD_CAP_SIZE: u64 = 512;
 const PD_CAP_BITS: u64 = PD_CAP_SIZE.ilog2() as u64;
 const PD_SCHEDCONTEXT_SIZE: u64 = 1 << 8;
@@ -82,7 +81,7 @@ const SLOT_SIZE: u64 = 1 << SLOT_BITS;
 // const INIT_ASID_POOL_CAP_ADDRESS: u64 = 6;
 // const SMC_CAP_ADDRESS: u64 = 15;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+#[derive(Serialize, Debug, Clone, Eq, PartialEq)]
 pub struct CapDLSpec {
     pub objects: Vec<NamedObject>,
     pub irqs: Vec<IrqEntry>,
@@ -130,7 +129,7 @@ impl CapDLSpec {
     /// -> VSpace: all ELF loadable pages and IPC buffer mapped in.
     /// Returns the object ID of the TCB
     ///
-    pub fn add_elf_to_spec(&mut self, pd_name: &str, elf: &ElfFile) -> Result<ObjectId, String> {
+    pub fn add_elf_to_spec(&mut self, sel4_config: &Config, pd_name: &str, elf: &ElfFile) -> Result<ObjectId, String> {
         // We assumes that ELFs and PDs have a one-to-one relationship. So for each ELF we create a VSpace.
         let vspace_obj_id = X86_64::create_vspace(self, pd_name); // @billn make arch agnostic
         let vspace_cap = Cap::PageTable(cap::PageTable {
@@ -152,12 +151,10 @@ impl CapDLSpec {
             let page_size = PageSize::Small;
             let page_size_bytes = page_size as u64;
 
-            // Starts from the page boundary
+            // Create and map all frames for this segment.
             let mut cur_vaddr = round_down(seg_base_vaddr, page_size_bytes);
             while cur_vaddr < seg_base_vaddr + seg_mem_size {
-                let mut frame_fill = FrameInit::Fill(Fill {
-                    entries: [].to_vec(),
-                });
+                let mut frame_init_maybe: Option<FrameInit> = None;
 
                 // Now compute the ELF file offset to fill in this page.
                 let mut dest_offset = 0;
@@ -178,29 +175,35 @@ impl CapDLSpec {
                         seg_file_size - section_offset,
                     );
                     let src_off = seg_file_off + section_offset;
-                    match &mut frame_fill {
-                        FrameInit::Fill(fill) => {
-                            fill.entries.push(FillEntry {
-                                range: Range {
-                                    start: dest_offset as usize,
-                                    end: (dest_offset + len_to_cpy) as usize,
-                                },
-                                content: FillEntryContent::Data(FileContentRange {
-                                    file: elf.path.to_string_lossy().into_owned(),
-                                    file_offset: src_off as usize,
-                                }),
-                            });
-                        }
-                    }
+
+                    frame_init_maybe = Some(FrameInit::Fill(Fill {
+                        entries: [FillEntry {
+                            range: Range {
+                                start: dest_offset as usize,
+                                end: (dest_offset + len_to_cpy) as usize,
+                            },
+                            content: FillEntryContent::Data(FileContentRange {
+                                file: elf.path.to_string_lossy().into_owned(),
+                                file_offset: src_off as usize,
+                            }),
+                        }]
+                        .to_vec(),
+                    }));
                 }
 
+                let frame_init = match frame_init_maybe {
+                    Some(actual_frame_init) => actual_frame_init,
+                    None => FrameInit::Fill(Fill {
+                        entries: [].to_vec(),
+                    }),
+                };
                 // Create the frame object, cap to the object, add it to the spec and map it in.
                 let frame_obj_id = capdl_util_make_frame_obj(
                     self,
-                    frame_fill,
+                    frame_init,
                     &format!("elf_{}_{}", pd_name, frame_sequence),
                     None,
-                    12, // @billn fix use ObjectType::fixed_size_bits
+                    PageSize::Small.fixed_size_bits(sel4_config) as usize
                 );
                 let frame_cap = capdl_util_make_frame_cap(
                     frame_obj_id,
@@ -320,7 +323,7 @@ pub fn build_capdl_spec(
     // *********************************
 
     // Parse ELF, create VSpace, map in all ELF loadable frames and IPC buffer, and create TCB.
-    let monitor_tcb_obj_id = spec.add_elf_to_spec("monitor", monitor_elf)?; // @billn check error
+    let monitor_tcb_obj_id = spec.add_elf_to_spec(kernel_config, "monitor", monitor_elf).unwrap(); // @billn check error
 
     // Create monitor fault endpoint object + cap
     let mon_fault_ep_obj_id = capdl_util_make_endpoint_obj(&mut spec, "monitor");
@@ -413,7 +416,7 @@ pub fn build_capdl_spec(
 
         // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
         let elf = &pd_elf_files[pd_id];
-        let pd_tcb_obj_id = spec.add_elf_to_spec(&pd.name, elf).unwrap();
+        let pd_tcb_obj_id = spec.add_elf_to_spec(kernel_config, &pd.name, elf).unwrap();
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec, pd_tcb_obj_id);
 
         // In the benchmark configuration, we allow PDs to access their own TCB.
