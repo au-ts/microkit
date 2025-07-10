@@ -28,7 +28,7 @@ else ifeq ($(ARCH),riscv64)
 
 	ARCH_DIR := riscv
 else ifeq ($(ARCH),x86_64)
-	CFLAGS_ARCH := -mtune=$(GCC_CPU) -mabi=sysv -mcmodel=large
+	CFLAGS_ARCH := -march=x86-64 -mtune=$(GCC_CPU) -mabi=sysv -mcmodel=large
 	ASM_CPP_FLAGS := -x assembler-with-cpp -c -g
 	ASM_FLAGS := -g -march=generic64
 
