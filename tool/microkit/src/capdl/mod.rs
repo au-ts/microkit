@@ -8,5 +8,9 @@ pub mod capdl;
 mod spec;
 mod memory;
 mod util;
+pub mod reserialize_spec;
+pub mod render_elf;
 
 pub use self::capdl::*;
+pub use self::reserialize_spec::*;
+pub use self::render_elf::*;

@@ -9,7 +9,7 @@
 
 use microkit_tool::elf::ElfFile;
 // use loader::Loader;
-use microkit_tool::capdl::build_capdl_spec;
+use microkit_tool::capdl::{build_capdl_spec, render_elf, reserialize_spec};
 // use microkit_tool::{
 //     capdl, elf, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError, MemoryRegion,
 //     ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH,
@@ -28,6 +28,7 @@ use microkit_tool::sel4::{
     Arch, Config, RiscvVirtualMemory,
 };
 use microkit_tool::PD_MAX_NAME_LENGTH;
+use sel4_capdl_initializer_types::{Footprint, InputSpec, ObjectNamesLevel};
 use std::cmp::{max, min};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
@@ -2947,7 +2948,6 @@ struct Args<'a> {
     report: &'a str,
     output: &'a str,
     search_paths: Vec<&'a String>,
-    use_capdl: bool,
 }
 
 impl<'a> Args<'a> {
@@ -2960,7 +2960,6 @@ impl<'a> Args<'a> {
         let mut system = None;
         let mut board = None;
         let mut config = None;
-        let mut use_capdl = true;
 
         if args.len() <= 1 {
             print_usage();
@@ -3016,9 +3015,6 @@ impl<'a> Args<'a> {
                         std::process::exit(1);
                     }
                 }
-                "--legacy" => {
-                    use_capdl = false;
-                }
                 "--search-path" => {
                     in_search_path = true;
                 }
@@ -3068,7 +3064,6 @@ impl<'a> Args<'a> {
         }
 
         Args {
-            use_capdl,
             system: system.unwrap(),
             board: board.unwrap(),
             config: config.unwrap(),
@@ -3081,20 +3076,23 @@ impl<'a> Args<'a> {
 
 fn main() -> Result<(), String> {
     let exe_path = std::env::current_exe().unwrap();
-    let sdk_env = std::env::var("MICROKIT_SDK");
-    let sdk_dir = match sdk_env {
-        Ok(ref value) => Path::new(value),
-        Err(err) => match err {
-            // If there is no MICROKIT_SDK explicitly set, use the one that the binary is in.
-            std::env::VarError::NotPresent => exe_path.parent().unwrap().parent().unwrap(),
-            _ => {
-                return Err(format!(
-                    "Could not read MICROKIT_SDK environment variable: {}",
-                    err
-                ))
-            }
-        },
-    };
+    // @billn revisit
+    // let sdk_env = std::env::var("MICROKIT_SDK");
+    // let sdk_dir = match sdk_env {
+    //     Ok(ref value) => Path::new(value),
+    //     Err(err) => match err {
+    //         // If there is no MICROKIT_SDK explicitly set, use the one that the binary is in.
+    //         std::env::VarError::NotPresent => exe_path.parent().unwrap().parent().unwrap(),
+    //         _ => {
+    //             return Err(format!(
+    //                 "Could not read MICROKIT_SDK environment variable: {}",
+    //                 err
+    //             ))
+    //         }
+    //     },
+    // };
+
+    let sdk_dir = exe_path.parent().unwrap().parent().unwrap();
 
     if !sdk_dir.exists() {
         eprintln!(
@@ -3165,7 +3163,6 @@ fn main() -> Result<(), String> {
     let loader_elf_path = elf_path.join("loader.elf");
     let kernel_elf_path = elf_path.join("sel4.elf");
     let monitor_elf_path = elf_path.join("monitor.elf");
-    let capdl_monitor_elf_path = elf_path.join("capdl_monitor.elf");
     let capdl_init_elf_path = elf_path.join("capdl_initialiser.elf"); 
 
     let kernel_config_path = sdk_dir
@@ -3194,13 +3191,13 @@ fn main() -> Result<(), String> {
         std::process::exit(1);
     }
     // @billn make more user frenly by announcing that the platform does not support non-capdl loading rather than the onminous error
-    if !args.use_capdl && !loader_elf_path.exists() {
-        eprintln!(
-            "Error: loader ELF '{}' does not exist",
-            loader_elf_path.display()
-        );
-        std::process::exit(1);
-    }
+    // if !loader_elf_path.exists() {
+    //     eprintln!(
+    //         "Error: loader ELF '{}' does not exist",
+    //         loader_elf_path.display()
+    //     );
+    //     std::process::exit(1);
+    // }
     if !kernel_elf_path.exists() {
         eprintln!(
             "Error: kernel ELF '{}' does not exist",
@@ -3208,16 +3205,9 @@ fn main() -> Result<(), String> {
         );
         std::process::exit(1);
     }
-    if !args.use_capdl && !monitor_elf_path.exists() {
+    if !monitor_elf_path.exists() {
         eprintln!(
             "Error: monitor ELF '{}' does not exist",
-            monitor_elf_path.display()
-        );
-        std::process::exit(1);
-    }
-    if args.use_capdl && !capdl_monitor_elf_path.exists() {
-        eprintln!(
-            "Error: CapDL monitor ELF '{}' does not exist",
             monitor_elf_path.display()
         );
         std::process::exit(1);
@@ -3236,14 +3226,7 @@ fn main() -> Result<(), String> {
         );
         std::process::exit(1);
     }
-    if !args.use_capdl && !kernel_platform_config_path.exists() {
-        eprintln!(
-            "Error: kernel platform configuration file '{}' does not exist",
-            kernel_platform_config_path.display()
-        );
-        std::process::exit(1);
-    }
-    if !args.use_capdl && !invocations_all_path.exists() {
+    if !invocations_all_path.exists() {
         eprintln!(
             "Error: invocations JSON file '{}' does not exist",
             invocations_all_path.display()
@@ -3363,8 +3346,7 @@ fn main() -> Result<(), String> {
     // };
 
     let kernel_elf: ElfFile = ElfFile::from_path(&kernel_elf_path)?;
-    // let mut monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
-    let capdl_monitor_elf = ElfFile::from_path(&capdl_monitor_elf_path)?;
+    let mut monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
 
     // if monitor_elf.segments.iter().filter(|s| s.loadable).count() > 1 {
     //     eprintln!(
@@ -3397,40 +3379,81 @@ fn main() -> Result<(), String> {
         }
     }
 
+    let spec = build_capdl_spec(&kernel_config, &capdl_init_elf_path, &monitor_elf, &pd_elf_files, &system)?;
+
+    {
+        // A re-implementation of dep/rust-sel4/crates/sel4-capdl-initializer/add-spec/src/main.rs
+        // so we don't have to call out to it as a subprocess.
+        let spec_as_json = serde_json::to_string(&spec).unwrap();
+        // Reserialise it into a type that can be understood by rust-sel4.
+        let spec_reserialised = InputSpec::parse(&spec_as_json);
+
+        // @billn revisit where this comes from
+        let granule_size_bits = 12;
+
+        let (final_spec, serialized_spec) = reserialize_spec::reserialize_spec(
+            &spec_reserialised,
+            "",
+            &ObjectNamesLevel::All,
+            false,
+            granule_size_bits,
+            true,
+        );
+
+        let footprint = final_spec.total_footprint();
+        // TODO make configurable
+        let heap_size = footprint * 2 + 16 * 4096;
+
+        let render_elf_args = render_elf::RenderElfArgs {
+            data: &serialized_spec,
+            granule_size_bits: granule_size_bits,
+            heap_size,
+        };
+
+        let initializer_elf_buf = fs::read(capdl_init_elf_path).unwrap();
+        let rendered_initializer_elf_buf = match object::File::parse(&*initializer_elf_buf).unwrap() {
+            object::File::Elf32(initializer_elf) => render_elf_args.call_with(&initializer_elf),
+            object::File::Elf64(initializer_elf) => render_elf_args.call_with(&initializer_elf),
+            _ => {
+                panic!()
+            }
+        };
+
+        fs::write(args.output, rendered_initializer_elf_buf).unwrap();
+    }
+
+    // let spec_file = File::create("capdl_spec.json").unwrap();
+    // let mut writer = BufWriter::new(spec_file);
+    // serde_json::to_writer_pretty(&mut writer, &spec).unwrap();
+    // writer.flush().unwrap();
+
+    // // @billn make proper
+    // let spec_pack_status = std::process::Command::new(format!("{}/sel4-capdl-initializer-add-spec", exe_path.parent().unwrap().to_string_lossy()))
+    // .args([
+    //     "-e", capdl_init_elf_path.to_str().unwrap(),
+    //     "-f", "/Users/dreamliner787-9/TS/microkit-capdl-dev/example/x86_64_ioport/capdl_spec.json",
+    //     "-o", "/Users/dreamliner787-9/TS/microkit-capdl-dev/example/x86_64_ioport/build/capdl_initializer_with_spec.elf",
+    //     "-d", "/Users/dreamliner787-9/TS/microkit-capdl-dev/example/x86_64_ioport/buildddddd",
+    //     "--embed-frames"
+    // ]).output();
+
+    // match spec_pack_status {
+    //     Ok(result) => {
+    //         println!("{}{}", std::str::from_utf8(&result.stdout).unwrap(), std::str::from_utf8(&result.stderr).unwrap());
+    //         println!("Built CapDL spec with {} root objects.", spec.root_objects.end - 1);
+    //     },
+    //     Err(result) => {
+    //         println!("fail {}", result);
+    //     },
+    // }
+
+
+
+    Ok(())
+
     // let mut invocation_table_size = kernel_config.minimum_page_size;
     // let mut system_cnode_size = 2;
 
-    if args.use_capdl {
-        let spec = build_capdl_spec(&kernel_config, &capdl_init_elf_path, &capdl_monitor_elf, &pd_elf_files, &system)?;
-
-        let spec_file = File::create("capdl_spec.json").unwrap();
-        let mut writer = BufWriter::new(spec_file);
-        serde_json::to_writer_pretty(&mut writer, &spec).unwrap();
-        writer.flush().unwrap();
-
-        // @billn make proper
-        let spec_pack_status = std::process::Command::new(format!("{}/sel4-capdl-initializer-add-spec", exe_path.parent().unwrap().to_string_lossy()))
-        .args([
-            "-e", capdl_init_elf_path.to_str().unwrap(),
-            "-f", "/Users/dreamliner787-9/TS/microkit-capdl-dev/scratch/capdl_spec.json",
-            "-o", "/Users/dreamliner787-9/TS/microkit-capdl-dev/scratch/capdl_initializer_with_spec.elf",
-            "-d", "/Users/dreamliner787-9/TS/microkit-capdl-dev/scratch"
-        ]).output();
-
-        match spec_pack_status {
-            Ok(result) => {
-                println!("{}{}", std::str::from_utf8(&result.stdout).unwrap(), std::str::from_utf8(&result.stderr).unwrap());
-                println!("Built CapDL spec with {} root objects.", spec.root_objects.end - 1);
-            },
-            Err(result) => {
-                println!("fail {}", result);
-            },
-        }
-
-
-
-        Ok(())
-    } else {
         // let mut built_system;
         // loop {
         //     built_system = build_system(
@@ -3654,6 +3677,6 @@ fn main() -> Result<(), String> {
         // );
         // loader.write_image(Path::new(args.output));
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }
