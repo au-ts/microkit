@@ -334,6 +334,23 @@ SUPPORTED_BOARDS = (
             "KernelFPU": "FXSAVE",
         },
     ),
+    BoardInfo(
+        name="x86_64_generic",
+        arch=KernelArch.X86_64,
+        gcc_cpu="generic",
+        loader_link_address=0x10000000,
+        kernel_options = {
+            # @billn make vm work
+            "KernelIsMCS": True,
+            "KernelPlatform": "pc99",
+            "KernelSel4Arch": "x86_64",
+            "KernelVTX": False,
+            "KernelX86MicroArch": "generic",
+            "KernelSupportPCID": False,
+            "KernelFSGSBaseInst": False,
+            "KernelFPU": "FXSAVE",
+        },
+    ),
 )
 
 SUPPORTED_CONFIGS = (
@@ -815,11 +832,10 @@ def main() -> None:
             # @billn, come back to when adding CapDL support for aarch64 and riscv
             if not board.arch.is_x86():
                 build_elf_component("loader", root_dir, build_dir, board, config, loader_defines)
-                build_elf_component("monitor", root_dir, build_dir, board, config, [])
+            build_elf_component("monitor", root_dir, build_dir, board, config, [])
             build_lib_component("libmicrokit", root_dir, build_dir, board, config)
             # @billn make the rust sel4 path thing less hacky
             build_capdl_initialiser("capdl_initialiser", Path("dep/rust-sel4").absolute(), root_dir, build_dir, board, config)
-            build_elf_component("capdl_monitor", root_dir, build_dir, board, config, [])
 
     # Setup the examples
     for example, example_path in EXAMPLES.items():
