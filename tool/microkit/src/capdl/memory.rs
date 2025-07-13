@@ -149,7 +149,6 @@ impl ArchMethods for X86_64 {
                 let pd_slot = (vaddr >> (12 + 9)) & ((1 << 9) - 1);
                 let pt_slot = (vaddr >> (12)) & ((1 << 9) - 1);
 
-                // @billn handle huge page
                 match map_intermediary_level_helper(
                     spec,
                     pd_name,

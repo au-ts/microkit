@@ -148,8 +148,6 @@ pub enum Cap {
 impl Cap {
     pub fn obj(&self) -> ObjectId {
         match self {
-            // @billn do we ever need to use the untyped object in spec generation?
-            // Cap::Untyped(cap) => cap.object,
             Cap::Endpoint(cap) => cap.object,
             Cap::Notification(cap) => cap.object,
             Cap::CNode(cap) => cap.object,
@@ -170,8 +168,6 @@ impl Cap {
 
     pub fn set_id(&mut self, new_id: ObjectId) {
         match self {
-            // @billn do we ever need to use the untyped object in spec generation?
-            // Cap::Untyped(cap) => cap.object,
             Cap::Endpoint(cap) => cap.object = new_id,
             Cap::Notification(cap) => cap.object = new_id,
             Cap::CNode(cap) => cap.object = new_id,
