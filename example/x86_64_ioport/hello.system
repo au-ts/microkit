@@ -5,11 +5,16 @@
  SPDX-License-Identifier: BSD-2-Clause
 -->
 <system>
-    <memory_region name="small_test_mr" size="0x1000" phys_addr="0x321_0000"/>
-    <protection_domain name="hello" priority="254">
+    <memory_region name="small_test_mr" size="0x1000" phys_addr="0x3231_0000"/>
+    <memory_region name="large_test_mr" size="0x200_000" page_size="0x200_000" phys_addr="0x2000_0000"/>
+
+    <protection_domain name="hello" priority="1">
         <program_image path="hello.elf" />
 
-        <map mr="small_test_mr" vaddr="0x8456_0000" perms="rw" setvar_vaddr="small_memory_region_vaddr" setvar_size="small_memory_region_size"/>
+        <map mr="small_test_mr" vaddr="0x1234_00_0000" perms="rw" setvar_vaddr="small_memory_region_vaddr" setvar_size="small_memory_region_size"/>
         <setvar symbol="small_memory_region_paddr" region_paddr="small_test_mr" />
+
+        <map mr="large_test_mr" vaddr="0x5678_00_0000" perms="rw" setvar_vaddr="large_memory_region_vaddr" setvar_size="large_memory_region_size"/>
+        <setvar symbol="large_memory_region_paddr" region_paddr="large_test_mr" />
     </protection_domain>
 </system>
