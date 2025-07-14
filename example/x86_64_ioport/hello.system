@@ -5,7 +5,11 @@
  SPDX-License-Identifier: BSD-2-Clause
 -->
 <system>
+    <memory_region name="small_test_mr" size="0x1000" phys_addr="0x321_0000"/>
     <protection_domain name="hello" priority="254">
         <program_image path="hello.elf" />
+
+        <map mr="small_test_mr" vaddr="0x8456_0000" perms="rw" setvar_vaddr="small_memory_region_vaddr" setvar_size="small_memory_region_size"/>
+        <setvar symbol="small_memory_region_paddr" region_paddr="small_test_mr" />
     </protection_domain>
 </system>
