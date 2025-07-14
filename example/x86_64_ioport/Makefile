@@ -49,7 +49,7 @@ KERNEL = $(MICROKIT_SDK)/board/$(MICROKIT_BOARD)/$(MICROKIT_CONFIG)/elf/sel4.elf
 COPIED_KERNEL = $(BUILD_DIR)/kernel.elf
 REPORT = $(BUILD_DIR)/report.json
 
-all: $(COPIED_KERNEL) $(INITIAL_TASK)
+all qemu: $(COPIED_KERNEL) $(INITIAL_TASK)
 
 $(BUILD_DIR)/%.o: %.c Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
@@ -62,4 +62,13 @@ $(INITIAL_TASK): $(addprefix $(BUILD_DIR)/, $(IMAGES)) hello.system
 
 $(COPIED_KERNEL): $(KERNEL)
 	$(OBJCOPY) -O elf32-i386 $(KERNEL) $(COPIED_KERNEL)
+
+qemu:
+	qemu-system-x86_64                                                                         \
+			-cpu Nehalem,-vme,+pdpe1gb,-xsave,-xsaveopt,-xsavec,+fsgsbase,-invpcid,+syscall,+lm,enforce \
+			-m "4G"                                                                             \
+			-display none                                                                       \
+			-serial mon:stdio                                                                   \
+		-kernel $(COPIED_KERNEL) \
+		-initrd $(INITIAL_TASK)
 
