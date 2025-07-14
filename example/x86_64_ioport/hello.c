@@ -14,6 +14,22 @@ uintptr_t large_memory_region_vaddr;
 uintptr_t large_memory_region_paddr;
 uint64_t large_memory_region_size;
 
+#define SERIAL_IOPORT_ID 0
+
+static inline void serial_putc(char ch)
+{
+    microkit_x86_ioport_write_8(SERIAL_IOPORT_ID, 0x3f8, ch);
+}
+
+static inline void serial_puts(const char *s)
+{
+    while (*s) {
+        if (*s == '\n')
+            serial_putc('\r');
+        serial_putc(*s++);
+    }
+}
+
 static char hexchar(unsigned int v)
 {
     return v < 10 ? '0' + v : ('a' - 10) + v;
@@ -81,6 +97,11 @@ void init(void)
     } else {
         microkit_dbg_puts("FAIL\n");
     }
+
+    microkit_dbg_puts("Now writing to serial I/O port: ");
+    serial_puts("hey there from serial I/O port\n");
+
+    
 }
 
 void notified(microkit_channel ch)

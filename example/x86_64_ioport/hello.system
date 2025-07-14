@@ -16,5 +16,8 @@
 
         <map mr="large_test_mr" vaddr="0x5678_00_0000" perms="rw" setvar_vaddr="large_memory_region_vaddr" setvar_size="large_memory_region_size"/>
         <setvar symbol="large_memory_region_paddr" region_paddr="large_test_mr" />
+
+        <ioport id="0" addr="0x3f8" size="8" />
+
     </protection_domain>
 </system>
