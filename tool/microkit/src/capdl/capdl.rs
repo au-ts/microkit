@@ -570,14 +570,34 @@ pub fn build_capdl_spec(
 
 
         // Step 3-n write libmicrokit symbols.
-        {
-            let name = pd.name.as_bytes();
-            let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
-            elf_obj.borrow_mut().write_symbol("microkit_name", &name[..name_length]).unwrap();
+        let name = pd.name.as_bytes();
+        let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
+        elf_obj.borrow_mut().write_symbol("microkit_name", &name[..name_length]).unwrap();
+        elf_obj.borrow_mut().write_symbol("microkit_passive", &[pd.passive as u8]).unwrap();
+
+        let mut notification_bits: u64 = 0;
+        let mut pp_bits: u64 = 0;
+        for channel in system.channels.iter() {
+            if channel.end_a.pd == pd_id {
+                if channel.end_a.notify {
+                    notification_bits |= 1 << channel.end_a.id;
+                }
+                if channel.end_a.pp {
+                    pp_bits |= 1 << channel.end_a.id;
+                }
+            }
+            if channel.end_b.pd == pd_id {
+                if channel.end_b.notify {
+                    notification_bits |= 1 << channel.end_b.id;
+                }
+                if channel.end_b.pp {
+                    pp_bits |= 1 << channel.end_b.id;
+                }
+            }
         }
-        {
-            elf_obj.borrow_mut().write_symbol("microkit_passive", &[pd.passive as u8]).unwrap();
-        }
+        elf_obj.borrow_mut().write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
+        elf_obj.borrow_mut().write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
+        elf_obj.borrow_mut().write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
     }
 
     // *********************************
