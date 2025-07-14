@@ -18,17 +18,14 @@ use crate::{
     capdl::{
         memory::{self, ArchMethods, X86_64},
         spec::{
-            cap,
-            object::{self},
-            AsidSlotEntry, Cap, CapTableEntry, FileContentRange, Fill, FillEntry, FillEntryContent,
-            FrameInit, IrqEntry, NamedObject, Object, ObjectId, UntypedCover,
+            cap, object::{self}, AsidSlotEntry, BytesContent, Cap, CapTableEntry, Fill, FillEntry, FillEntryContent, FrameInit, IrqEntry, NamedObject, Object, ObjectId, UntypedCover
         },
         util::*,
     },
     elf::ElfFile,
     sdf::{SysMapPerms, SystemDescription},
     sel4::{Config, PageSize},
-    util::{self, round_down},
+    util::round_down,
 };
 
 // Corresponds to the IPC buffer symbol in libmicrokit and the monitor
@@ -144,7 +141,6 @@ impl CapDLSpec {
             }
 
             let seg_base_vaddr = segment.virt_addr;
-            let seg_file_off = segment.p_offset;
             let seg_file_size: u64 = segment.p_filesz;
             let seg_mem_size: u64 = segment.mem_size();
 
@@ -169,12 +165,11 @@ impl CapDLSpec {
                 let target_vaddr_start = cur_vaddr + dest_offset;
                 let section_offset = target_vaddr_start - seg_base_vaddr;
                 if section_offset < seg_file_size {
-                    // Have data to load
+                    // We have data to load
                     let len_to_cpy = min(
                         page_size_bytes - dest_offset,
                         seg_file_size - section_offset,
                     );
-                    let src_off = seg_file_off + section_offset;
 
                     frame_init_maybe = Some(FrameInit::Fill(Fill {
                         entries: [FillEntry {
@@ -182,9 +177,8 @@ impl CapDLSpec {
                                 start: dest_offset as usize,
                                 end: (dest_offset + len_to_cpy) as usize,
                             },
-                            content: FillEntryContent::Data(FileContentRange {
-                                file: elf.path.to_string_lossy().into_owned(),
-                                file_offset: src_off as usize,
+                            content: FillEntryContent::Data(BytesContent {
+                                bytes: segment.data[section_offset as usize..((section_offset + len_to_cpy) as usize)].to_vec()
                             }),
                         }]
                         .to_vec(),
@@ -309,7 +303,6 @@ impl CapDLSpec {
 /// Build a CapDL Spec according to the System Description File.
 pub fn build_capdl_spec(
     kernel_config: &Config,
-    capdl_initialiser_elf_path: &PathBuf,
     monitor_elf: &ElfFile,
     pd_elf_files: &Vec<ElfFile>,
     system: &SystemDescription,
@@ -515,7 +508,7 @@ pub fn build_capdl_spec(
             pc_tcb.extra.sp = kernel_config.pd_stack_top();
             pc_tcb.extra.master_fault_ep = Some(FAULT_EP_CAP_IDX);
             pc_tcb.extra.prio = pd.priority;
-            pc_tcb.extra.max_prio = pd.priority; // @billn what is this used for?
+            pc_tcb.extra.max_prio = pd.priority; // Prevent priority escalation.
             pc_tcb.extra.resume = true;
 
             pc_tcb.slots.extend(caps_to_bind_to_tcb);
@@ -597,14 +590,6 @@ pub fn build_capdl_spec(
             None => continue,
         }
     }
-
-    // *********************************
-    // Step 5. Serialise the spec to JSON
-    // *********************************
-
-    // *********************************
-    // Step 6. Embed the serialised spec to the CapDL loader
-    // *********************************
 
     Ok(spec)
 }

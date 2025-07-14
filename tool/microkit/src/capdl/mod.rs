@@ -5,7 +5,7 @@
 //
 
 pub mod capdl;
-mod spec;
+pub mod spec;
 mod memory;
 mod util;
 pub mod reserialize_spec;

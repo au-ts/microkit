@@ -48,7 +48,7 @@ pub struct Fill {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
 pub enum FillEntryContent {
-    Data(FileContentRange),
+    Data(BytesContent),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
@@ -58,9 +58,8 @@ pub struct FillEntry {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
-pub struct FileContentRange {
-    pub file: String,
-    pub file_offset: usize,
+pub struct BytesContent {
+    pub bytes: Vec<u8>
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]

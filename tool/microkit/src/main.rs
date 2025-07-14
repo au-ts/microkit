@@ -7,6 +7,7 @@
 // we want our asserts, even if the compiler figures out they hold true already during compile-time
 #![allow(clippy::assertions_on_constants)]
 
+use microkit_tool::capdl::spec::BytesContent;
 use microkit_tool::elf::ElfFile;
 // use loader::Loader;
 use microkit_tool::capdl::{build_capdl_spec, render_elf, reserialize_spec};
@@ -16,8 +17,7 @@ use microkit_tool::capdl::{build_capdl_spec, render_elf, reserialize_spec};
 //     VM_MAX_NAME_LENGTH,
 // };
 use microkit_tool::sdf::{
-    parse, Channel, ProtectionDomain, SysMap, SysMapPerms, SysMemoryRegion, SysMemoryRegionKind,
-    SystemDescription, VirtualMachine,
+    parse, Channel, ProtectionDomain,
 };
 // use sel4::{
 //     default_vm_attr, Aarch64Regs, Arch, ArmVmAttributes, BootInfo, Config, Invocation,
@@ -25,20 +25,17 @@ use microkit_tool::sdf::{
 //     RiscvVirtualMemory, RiscvVmAttributes,
 // };
 use microkit_tool::sel4::{
-    Arch, Config, RiscvVirtualMemory,
+    Arch, Config, PageSize, RiscvVirtualMemory
 };
 use microkit_tool::PD_MAX_NAME_LENGTH;
-use sel4_capdl_initializer_types::{Footprint, InputSpec, ObjectNamesLevel};
-use std::cmp::{max, min};
-use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
-use std::io::{BufWriter, Write};
+use sel4_capdl_initializer_types::{ObjectNamesLevel, Spec};
+use std::cmp::min;
+use std::fs::{self};
 // use std::iter::zip;
 // use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use microkit_tool::util::{
-    comma_sep_u64, comma_sep_usize, human_size_strict, json_str, json_str_as_bool, json_str_as_u64,
-    monitor_serialise_names, monitor_serialise_u64_vec, struct_to_bytes,
+    json_str, json_str_as_bool, json_str_as_u64,
 };
 
 // Corresponds to the IPC buffer symbol in libmicrokit and the monitor
@@ -3160,7 +3157,7 @@ fn main() -> Result<(), String> {
         .join(args.board)
         .join(args.config)
         .join("elf");
-    let loader_elf_path = elf_path.join("loader.elf");
+    // let loader_elf_path = elf_path.join("loader.elf");
     let kernel_elf_path = elf_path.join("sel4.elf");
     let monitor_elf_path = elf_path.join("monitor.elf");
     let capdl_init_elf_path = elf_path.join("capdl_initialiser.elf"); 
@@ -3171,11 +3168,11 @@ fn main() -> Result<(), String> {
         .join(args.config)
         .join("include/kernel/gen_config.json");
 
-    let kernel_platform_config_path = sdk_dir
-        .join("board")
-        .join(args.board)
-        .join(args.config)
-        .join("platform_gen.json");
+    // let kernel_platform_config_path = sdk_dir
+    //     .join("board")
+    //     .join(args.board)
+    //     .join(args.config)
+    //     .join("platform_gen.json");
 
     let invocations_all_path = sdk_dir
         .join("board")
@@ -3345,7 +3342,7 @@ fn main() -> Result<(), String> {
     //     system_invocation_count_symbol_name: "system_invocation_count",
     // };
 
-    let kernel_elf: ElfFile = ElfFile::from_path(&kernel_elf_path)?;
+    // let kernel_elf: ElfFile = ElfFile::from_path(&kernel_elf_path)?;
     let monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
 
     // if monitor_elf.segments.iter().filter(|s| s.loadable).count() > 1 {
@@ -3379,32 +3376,30 @@ fn main() -> Result<(), String> {
         }
     }
 
-    // Now we have the parsed the XML and all ELF files, create the CapDL spec of the system described in the XML.
-    let spec = build_capdl_spec(&kernel_config, &capdl_init_elf_path, &monitor_elf, &pd_elf_files, &system)?;
+    // We have parsed the XML and all ELF files, create the CapDL spec of the system described in the XML.
+    let spec = build_capdl_spec(&kernel_config, &monitor_elf, &pd_elf_files, &system)?;
 
     // Now embed the built spec into the CapDL initialiser.
+    let spec_as_json = serde_json::to_string_pretty(&spec).unwrap();
+
+    // Eagerly write out the report so we can debug in case something crash later.
+    fs::write(args.report, &spec_as_json).unwrap();
+
+    // Reserialise the spec into a type that can be understood by rust-sel4.
+    let spec_reserialised = serde_json::from_str::<Spec<String, BytesContent, ()>>(&spec_as_json).unwrap();
+
+    // Frame size bits for embedding into the CapDL spec from ELFs.
+    // MUST match up with the frame size when creating ELF specs.
+    let granule_size_bits = PageSize::Small.fixed_size_bits(&kernel_config) as usize;
+
     // A re-implementation of dep/rust-sel4/crates/sel4-capdl-initializer/add-spec/src/main.rs
     // so we don't have to call out to it as a subprocess.
-    let spec_as_json = serde_json::to_string(&spec).unwrap();
-    // Reserialise it into a type that can be understood by rust-sel4.
-    let spec_reserialised = InputSpec::parse(&spec_as_json);
-
-    // @billn revisit where this comes from
-    let granule_size_bits = 12;
-
-    // This is empty because the spec we built reference all ELF by absolute path, so this can be empty.
-    let fill_dir_path = "";
-
-    let (final_spec, serialized_spec) = reserialize_spec::reserialize_spec(
+    let serialized_spec = reserialize_spec::reserialize_spec(
         &spec_reserialised,
-        fill_dir_path,
         &ObjectNamesLevel::All,
-        false,
-        granule_size_bits,
-        true,
     );
 
-    let footprint = final_spec.total_footprint();
+    let footprint = serialized_spec.len();
     // @billn this was from the original impl, do we need it to be configurable though? : TODO make configurable
     let heap_size = footprint * 2 + 16 * 4096;
 
@@ -3414,6 +3409,7 @@ fn main() -> Result<(), String> {
         heap_size,
     };
 
+    // Patch the CapDL initialiser ELF with the spec and write it out.
     let initializer_elf_buf = fs::read(capdl_init_elf_path).unwrap();
     let rendered_initializer_elf_buf = match object::File::parse(&*initializer_elf_buf).unwrap() {
         object::File::Elf32(initializer_elf) => render_elf_args.call_with(&initializer_elf),
