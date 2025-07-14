@@ -1,5 +1,5 @@
 //
-// Copyright 2024, UNSW
+// Copyright 2025, UNSW
 //
 // SPDX-License-Identifier: BSD-2-Clause
 //
@@ -16,7 +16,7 @@
 /// but few seem to be concerned with giving any introspection regarding the parsed
 /// XML. The roxmltree project allows us to work on a lower-level than something based
 /// on serde and so we can report proper user errors.
-use crate::sel4::{Config, IrqTrigger, PageSize};
+use crate::sel4::{Arch, Config, IrqTrigger, PageSize};
 use crate::util::str_to_bool;
 use crate::MAX_PDS;
 use std::path::{Path, PathBuf};
@@ -137,6 +137,13 @@ pub struct SysIrq {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
+pub struct IOPort {
+    pub id: u64,
+    pub addr: u64,
+    pub size: u64,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum SysSetVarKind {
     // For size we do not store the size since when we parse mappings
     // we do not have access to the memory region yet. The size is resolved
@@ -180,6 +187,7 @@ pub struct ProtectionDomain {
     pub program_image: PathBuf,
     pub maps: Vec<SysMap>,
     pub irqs: Vec<SysIrq>,
+    pub ioports: Vec<IOPort>,
     pub setvars: Vec<SysSetVar>,
     pub virtual_machine: Option<VirtualMachine>,
     /// Only used when parsing child PDs. All elements will be removed
@@ -478,6 +486,7 @@ impl ProtectionDomain {
 
         let mut maps = Vec::new();
         let mut irqs = Vec::new();
+        let mut ioports = Vec::new();
         let mut setvars: Vec<SysSetVar> = Vec::new();
         let mut child_pds = Vec::new();
 
@@ -603,6 +612,30 @@ impl ProtectionDomain {
                     };
                     irqs.push(irq);
                 }
+                "ioport" => {
+                    if let Arch::X86_64 = config.arch {
+                        check_attributes(xml_sdf, &child, &["id", "addr", "size"])?;
+                        ioports.push(IOPort {
+                            id: checked_lookup(xml_sdf, &child, "id")?
+                                .parse::<u64>()
+                                .unwrap(),
+                            addr: sdf_parse_number(
+                                checked_lookup(xml_sdf, &child, "addr")?,
+                                &child,
+                            )?,
+                            size: sdf_parse_number(
+                                checked_lookup(xml_sdf, &child, "size")?,
+                                &child,
+                            )?,
+                        })
+                    } else {
+                        return Err(value_error(
+                            xml_sdf,
+                            node,
+                            "I/O Ports are only available on x86 boards".to_string(),
+                        ));
+                    }
+                }
                 "setvar" => {
                     check_attributes(xml_sdf, &child, &["symbol", "region_paddr"])?;
                     let symbol = checked_lookup(xml_sdf, &child, "symbol")?.to_string();
@@ -670,6 +703,7 @@ impl ProtectionDomain {
             program_image: program_image.unwrap(),
             maps,
             irqs,
+            ioports,
             setvars,
             child_pds,
             virtual_machine,
@@ -1360,6 +1394,21 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
 
         ch_ids[ch.end_a.pd].push(ch.end_a.id);
         ch_ids[ch.end_b.pd].push(ch.end_b.id);
+    }
+
+    // Ensure no duplicate I/O Ports
+    for pd in &pds {
+        let mut seen_ioport_ids: Vec<u64> = Vec::new();
+        for ioport in &pd.ioports {
+            if seen_ioport_ids.contains(&ioport.id) {
+                return Err(format!(
+                    "Error: duplicate I/O port id: {} in protection domain: '{}' @ {}:{}:{}",
+                    ioport.id, pd.name, filename, pd.text_pos.row, pd.text_pos.col
+                ));
+            } else {
+                seen_ioport_ids.push(ioport.id);
+            }
+        }
     }
 
     // Ensure that all maps are correct

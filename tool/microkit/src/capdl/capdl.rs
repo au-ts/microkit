@@ -65,6 +65,7 @@ const BASE_IRQ_CAP: u64 = BASE_OUTPUT_ENDPOINT_CAP + 64;
 const BASE_PD_TCB_CAP: u64 = BASE_IRQ_CAP + 64;
 const BASE_VM_TCB_CAP: u64 = BASE_PD_TCB_CAP + 64;
 const BASE_VCPU_CAP: u64 = BASE_VM_TCB_CAP + 64;
+const BASE_IOPORT_CAP: u64 = BASE_VCPU_CAP + 64;
 
 const PD_CAP_SIZE: u64 = 512;
 const PD_CAP_BITS: u64 = PD_CAP_SIZE.ilog2() as u64;
@@ -542,7 +543,23 @@ pub fn build_capdl_spec(
 
         // Step 3-7 Create spec and caps to IRQs
         let mut irq_caps: Vec<Cap> = Vec::new();
-        for irq in pd.irqs.iter() {}
+        for irq in pd.irqs.iter() {
+
+        }
+
+        // Step 3-8 Create endpoint object for the PD if it have inwards PPC, else it will be a notification
+        if pd.needs_ep(pd_id, &system.channels) {
+
+        } else {
+
+        }
+
+        // Step 3-9 create I/O port objects on x86 platform.
+        for ioport in pd.ioports.iter() {
+            let ioport_obj_id = capdl_util_make_ioport_obj(&mut spec, &pd.name, ioport.addr, ioport.size);
+            let ioport_cap = capdl_util_make_ioport_cap(ioport_obj_id);
+            caps_to_insert_to_cspace.push(((BASE_IOPORT_CAP + ioport.id) as usize, ioport_cap));
+        }
 
         // Create CSpace and add all caps that the PD code and libmicrokit need to access.
         let pd_cnode_obj_id = capdl_util_make_cnode_obj(
@@ -568,8 +585,8 @@ pub fn build_capdl_spec(
             unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
         }
 
-
         // Step 3-n write libmicrokit symbols.
+        // @billn add one for ioports as well.
         let name = pd.name.as_bytes();
         let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
         elf_obj.borrow_mut().write_symbol("microkit_name", &name[..name_length]).unwrap();
@@ -649,6 +666,7 @@ pub fn build_capdl_spec(
     }
 
     // Step 6-2
+    // @billn revisit, seems like some cases with paddrs doesnt work as expected
     spec.objects.sort_by(|a, b| {
         // Objects with paddrs come first.
         if a.object.paddr().is_none() && a.object.paddr().is_some() {

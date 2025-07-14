@@ -176,3 +176,26 @@ pub fn capdl_util_make_cnode_cap(cnode_obj_id: ObjectId, guard: u64, guard_size:
         guard_size,
     })
 }
+
+pub fn capdl_util_make_ioport_obj(
+    spec: &mut CapDLSpec,
+    pd_name: &str,
+    start_addr: u64,
+    size: u64
+) -> ObjectId {
+    let ioport_inner_obj = Object::IOPorts(object::IOPorts {
+        start_port: start_addr,
+        end_port: start_addr + size,
+    });
+    let ioport_obj = NamedObject {
+        name: format!("ioports_0x{:x}_{}", start_addr, pd_name),
+        object: ioport_inner_obj
+    };
+    spec.add_root_object(ioport_obj)
+}
+
+pub fn capdl_util_make_ioport_cap(ioport_obj_id: ObjectId) -> Cap {
+    Cap::IOPorts(cap::IOPorts {
+        object: ioport_obj_id
+    })
+}

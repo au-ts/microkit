@@ -1,5 +1,5 @@
 //
-// Copyright 2024, UNSW
+// Copyright 2025, UNSW
 //
 // SPDX-License-Identifier: BSD-2-Clause
 //
@@ -27,7 +27,6 @@ use microkit_tool::sdf::{
 use microkit_tool::sel4::{
     Arch, Config, PageSize, RiscvVirtualMemory
 };
-use microkit_tool::PD_MAX_NAME_LENGTH;
 use sel4_capdl_initializer_types::{ObjectNamesLevel, Spec};
 use std::cell::RefCell;
 use std::fs::{self};
