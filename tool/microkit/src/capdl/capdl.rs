@@ -29,7 +29,7 @@ use crate::{
     elf::ElfFile,
     sdf::{self, SysMapPerms, SysMemoryRegion, SystemDescription},
     sel4::{Config, PageSize},
-    util::{pd_write_symbols, round_down},
+    util::{pd_write_symbols, round_down}, PD_MAX_NAME_LENGTH,
 };
 
 // Corresponds to the IPC buffer symbol in libmicrokit and the monitor
@@ -175,10 +175,8 @@ impl CapDLSpec {
                 let section_offset = target_vaddr_start - seg_base_vaddr;
                 if section_offset < seg_mem_size {
                     // We have data to load
-                    let len_to_cpy = min(
-                        page_size_bytes - dest_offset,
-                        seg_mem_size - section_offset,
-                    );
+                    let len_to_cpy =
+                        min(page_size_bytes - dest_offset, seg_mem_size - section_offset);
 
                     frame_init_maybe = Some(FrameInit::Fill(Fill {
                         entries: [FillEntry {
@@ -420,6 +418,8 @@ pub fn build_capdl_spec(
     // Step 3. Create the PDs' spec
     // *********************************
     for (pd_id, pd) in system.protection_domains.iter().enumerate() {
+        let elf_obj = pd_elf_files[pd_id].clone();
+
         let mut caps_to_bind_to_tcb: Vec<CapTableEntry> = Vec::new();
         let mut caps_to_insert_to_cspace: Vec<CapTableEntry> = Vec::new();
 
@@ -469,32 +469,35 @@ pub fn build_capdl_spec(
 
         // Step 3-3: Write all symbols in this PD's ELF as required by any setvar elements and attributes.
         let mut symbols_to_write: Vec<(&String, u64)> = Vec::new();
-        {
-            let elf_obj = pd_elf_files[pd_id].clone();
-            for setvar in pd.setvars.iter() {
-                // Check that the symbol exists in the ELF
-                match elf_obj.borrow().find_symbol(&setvar.symbol) {
-                    Ok(sym_info) => {
-                        // Sanity check that the symbol is of word size so we dont overwrite anything.
-                        if sym_info.1 != (kernel_config.word_size / 8){
-                            return Err(format!("setvar to non word size symbol '{}', which is of size {} bytes", setvar.symbol, sym_info.1));
-                        }
-                        let data = match &setvar.kind {
-                            sdf::SysSetVarKind::Size { mr } => mr_to_xml_obj.get(&mr).unwrap().size,
-                            sdf::SysSetVarKind::Vaddr { address } => *address,
-                            sdf::SysSetVarKind::Paddr { region } => mr_to_xml_obj.get(&region).unwrap().phys_addr.unwrap(),
-                        };
-                        symbols_to_write.push((&setvar.symbol, data));
+        for setvar in pd.setvars.iter() {
+            // Check that the symbol exists in the ELF
+            match elf_obj.borrow().find_symbol(&setvar.symbol) {
+                Ok(sym_info) => {
+                    // Sanity check that the symbol is of word size so we dont overwrite anything.
+                    if sym_info.1 != (kernel_config.word_size / 8) {
+                        return Err(format!(
+                            "setvar to non word size symbol '{}', which is of size {} bytes",
+                            setvar.symbol, sym_info.1
+                        ));
                     }
-                    Err(err) => return Err(err),
+                    let data = match &setvar.kind {
+                        sdf::SysSetVarKind::Size { mr } => mr_to_xml_obj.get(&mr).unwrap().size,
+                        sdf::SysSetVarKind::Vaddr { address } => *address,
+                        sdf::SysSetVarKind::Paddr { region } => {
+                            mr_to_xml_obj.get(&region).unwrap().phys_addr.unwrap()
+                        }
+                    };
+                    symbols_to_write.push((&setvar.symbol, data));
                 }
+                Err(err) => return Err(err),
             }
         }
-        {
-            let elf_obj = pd_elf_files[pd_id].clone();
-            for (sym_name, value) in symbols_to_write.iter() {
-                elf_obj.borrow_mut().write_symbol(*sym_name, &value.to_le_bytes()).unwrap();
-            }
+        let elf_obj = pd_elf_files[pd_id].clone();
+        for (sym_name, value) in symbols_to_write.iter() {
+            elf_obj
+                .borrow_mut()
+                .write_symbol(*sym_name, &value.to_le_bytes())
+                .unwrap();
         }
 
         // Step 3-4: Create and map in the stack (bottom up)
@@ -564,6 +567,17 @@ pub fn build_capdl_spec(
         } else {
             unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
         }
+
+
+        // Step 3-n write libmicrokit symbols.
+        {
+            let name = pd.name.as_bytes();
+            let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
+            elf_obj.borrow_mut().write_symbol("microkit_name", &name[..name_length]).unwrap();
+        }
+        {
+            elf_obj.borrow_mut().write_symbol("microkit_passive", &[pd.passive as u8]).unwrap();
+        }
     }
 
     // *********************************
@@ -629,6 +643,8 @@ pub fn build_capdl_spec(
             let b_paddr = b.object.paddr().unwrap();
             if a_paddr != b_paddr {
                 return a_paddr.cmp(&b_paddr);
+            } else {
+                unreachable!("found two objects with the same paddr at 0x{:x}", a_paddr);
             }
         }
         // Both have no paddr or equal paddr, break tie by object size and name.
