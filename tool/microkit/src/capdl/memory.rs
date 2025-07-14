@@ -200,8 +200,8 @@ impl ArchMethods for X86_64 {
                 }
             }
             _ => Err(format!(
-                "map_page() received a non-Frame cap: {:?}, for mapping at vaddr 0x{:x}, to pd {}",
-                frame_cap, vaddr, pd_name
+                "map_page() received a non-Frame object: {:?}, for mapping at vaddr 0x{:x}, to pd {}",
+                frame_cap.obj(), vaddr, pd_name
             )),
         }
     }

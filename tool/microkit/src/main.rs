@@ -17,7 +17,7 @@ use microkit_tool::capdl::{build_capdl_spec, render_elf, reserialize_spec};
 //     VM_MAX_NAME_LENGTH,
 // };
 use microkit_tool::sdf::{
-    parse, Channel, ProtectionDomain,
+    parse,
 };
 // use sel4::{
 //     default_vm_attr, Aarch64Regs, Arch, ArmVmAttributes, BootInfo, Config, Invocation,
@@ -29,11 +29,12 @@ use microkit_tool::sel4::{
 };
 use microkit_tool::PD_MAX_NAME_LENGTH;
 use sel4_capdl_initializer_types::{ObjectNamesLevel, Spec};
-use std::cmp::min;
+use std::cell::RefCell;
 use std::fs::{self};
 // use std::iter::zip;
 // use std::mem::size_of;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use microkit_tool::util::{
     json_str, json_str_as_bool, json_str_as_u64,
 };
@@ -379,61 +380,7 @@ use microkit_tool::util::{
 //     initial_task_phys_region: MemoryRegion,
 // }
 
-// @billn reuse this in CapDL
-pub fn pd_write_symbols(
-    pds: &[ProtectionDomain],
-    channels: &[Channel],
-    pd_elf_files: &mut [ElfFile],
-    pd_setvar_values: &[Vec<u64>],
-) -> Result<(), String> {
-    for (i, pd) in pds.iter().enumerate() {
-        let elf = &mut pd_elf_files[i];
-        let name = pd.name.as_bytes();
-        let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
-        elf.write_symbol("microkit_name", &name[..name_length])?;
-        elf.write_symbol("microkit_passive", &[pd.passive as u8])?;
 
-        let mut notification_bits: u64 = 0;
-        let mut pp_bits: u64 = 0;
-        for channel in channels {
-            if channel.end_a.pd == i {
-                if channel.end_a.notify {
-                    notification_bits |= 1 << channel.end_a.id;
-                }
-                if channel.end_a.pp {
-                    pp_bits |= 1 << channel.end_a.id;
-                }
-            }
-            if channel.end_b.pd == i {
-                if channel.end_b.notify {
-                    notification_bits |= 1 << channel.end_b.id;
-                }
-                if channel.end_b.pp {
-                    pp_bits |= 1 << channel.end_b.id;
-                }
-            }
-        }
-
-        elf.write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
-        elf.write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
-        elf.write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
-
-        for (setvar_idx, setvar) in pd.setvars.iter().enumerate() {
-            let value = pd_setvar_values[i][setvar_idx];
-            let result = elf.write_symbol(&setvar.symbol, &value.to_le_bytes());
-            if result.is_err() {
-                return Err(format!(
-                    "No symbol named '{}' in ELF '{}' for PD '{}'",
-                    setvar.symbol,
-                    pd.program_image.display(),
-                    pd.name
-                ));
-            }
-        }
-    }
-
-    Ok(())
-}
 
 // /// Determine the physical memory regions for an ELF file with a given
 // /// alignment.
@@ -3343,7 +3290,7 @@ fn main() -> Result<(), String> {
     // };
 
     // let kernel_elf: ElfFile = ElfFile::from_path(&kernel_elf_path)?;
-    let monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
+    let monitor_elf: Rc<RefCell<ElfFile>> = Rc::new(ElfFile::from_path(&monitor_elf_path).unwrap().into());
 
     // if monitor_elf.segments.iter().filter(|s| s.loadable).count() > 1 {
     //     eprintln!(
@@ -3364,7 +3311,7 @@ fn main() -> Result<(), String> {
     for pd in &system.protection_domains {
         match get_full_path(&pd.program_image, &search_paths) {
             Some(path) => {
-                let elf = ElfFile::from_path(&path).unwrap();
+                let elf: Rc<RefCell<ElfFile>> = Rc::new(ElfFile::from_path(&path).unwrap().into());
                 pd_elf_files.push(elf);
             }
             None => {
@@ -3377,7 +3324,7 @@ fn main() -> Result<(), String> {
     }
 
     // We have parsed the XML and all ELF files, create the CapDL spec of the system described in the XML.
-    let spec = build_capdl_spec(&kernel_config, &monitor_elf, &pd_elf_files, &system)?;
+    let spec = build_capdl_spec(&kernel_config, monitor_elf, &mut pd_elf_files, &system)?;
 
     // Now embed the built spec into the CapDL initialiser.
     let spec_as_json = serde_json::to_string_pretty(&spec).unwrap();

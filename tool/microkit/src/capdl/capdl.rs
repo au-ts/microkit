@@ -6,26 +6,30 @@
 use core::ops::Range;
 
 use std::{
+    cell::RefCell,
     cmp::{min, Ordering},
     collections::HashMap,
-    path::PathBuf,
+    rc::Rc,
     u8,
 };
 
-use serde::{Serialize};
+use serde::Serialize;
 
 use crate::{
     capdl::{
         memory::{self, ArchMethods, X86_64},
         spec::{
-            cap, object::{self}, AsidSlotEntry, BytesContent, Cap, CapTableEntry, Fill, FillEntry, FillEntryContent, FrameInit, IrqEntry, NamedObject, Object, ObjectId, UntypedCover
+            cap,
+            object::{self},
+            AsidSlotEntry, BytesContent, Cap, CapTableEntry, Fill, FillEntry, FillEntryContent,
+            FrameInit, IrqEntry, NamedObject, Object, ObjectId, UntypedCover,
         },
         util::*,
     },
     elf::ElfFile,
-    sdf::{SysMapPerms, SystemDescription},
+    sdf::{self, SysMapPerms, SystemDescription},
     sel4::{Config, PageSize},
-    util::round_down,
+    util::{pd_write_symbols, round_down},
 };
 
 // Corresponds to the IPC buffer symbol in libmicrokit and the monitor
@@ -78,7 +82,7 @@ const SLOT_SIZE: u64 = 1 << SLOT_BITS;
 // const INIT_ASID_POOL_CAP_ADDRESS: u64 = 6;
 // const SMC_CAP_ADDRESS: u64 = 15;
 
-#[derive(Serialize, Debug, Clone, Eq, PartialEq)]
+#[derive(Serialize, Clone, Eq, PartialEq)]
 pub struct CapDLSpec {
     pub objects: Vec<NamedObject>,
     pub irqs: Vec<IrqEntry>,
@@ -126,7 +130,12 @@ impl CapDLSpec {
     /// -> VSpace: all ELF loadable pages and IPC buffer mapped in.
     /// Returns the object ID of the TCB
     ///
-    pub fn add_elf_to_spec(&mut self, sel4_config: &Config, pd_name: &str, elf: &ElfFile) -> Result<ObjectId, String> {
+    pub fn add_elf_to_spec(
+        &mut self,
+        sel4_config: &Config,
+        pd_name: &str,
+        elf: Rc<RefCell<ElfFile>>,
+    ) -> Result<ObjectId, String> {
         // We assumes that ELFs and PDs have a one-to-one relationship. So for each ELF we create a VSpace.
         let vspace_obj_id = X86_64::create_vspace(self, pd_name); // @billn make arch agnostic
         let vspace_cap = Cap::PageTable(cap::PageTable {
@@ -135,7 +144,7 @@ impl CapDLSpec {
 
         // For each loadable segment in the ELF, map it into the address space of this PD.
         let mut frame_sequence = 0; // For object naming purpose only.
-        for segment in elf.loadable_segments() {
+        for segment in elf.borrow().loadable_segments().iter() {
             if segment.data.len() == 0 {
                 continue;
             }
@@ -178,7 +187,9 @@ impl CapDLSpec {
                                 end: (dest_offset + len_to_cpy) as usize,
                             },
                             content: FillEntryContent::Data(BytesContent {
-                                bytes: segment.data[section_offset as usize..((section_offset + len_to_cpy) as usize)].to_vec()
+                                bytes: segment.data[section_offset as usize
+                                    ..((section_offset + len_to_cpy) as usize)]
+                                    .to_vec(),
                             }),
                         }]
                         .to_vec(),
@@ -197,7 +208,7 @@ impl CapDLSpec {
                     frame_init,
                     &format!("elf_{}_{}", pd_name, frame_sequence),
                     None,
-                    PageSize::Small.fixed_size_bits(sel4_config) as usize
+                    PageSize::Small.fixed_size_bits(sel4_config) as usize,
                 );
                 let frame_cap = capdl_util_make_frame_cap(
                     frame_obj_id,
@@ -238,7 +249,8 @@ impl CapDLSpec {
             }),
             &format!("{}_ipcbuf", pd_name),
             None,
-            12, // @billn fix
+            // Must be consistent with the granule bits used in spec serialisation
+            PageSize::Small.fixed_size_bits(sel4_config) as usize,
         );
         let ipcbuf_frame_cap =
             capdl_util_make_frame_cap(ipcbuf_frame_obj_id, true, true, false, true);
@@ -246,6 +258,7 @@ impl CapDLSpec {
         // this frame to the TCB as well.
         let ipcbuf_frame_cap_for_tcb = ipcbuf_frame_cap.clone();
         let ipcbuf_vaddr = elf
+            .borrow()
             .find_symbol(SYMBOL_IPC_BUFFER)
             .unwrap_or_else(|_| panic!("Could not find {}", SYMBOL_IPC_BUFFER))
             .0;
@@ -267,7 +280,7 @@ impl CapDLSpec {
         };
 
         let tcb_name = format!("tcb_{}", pd_name);
-        let entry_point = elf.entry;
+        let entry_point = elf.borrow().entry;
 
         let tcb_extra_info = object::TcbExtraInfo {
             ipc_buffer_addr: ipcbuf_vaddr,
@@ -303,20 +316,22 @@ impl CapDLSpec {
 /// Build a CapDL Spec according to the System Description File.
 pub fn build_capdl_spec(
     kernel_config: &Config,
-    monitor_elf: &ElfFile,
-    pd_elf_files: &Vec<ElfFile>,
+    monitor_elf: Rc<RefCell<ElfFile>>,
+    pd_elf_files: &mut Vec<Rc<RefCell<ElfFile>>>,
     system: &SystemDescription,
 ) -> Result<CapDLSpec, String> {
     let mut spec = CapDLSpec::new();
 
-    // @billn revisit: does every caps need grant rights?
+    // @billn revisit: does every caps need grant rights? Apart from executable data needing grant
 
     // *********************************
     // Step 1. Create the monitor's spec.
     // *********************************
 
     // Parse ELF, create VSpace, map in all ELF loadable frames and IPC buffer, and create TCB.
-    let monitor_tcb_obj_id = spec.add_elf_to_spec(kernel_config, "monitor", monitor_elf).unwrap(); // @billn check error
+    let monitor_tcb_obj_id = spec
+        .add_elf_to_spec(kernel_config, "monitor", monitor_elf.clone())
+        .unwrap(); // @billn check error
 
     // Create monitor fault endpoint object + cap
     let mon_fault_ep_obj_id = capdl_util_make_endpoint_obj(&mut spec, "monitor");
@@ -353,7 +368,7 @@ pub fn build_capdl_spec(
         &mut spec.get_root_object_mut(monitor_tcb_obj_id).unwrap().object
     {
         // Special case, monitor have its stack statically allocated.
-        monitor_tcb.extra.sp = monitor_elf.find_symbol("_stack").unwrap().0;
+        monitor_tcb.extra.sp = monitor_elf.borrow().find_symbol("_stack").unwrap().0;
         // Monitor must run at the highest priority
         monitor_tcb.extra.prio = u8::MAX;
         monitor_tcb.extra.max_prio = u8::MAX;
@@ -403,12 +418,47 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 3. Create the PDs' spec
     // *********************************
+    // // Before we do anything though, we write all ELF symbols we need into every PD's ELF data structure.
+    // // So that spec.add_elf_to_spec() will just add the correct data into the spec for us and we don't have to
+    // // touch the frames data again at a later step.
+    // let pd_setvar_values: Vec<Vec<u64>> = system
+    //     .protection_domains
+    //     .iter()
+    //     .map(|pd| {
+    //         pd.setvars
+    //             .iter()
+    //             .map(|setvar| match &setvar.kind {
+    //                 sdf::SysSetVarKind::Size { mr } => {
+    //                     system
+    //                         .memory_regions
+    //                         .iter()
+    //                         .find(|m| m.name == *mr)
+    //                         .unwrap()
+    //                         .size
+    //                 }
+    //                 sdf::SysSetVarKind::Vaddr { address } => *address,
+    //                 sdf::SysSetVarKind::Paddr { region } => {
+    //                     let mr = system
+    //                         .memory_regions
+    //                         .iter()
+    //                         .find(|mr| mr.name == *region)
+    //                         .unwrap_or_else(|| panic!("Cannot find region: {}", region));
+
+    //                     mr_pages[mr][0].phys_addr
+    //                 }
+    //             })
+    //             .collect()
+    //     })
+    //     .collect();
+
+    // pd_write_symbols(&system.protection_domains, &system.channels, pd_elf_files, pd_setvar_values);
+
     for (pd_id, pd) in system.protection_domains.iter().enumerate() {
         let mut caps_to_bind_to_tcb: Vec<CapTableEntry> = Vec::new();
         let mut caps_to_insert_to_cspace: Vec<CapTableEntry> = Vec::new();
 
         // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
-        let elf = &pd_elf_files[pd_id];
+        let elf = pd_elf_files[pd_id].clone();
         let pd_tcb_obj_id = spec.add_elf_to_spec(kernel_config, &pd.name, elf).unwrap();
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec, pd_tcb_obj_id);
 
@@ -518,7 +568,11 @@ pub fn build_capdl_spec(
     }
 
     // *********************************
-    // Step 4. Sort the root objects
+    // Step 4. Write ELF symbols in the monitor and PDs.
+    // *********************************
+
+    // *********************************
+    // Step 5. Sort the root objects
     // *********************************
     // The CapDL loader expects objects with paddr to come first, then sorted by size so that the
     // allocation algorithm at run-time can run more efficiently.

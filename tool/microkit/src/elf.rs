@@ -34,7 +34,7 @@ struct ElfHeader32 {
 }
 
 #[repr(C, packed)]
-#[derive(Copy, Clone)]
+#[derive(Clone, Eq, PartialEq)]
 struct ElfSymbol64 {
     name: u32,
     info: u8,
@@ -96,6 +96,7 @@ struct ElfHeader64 {
 
 const ELF_MAGIC: &[u8; 4] = b"\x7FELF";
 
+#[derive(Eq, PartialEq, Clone)]
 pub struct ElfSegment {
     pub p_filesz: u64,
     pub p_offset: u64,
@@ -124,6 +125,7 @@ impl ElfSegment {
     }
 }
 
+#[derive(Eq, PartialEq)]
 enum ElfSegmentAttributes {
     /// Corresponds to PF_X
     Execute = 0x1,
@@ -133,6 +135,7 @@ enum ElfSegmentAttributes {
     Read = 0x4,
 }
 
+#[derive(Eq, PartialEq, Clone)]
 pub struct ElfFile {
     pub path: PathBuf,
     pub word_size: usize,
@@ -280,7 +283,7 @@ impl ElfFile {
             assert!(sym_body.len() == 1);
             assert!(sym_tail.is_empty());
 
-            let sym = sym_body[0];
+            let sym = &sym_body[0];
 
             let name = Self::get_string(symtab_str, sym.name as usize)?;
             // It is possible for a valid ELF to contain multiple global symbols with the same name.
@@ -293,7 +296,7 @@ impl ElfFile {
                 // Here we are doing something that could end up being fairly expensive, we are copying
                 // the string for each symbol name. It should be possible to turn this into a reference
                 // although it might be awkward in order to please the borrow checker.
-                let insert = symbols.insert(name.to_string(), (sym, false));
+                let insert = symbols.insert(name.to_string(), (sym.clone(), false));
                 assert!(insert.is_none());
             }
             offset += symbol_size;

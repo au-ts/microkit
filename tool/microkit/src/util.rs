@@ -4,8 +4,12 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
+use std::cmp::min;
+
 // use crate::sel4::Object;
 use serde_json;
+
+use crate::{elf::ElfFile, sdf::{Channel, ProtectionDomain}, PD_MAX_NAME_LENGTH};
 
 pub fn msb(x: u64) -> u64 {
     64 - x.leading_zeros() as u64 - 1
@@ -216,6 +220,61 @@ pub fn monitor_serialise_names(
     }
 
     names_bytes
+}
+
+pub fn pd_write_symbols(
+    pds: &[ProtectionDomain],
+    channels: &[Channel],
+    pd_elf_files: &mut [ElfFile],
+    pd_setvar_values: &[Vec<u64>],
+) -> Result<(), String> {
+    for (i, pd) in pds.iter().enumerate() {
+        let elf = &mut pd_elf_files[i];
+        let name = pd.name.as_bytes();
+        let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
+        elf.write_symbol("microkit_name", &name[..name_length])?;
+        elf.write_symbol("microkit_passive", &[pd.passive as u8])?;
+
+        let mut notification_bits: u64 = 0;
+        let mut pp_bits: u64 = 0;
+        for channel in channels {
+            if channel.end_a.pd == i {
+                if channel.end_a.notify {
+                    notification_bits |= 1 << channel.end_a.id;
+                }
+                if channel.end_a.pp {
+                    pp_bits |= 1 << channel.end_a.id;
+                }
+            }
+            if channel.end_b.pd == i {
+                if channel.end_b.notify {
+                    notification_bits |= 1 << channel.end_b.id;
+                }
+                if channel.end_b.pp {
+                    pp_bits |= 1 << channel.end_b.id;
+                }
+            }
+        }
+
+        elf.write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
+        elf.write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
+        elf.write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
+
+        for (setvar_idx, setvar) in pd.setvars.iter().enumerate() {
+            let value = pd_setvar_values[i][setvar_idx];
+            let result = elf.write_symbol(&setvar.symbol, &value.to_le_bytes());
+            if result.is_err() {
+                return Err(format!(
+                    "No symbol named '{}' in ELF '{}' for PD '{}'",
+                    setvar.symbol,
+                    pd.program_image.display(),
+                    pd.name
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

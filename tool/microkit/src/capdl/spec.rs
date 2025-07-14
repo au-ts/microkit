@@ -4,10 +4,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 use core::ops::Range;
+use std::{cell::RefCell, rc::Rc};
 use sel4_capdl_initializer_types::Word;
 use serde::{Deserialize, Serialize};
 
-use crate::sel4::{Config, ObjectType};
+use crate::{elf::ElfFile, sel4::{Config, ObjectType}};
 
 pub type ObjectId = usize;
 pub type Badge = Word;
@@ -16,7 +17,7 @@ pub type CapSlot = usize;
 pub type CapTableEntry = (CapSlot, Cap);
 
 // CapDL Spec objects
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Serialize, Clone, Eq, PartialEq)]
 pub struct IrqEntry {
     pub irq: Word,
     pub handler: ObjectId,
@@ -24,45 +25,62 @@ pub struct IrqEntry {
 
 pub type AsidSlotEntry = ObjectId;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Serialize, Clone, Eq, PartialEq)]
 pub struct UntypedCover {
     pub parent: ObjectId,
     pub children: Range<ObjectId>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Serialize, Clone, Eq, PartialEq)]
 pub struct NamedObject {
     pub name: String,
     pub object: Object,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Serialize, Clone, Eq, PartialEq)]
 pub enum FrameInit {
     Fill(Fill),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Serialize, Clone, Eq, PartialEq)]
 pub struct Fill {
     pub entries: Vec<FillEntry>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
-pub enum FillEntryContent {
-    Data(BytesContent),
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Serialize, Clone, Eq, PartialEq)]
 pub struct FillEntry {
     pub range: Range<usize>,
     pub content: FillEntryContent,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Serialize, Clone, Eq, PartialEq)]
+pub enum FillEntryContent {
+    Data(BytesContent),
+    Temp(TemporaryContent)
+}
+
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub struct BytesContent {
     pub bytes: Vec<u8>
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+// This is not valid CapDL, it is only used internally as a placeholder
+// for ELF frame objects until we write out the data
+#[derive(Clone, Eq, PartialEq)]
+pub struct TemporaryContent {
+    pub elf_source: Rc<RefCell<ElfFile>>,
+    pub elf_segment_id: usize,
+    pub elf_seg_data_range: Range<usize>
+}
+impl Serialize for TemporaryContent {
+    fn serialize<S>(&self, _: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+        unreachable!("All TemporaryContent should have already been converted to BytesContent at spec serialisation time!")
+    }
+}
+
+#[derive(Serialize, Clone, Eq, PartialEq)]
 pub enum Object {
     Endpoint,
     Notification,
@@ -100,7 +118,7 @@ impl Object {
             Object::VCpu => ObjectType::Vcpu.fixed_size_bits(sel4_config).unwrap(),
             Object::Frame(frame) => frame.size_bits as u64,
             Object::PageTable(_) => ObjectType::PageTable.fixed_size_bits(sel4_config).unwrap(),
-            Object::AsidPool(_) => 0, // This isn't zero on x86, is it also zero on arm?? @billn revisit
+            Object::AsidPool(_) => 0, // This isn't zero on x86, is it also zero on arm? do we even use this? @billn revisit
             Object::ArmIrq(_) => 0,
             Object::IrqMsi(_) => 0,
             Object::IrqIOApic(_) => 0,
@@ -124,7 +142,7 @@ impl Object {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Serialize, Clone, Eq, PartialEq)]
 pub enum Cap {
     // Untyped(cap::Untyped),
     Endpoint(cap::Endpoint),
@@ -186,7 +204,7 @@ impl Cap {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Serialize, Clone, Eq, PartialEq)]
 pub struct Rights {
     pub read: bool,
     pub write: bool,
@@ -198,19 +216,19 @@ pub mod object {
     use super::*;
     /// Any object that takes a size bits is in addition to the base size
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct CNode {
         pub size_bits: usize,
         pub slots: Vec<CapTableEntry>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct Tcb {
         pub slots: Vec<CapTableEntry>,
         pub extra: TcbExtraInfo,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct TcbExtraInfo {
         pub ipc_buffer_addr: Word,
 
@@ -226,49 +244,49 @@ pub mod object {
         pub master_fault_ep: Option<CPtr>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct Irq {
         pub slots: Vec<CapTableEntry>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct Frame {
         pub size_bits: usize,
         pub paddr: Option<usize>,
         pub init: FrameInit,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct PageTable {
         pub is_root: bool,
         pub level: Option<u8>,
         pub slots: Vec<CapTableEntry>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct AsidPool {
         pub high: Word,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct ArmIrq {
         pub slots: Vec<CapTableEntry>,
         pub extra: ArmIrqExtraInfo,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct ArmIrqExtraInfo {
         pub trigger: Word,
         pub target: Word,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct IrqMsi {
         pub slots: Vec<CapTableEntry>,
         pub extra: IrqMsiExtraInfo,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct IrqMsiExtraInfo {
         pub handle: Word,
         pub pci_bus: Word,
@@ -276,13 +294,13 @@ pub mod object {
         pub pci_func: Word,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct IrqIOApic {
         pub slots: Vec<CapTableEntry>,
         pub extra: IrqIOApicExtraInfo,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct IrqIOApicExtraInfo {
         pub ioapic: Word,
         pub pin: Word,
@@ -290,19 +308,19 @@ pub mod object {
         pub polarity: Word,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct IOPorts {
         pub start_port: Word,
         pub end_port: Word,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct SchedContext {
         pub size_bits: usize,
         pub extra: SchedContextExtraInfo,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct SchedContextExtraInfo {
         pub period: u64,
         pub budget: u64,
@@ -313,12 +331,12 @@ pub mod object {
 pub mod cap {
     use super::*;
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct Untyped {
         pub object: ObjectId,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct Endpoint {
         pub object: ObjectId,
         // TODO
@@ -330,78 +348,78 @@ pub mod cap {
         pub rights: Rights,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct Notification {
         pub object: ObjectId,
         pub badge: Badge,
         pub rights: Rights,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct CNode {
         pub object: ObjectId,
         pub guard: Word,
         pub guard_size: Word,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct Tcb {
         pub object: ObjectId,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct IrqHandler {
         pub object: ObjectId,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct VCpu {
         pub object: ObjectId,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct Frame {
         pub object: ObjectId,
         pub rights: Rights,
         pub cached: bool,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct PageTable {
         pub object: ObjectId,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct AsidPool {
         pub object: ObjectId,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct ArmIrqHandler {
         pub object: ObjectId,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct IrqMsiHandler {
         pub object: ObjectId,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct IrqIOApicHandler {
         pub object: ObjectId,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct IOPorts {
         pub object: ObjectId,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct SchedContext {
         pub object: ObjectId,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct Reply {
         pub object: ObjectId,
     }
