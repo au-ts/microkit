@@ -22,12 +22,12 @@ use crate::{
             cap,
             object::{self},
             AsidSlotEntry, BytesContent, Cap, CapTableEntry, Fill, FillEntry, FillEntryContent,
-            FrameInit, IrqEntry, NamedObject, Object, ObjectId, UntypedCover,
+            FrameInit, IrqEntry, NamedObject, Object, ObjectId, TemporaryContent, UntypedCover,
         },
         util::*,
     },
     elf::ElfFile,
-    sdf::{self, SysMapPerms, SystemDescription},
+    sdf::{self, SysMapPerms, SysMemoryRegion, SystemDescription},
     sel4::{Config, PageSize},
     util::{pd_write_symbols, round_down},
 };
@@ -129,7 +129,8 @@ impl CapDLSpec {
     /// -> TCB: PC and IPC buffer vaddr set. VSpace and IPC buffer frame caps bound.
     /// -> VSpace: all ELF loadable pages and IPC buffer mapped in.
     /// Returns the object ID of the TCB
-    ///
+    /// NOTE that all ELF frames will just be reference to the original ELF object rather than the actual data.
+    /// So that symbols can be patched before the frames' data are filled in.
     pub fn add_elf_to_spec(
         &mut self,
         sel4_config: &Config,
@@ -144,13 +145,12 @@ impl CapDLSpec {
 
         // For each loadable segment in the ELF, map it into the address space of this PD.
         let mut frame_sequence = 0; // For object naming purpose only.
-        for segment in elf.borrow().loadable_segments().iter() {
+        for (seg_idx, segment) in elf.borrow().loadable_segments().iter().enumerate() {
             if segment.data.len() == 0 {
                 continue;
             }
 
             let seg_base_vaddr = segment.virt_addr;
-            let seg_file_size: u64 = segment.p_filesz;
             let seg_mem_size: u64 = segment.mem_size();
 
             let page_size = PageSize::Small;
@@ -173,11 +173,11 @@ impl CapDLSpec {
 
                 let target_vaddr_start = cur_vaddr + dest_offset;
                 let section_offset = target_vaddr_start - seg_base_vaddr;
-                if section_offset < seg_file_size {
+                if section_offset < seg_mem_size {
                     // We have data to load
                     let len_to_cpy = min(
                         page_size_bytes - dest_offset,
-                        seg_file_size - section_offset,
+                        seg_mem_size - section_offset,
                     );
 
                     frame_init_maybe = Some(FrameInit::Fill(Fill {
@@ -186,10 +186,11 @@ impl CapDLSpec {
                                 start: dest_offset as usize,
                                 end: (dest_offset + len_to_cpy) as usize,
                             },
-                            content: FillEntryContent::Data(BytesContent {
-                                bytes: segment.data[section_offset as usize
-                                    ..((section_offset + len_to_cpy) as usize)]
-                                    .to_vec(),
+                            content: FillEntryContent::Temp(TemporaryContent {
+                                elf_source: elf.clone(),
+                                elf_segment_id: seg_idx,
+                                elf_seg_data_range: (section_offset as usize
+                                    ..((section_offset + len_to_cpy) as usize)),
                             }),
                         }]
                         .to_vec(),
@@ -387,10 +388,10 @@ pub fn build_capdl_spec(
     // Step 2. Create the memory regions' spec. Result is a hashmap keyed on MR name, value is Vec of frame object IDs
     // *********************************
     let mut mr_to_frame_obj_ids: HashMap<&String, Vec<ObjectId>> = HashMap::new();
-    let mut mr_to_page_size: HashMap<&String, PageSize> = HashMap::new();
+    let mut mr_to_xml_obj: HashMap<&String, &SysMemoryRegion> = HashMap::new();
     for mr in system.memory_regions.iter() {
         mr_to_frame_obj_ids.insert(&mr.name, [].to_vec());
-        mr_to_page_size.insert(&mr.name, mr.page_size);
+        mr_to_xml_obj.insert(&mr.name, mr);
         let frame_size_bits = mr.page_size.fixed_size_bits(kernel_config);
 
         for frame_sequence in 0..mr.page_count {
@@ -418,48 +419,14 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 3. Create the PDs' spec
     // *********************************
-    // // Before we do anything though, we write all ELF symbols we need into every PD's ELF data structure.
-    // // So that spec.add_elf_to_spec() will just add the correct data into the spec for us and we don't have to
-    // // touch the frames data again at a later step.
-    // let pd_setvar_values: Vec<Vec<u64>> = system
-    //     .protection_domains
-    //     .iter()
-    //     .map(|pd| {
-    //         pd.setvars
-    //             .iter()
-    //             .map(|setvar| match &setvar.kind {
-    //                 sdf::SysSetVarKind::Size { mr } => {
-    //                     system
-    //                         .memory_regions
-    //                         .iter()
-    //                         .find(|m| m.name == *mr)
-    //                         .unwrap()
-    //                         .size
-    //                 }
-    //                 sdf::SysSetVarKind::Vaddr { address } => *address,
-    //                 sdf::SysSetVarKind::Paddr { region } => {
-    //                     let mr = system
-    //                         .memory_regions
-    //                         .iter()
-    //                         .find(|mr| mr.name == *region)
-    //                         .unwrap_or_else(|| panic!("Cannot find region: {}", region));
-
-    //                     mr_pages[mr][0].phys_addr
-    //                 }
-    //             })
-    //             .collect()
-    //     })
-    //     .collect();
-
-    // pd_write_symbols(&system.protection_domains, &system.channels, pd_elf_files, pd_setvar_values);
-
     for (pd_id, pd) in system.protection_domains.iter().enumerate() {
         let mut caps_to_bind_to_tcb: Vec<CapTableEntry> = Vec::new();
         let mut caps_to_insert_to_cspace: Vec<CapTableEntry> = Vec::new();
 
         // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
-        let elf = pd_elf_files[pd_id].clone();
-        let pd_tcb_obj_id = spec.add_elf_to_spec(kernel_config, &pd.name, elf).unwrap();
+        let pd_tcb_obj_id = spec
+            .add_elf_to_spec(kernel_config, &pd.name, pd_elf_files[pd_id].clone())
+            .unwrap();
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec, pd_tcb_obj_id);
 
         // In the benchmark configuration, we allow PDs to access their own TCB.
@@ -473,10 +440,11 @@ pub fn build_capdl_spec(
             ));
         }
 
-        // Step 3-2: Map in all Memory Regions
+        // Step 3-2: Map in all Memory Regions, keep tabs on what MR is mapped where so we can setvar later
+        let mut mr_to_vaddr: HashMap<&String, u64> = HashMap::new();
         for map in pd.maps.iter() {
             let cur_vaddr = map.vaddr;
-            let page_size = *mr_to_page_size.get(&map.mr).unwrap();
+            let page_size = mr_to_xml_obj.get(&map.mr).unwrap().page_size;
             let read = map.perms & SysMapPerms::Read as u8 != 0;
             let write = map.perms & SysMapPerms::Write as u8 != 0;
             let execute = map.perms & SysMapPerms::Execute as u8 != 0;
@@ -496,9 +464,40 @@ pub fn build_capdl_spec(
                 )
                 .unwrap();
             }
+            mr_to_vaddr.insert(&map.mr, map.vaddr);
         }
 
-        // Step 3-3: Create and map in the stack (bottom up)
+        // Step 3-3: Write all symbols in this PD's ELF as required by any setvar elements and attributes.
+        let mut symbols_to_write: Vec<(&String, u64)> = Vec::new();
+        {
+            let elf_obj = pd_elf_files[pd_id].clone();
+            for setvar in pd.setvars.iter() {
+                // Check that the symbol exists in the ELF
+                match elf_obj.borrow().find_symbol(&setvar.symbol) {
+                    Ok(sym_info) => {
+                        // Sanity check that the symbol is of word size so we dont overwrite anything.
+                        if sym_info.1 != (kernel_config.word_size / 8){
+                            return Err(format!("setvar to non word size symbol '{}', which is of size {} bytes", setvar.symbol, sym_info.1));
+                        }
+                        let data = match &setvar.kind {
+                            sdf::SysSetVarKind::Size { mr } => mr_to_xml_obj.get(&mr).unwrap().size,
+                            sdf::SysSetVarKind::Vaddr { address } => *address,
+                            sdf::SysSetVarKind::Paddr { region } => mr_to_xml_obj.get(&region).unwrap().phys_addr.unwrap(),
+                        };
+                        symbols_to_write.push((&setvar.symbol, data));
+                    }
+                    Err(err) => return Err(err),
+                }
+            }
+        }
+        {
+            let elf_obj = pd_elf_files[pd_id].clone();
+            for (sym_name, value) in symbols_to_write.iter() {
+                elf_obj.borrow_mut().write_symbol(*sym_name, &value.to_le_bytes()).unwrap();
+            }
+        }
+
+        // Step 3-4: Create and map in the stack (bottom up)
         let mut cur_stack_vaddr = kernel_config.pd_stack_bottom(pd.stack_size);
         let num_stack_frames = pd.stack_size / PageSize::Small as u64;
         for stack_frame_seq in 0..num_stack_frames {
@@ -525,20 +524,20 @@ pub fn build_capdl_spec(
             cur_stack_vaddr += PageSize::Small as u64;
         }
 
-        // Step 3-4 Create Scheduling Context
-        // @billn work out where these magic numbers come from and fix size bits
+        // Step 3-5 Create Scheduling Context
+        // @billn work out where size bits come from
         let pd_sc_obj_id = capdl_util_make_sc_obj(&mut spec, &pd.name, 7, pd.period, pd.budget, 0);
         let pd_sc_cap = capdl_util_make_sc_cap(pd_sc_obj_id);
         caps_to_bind_to_tcb.push((TCB_SLOT_SC as usize, pd_sc_cap));
 
-        // Step 3-5 Create fault Endpoint cap to monitor
+        // Step 3-6 Create fault Endpoint cap to monitor
         let pd_fault_ep_cap =
             capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, pd_id as u64);
         let pd_fault_ep_cap_clone = pd_fault_ep_cap.clone();
         caps_to_insert_to_cspace.push((FAULT_EP_CAP_IDX as usize, pd_fault_ep_cap));
         caps_to_bind_to_tcb.push((TCB_SLOT_FAULT_EP as usize, pd_fault_ep_cap_clone));
 
-        // Step 3-6 Create spec and caps to IRQs
+        // Step 3-7 Create spec and caps to IRQs
         let mut irq_caps: Vec<Cap> = Vec::new();
         for irq in pd.irqs.iter() {}
 
@@ -568,11 +567,37 @@ pub fn build_capdl_spec(
     }
 
     // *********************************
-    // Step 4. Write ELF symbols in the monitor and PDs.
+    // Step 4. Write ELF symbols in the monitor.
     // *********************************
 
     // *********************************
-    // Step 5. Sort the root objects
+    // Step 5. Fill in the data for all ELF loadable frames.
+    // *********************************
+    // Previously, spec.add_elf_to_spec() already created all the frame objects for us and book-keeped where
+    // the data for each frame should come from. We now fetch it from the ELF objects *after* all symbols have been
+    // set.
+    for obj in spec.objects.iter_mut() {
+        if let Object::Frame(frame_obj) = &mut obj.object {
+            let FrameInit::Fill(frame_fill) = &mut frame_obj.init;
+            for entry in frame_fill.entries.iter_mut() {
+                let mut temp_fill_content_maybe: Option<TemporaryContent> = None;
+                if let FillEntryContent::Temp(temp_fill) = &entry.content {
+                    temp_fill_content_maybe = Some(temp_fill.clone());
+                }
+                if temp_fill_content_maybe.is_some() {
+                    let temp_fill = temp_fill_content_maybe.unwrap();
+                    let elf_segments = temp_fill.elf_source.borrow();
+                    let elf_segment = elf_segments.segments.get(temp_fill.elf_segment_id).unwrap();
+                    entry.content = FillEntryContent::Data(BytesContent {
+                        bytes: elf_segment.data[temp_fill.elf_seg_data_range].to_vec(),
+                    });
+                }
+            }
+        }
+    }
+
+    // *********************************
+    // Step 6. Sort the root objects
     // *********************************
     // The CapDL loader expects objects with paddr to come first, then sorted by size so that the
     // allocation algorithm at run-time can run more efficiently.
@@ -583,13 +608,13 @@ pub fn build_capdl_spec(
     // 3. Record all of the root objects new index.
     // 4. Recurse through every cap, for any cap bearing the original object ID, write the new object ID.
 
-    // Step 4-1
+    // Step 6-1
     let mut obj_name_to_old_id: HashMap<String, ObjectId> = HashMap::new();
     for (id, obj) in spec.objects.iter().enumerate() {
         obj_name_to_old_id.insert(obj.name.clone(), id);
     }
 
-    // Step 4-2
+    // Step 6-2
     spec.objects.sort_by(|a, b| {
         // Objects with paddrs come first.
         if a.object.paddr().is_none() && a.object.paddr().is_some() {
@@ -625,13 +650,13 @@ pub fn build_capdl_spec(
         }
     });
 
-    // Step 4-3
+    // Step 6-3
     let mut obj_old_id_to_new_id: HashMap<ObjectId, ObjectId> = HashMap::new();
     for (new_id, obj) in spec.objects.iter().enumerate() {
         obj_old_id_to_new_id.insert(*obj_name_to_old_id.get(&obj.name).unwrap(), new_id);
     }
 
-    // Step 4-4
+    // Step 6-4
     for obj in spec.objects.iter_mut() {
         match obj.object.get_cap_entries_mut() {
             Some(caps) => {
