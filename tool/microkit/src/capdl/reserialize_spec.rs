@@ -1,11 +1,12 @@
 //
 // Copyright 2023, Colias Group, LLC
+// Copyright 2025, UNSW
 //
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
 // A reimplementation of https://github.com/seL4/rust-sel4/blob/6f8d1baaad3aaca6f20966a2acb40e4651546519/crates/sel4-capdl-initializer/add-spec/src/reserialize_spec.rs
-// We can't reuse the original code as is because it assumes that we are loading ELF frames from files.
+// We can't reuse the original code because it assumes that we are loading ELF frames from files.
 // Which isn't suitable for Microkit as we want to embed the frames' data directly into the spec for
 // easily patching ELF symbols.
 
@@ -37,7 +38,7 @@ pub fn reserialize_spec<'a>(
                 })
         })
         // The final step is to take the frame data and compress it using miniz_oxide::deflate::compress_to_vec()
-        // so to save memory then append it to `sources`.
+        // to save memory then append it to `sources`.
         .traverse_data(|data| IndirectDeflatedBytesContent {
             deflated_bytes_range: sources.append(&DeflatedBytesContent::pack(&data.bytes)),
         });
