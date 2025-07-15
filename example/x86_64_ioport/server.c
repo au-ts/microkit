@@ -1,5 +1,5 @@
 /*
- * Copyright 2021, Breakaway Consulting Pty. Ltd.
+ * Copyright 2025, UNSW
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -15,6 +15,7 @@ uintptr_t large_memory_region_paddr;
 uint64_t large_memory_region_size;
 
 #define SERIAL_IOPORT_ID 0
+#define CLIENT_CH 10
 
 static inline void serial_putc(char ch)
 {
@@ -101,9 +102,22 @@ void init(void)
     microkit_dbg_puts("Now writing to serial I/O port: ");
     serial_puts("hey there from serial I/O port\n");
 
-    
+    microkit_dbg_puts("init() returning!\n");
 }
 
 void notified(microkit_channel ch)
 {
+    microkit_dbg_puts("SERVER: GOT NOTIFICATION on :");
+    puthex64(ch);
+    microkit_dbg_puts("\n");
+}
+
+microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo) {
+    if (ch == CLIENT_CH) {
+        microkit_dbg_puts("SERVER: GOT PPC\n");
+        if (microkit_msginfo_get_label(msginfo) == 42) {
+            microkit_dbg_puts("SERVER: correct label!\n");
+        }
+    }
+    return microkit_msginfo_new(0, 0);
 }

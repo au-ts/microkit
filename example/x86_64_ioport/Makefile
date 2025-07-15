@@ -1,5 +1,4 @@
 #
-# Copyright 2021, Breakaway Consulting Pty. Ltd.
 # Copyright 2025, UNSW
 #
 # SPDX-License-Identifier: BSD-2-Clause
@@ -37,9 +36,7 @@ AS := $(TOOLCHAIN)-as
 OBJCOPY := $(TOOLCHAIN)-objcopy
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
-HELLO_OBJS := hello.o
-
-IMAGES := hello.elf
+IMAGES := server.elf client.elf
 CFLAGS := -nostdlib -ffreestanding -g -O3 -Wall -Wno-unused-function -Werror -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
 LDFLAGS := -L$(BOARD_DIR)/lib -z noexecstack
 LIBS := -lmicrokit -Tmicrokit.ld
@@ -51,10 +48,14 @@ REPORT = $(BUILD_DIR)/report.json
 
 all qemu: $(COPIED_KERNEL) $(INITIAL_TASK)
 
-$(BUILD_DIR)/%.o: %.c Makefile
+$(BUILD_DIR)/client.o: client.c Makefile
+	$(CC) -c $(CFLAGS) $< -o $@
+$(BUILD_DIR)/server.o: server.c Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
 
-$(BUILD_DIR)/hello.elf: $(addprefix $(BUILD_DIR)/, $(HELLO_OBJS))
+$(BUILD_DIR)/client.elf: $(BUILD_DIR)/client.o
+	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
+$(BUILD_DIR)/server.elf: $(BUILD_DIR)/server.o
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
 $(INITIAL_TASK): $(addprefix $(BUILD_DIR)/, $(IMAGES)) hello.system
