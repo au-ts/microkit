@@ -649,18 +649,32 @@ pub fn build_capdl_spec(
 
         // We trust that the SDF parsing code have checked for duplicate IDs.
         // A channel is always associated with a notification...
-        let pd_a_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + channel.end_a.id;
-        let pd_a_badge = 1 << channel.end_b.id;
-        let pd_a_ntfn_cap = capdl_util_make_ntfn_cap(pd_b_ntfn_id, true, true, pd_a_badge);
-        capdl_util_insert_cap_into_cspace(&mut spec, pd_a_cspace_id, pd_a_cap_idx as usize, pd_a_ntfn_cap);
+        let pd_a_ntfn_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + channel.end_a.id;
+        let pd_a_ntfn_badge = 1 << channel.end_b.id;
+        let pd_a_ntfn_cap = capdl_util_make_ntfn_cap(pd_b_ntfn_id, true, true, pd_a_ntfn_badge);
+        capdl_util_insert_cap_into_cspace(&mut spec, pd_a_cspace_id, pd_a_ntfn_cap_idx as usize, pd_a_ntfn_cap);
 
-        let pd_b_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + channel.end_b.id;
-        let pd_b_badge = 1 << channel.end_a.id;
-        let pd_b_ntfn_cap = capdl_util_make_ntfn_cap(pd_a_ntfn_id, true, true, pd_b_badge);
-        capdl_util_insert_cap_into_cspace(&mut spec, pd_b_cspace_id, pd_b_cap_idx as usize, pd_b_ntfn_cap);
+        let pd_b_ntfn_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + channel.end_b.id;
+        let pd_b_ntfn_badge = 1 << channel.end_a.id;
+        let pd_b_ntfn_cap = capdl_util_make_ntfn_cap(pd_a_ntfn_id, true, true, pd_b_ntfn_badge);
+        capdl_util_insert_cap_into_cspace(&mut spec, pd_b_cspace_id, pd_b_ntfn_cap_idx as usize, pd_b_ntfn_cap);
 
-        // ...and optionally and endpoint if a PPC is required.
+        // ...and optionally an endpoint if a PPC is required.
+        if channel.end_a.pp {
+            let pd_a_ep_cap_idx = BASE_OUTPUT_ENDPOINT_CAP + channel.end_a.id;
+            let pd_a_ep_badge = PPC_BADGE | channel.end_b.id;
+            let pd_b_ep_id = *pd_id_to_ep_id.get(&channel.end_b.pd).unwrap();
+            let pd_a_ep_cap = capdl_util_make_endpoint_cap(pd_b_ep_id, true, true, true, pd_a_ep_badge);
+            capdl_util_insert_cap_into_cspace(&mut spec, pd_a_cspace_id, pd_a_ep_cap_idx as usize, pd_a_ep_cap);
+        }
 
+        if channel.end_b.pp {
+            let pd_b_ep_cap_idx = BASE_OUTPUT_ENDPOINT_CAP + channel.end_b.id;
+            let pd_b_ep_badge = PPC_BADGE | channel.end_a.id;
+            let pd_a_ep_id = *pd_id_to_ep_id.get(&channel.end_a.pd).unwrap();
+            let pd_b_ep_cap = capdl_util_make_endpoint_cap(pd_a_ep_id, true, true, true, pd_b_ep_badge);
+            capdl_util_insert_cap_into_cspace(&mut spec, pd_b_cspace_id, pd_b_ep_cap_idx as usize, pd_b_ep_cap);
+        }
     }
 
     // *********************************
