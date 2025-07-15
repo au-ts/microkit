@@ -321,7 +321,7 @@ impl ElfFile {
                 Ok((sym.value, sym.size))
             }
         } else {
-            Err(format!("No symbol named '{variable_name}' not found"))
+            Err(format!("No symbol named '{variable_name}' found"))
         }
     }
 
