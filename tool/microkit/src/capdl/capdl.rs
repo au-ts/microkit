@@ -29,7 +29,8 @@ use crate::{
     elf::ElfFile,
     sdf::{self, SysMapPerms, SysMemoryRegion, SystemDescription},
     sel4::{Config, PageSize},
-    util::{pd_write_symbols, round_down}, PD_MAX_NAME_LENGTH,
+    util::round_down,
+    PD_MAX_NAME_LENGTH,
 };
 
 // Corresponds to the IPC buffer symbol in libmicrokit and the monitor
@@ -106,7 +107,15 @@ impl CapDLSpec {
     pub fn add_root_object(&mut self, obj: NamedObject) -> ObjectId {
         self.objects.push(obj);
         self.root_objects.end += 1;
+        assert_eq!(self.objects.len(), self.root_objects.end);
         self.root_objects.end - 1
+    }
+
+    pub fn add_irq(&mut self, irq_num: u64, irq_obj_id: ObjectId) {
+        self.irqs.push(IrqEntry {
+            irq: irq_num,
+            handler: irq_obj_id,
+        });
     }
 
     pub fn get_root_object_mut(&mut self, obj_id: ObjectId) -> Option<&mut NamedObject> {
@@ -520,7 +529,7 @@ pub fn build_capdl_spec(
             );
             let stack_frame_cap =
                 capdl_util_make_frame_cap(stack_frame_obj_id, true, true, false, true);
-                // @billn make arch agnostic
+            // @billn make arch agnostic
             memory::X86_64::map_page(
                 &mut spec,
                 &pd.name,
@@ -547,13 +556,7 @@ pub fn build_capdl_spec(
         caps_to_insert_to_cspace.push((FAULT_EP_CAP_IDX as usize, pd_fault_ep_cap));
         caps_to_bind_to_tcb.push((TCB_SLOT_FAULT_EP as usize, pd_fault_ep_cap_clone));
 
-        // Step 3-7 Create spec and caps to IRQs
-        let mut irq_caps: Vec<Cap> = Vec::new();
-        for irq in pd.irqs.iter() {
-
-        }
-
-        // Step 3-8 Create endpoint object for the PD if it have childrens/inwards PPC, else it will be a notification
+        // Step 3-7 Create endpoint object for the PD if it have childrens/inwards PPC, else it will be a notification
         let pd_ntfn_obj_id = capdl_util_make_ntfn_obj(&mut spec, &pd.name);
         let pd_ntfn_cap = capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0);
         pd_id_to_ntfn_id.insert(pd_id, pd_ntfn_obj_id);
@@ -569,19 +572,36 @@ pub fn build_capdl_spec(
             caps_to_bind_to_tcb.push((TCB_SLOT_BOUND_NOTIFICATION as usize, pd_ntfn_cap_clone));
         }
 
-        // Step 3-9 Create Reply obj + cap and insert into CSpace
+        // Step 3-8 Create Reply obj + cap and insert into CSpace
         let pd_reply_obj_id = capdl_util_make_reply_obj(&mut spec, &pd.name);
         let pd_reply_cap = capdl_util_make_reply_cap(pd_reply_obj_id);
         caps_to_insert_to_cspace.push((REPLY_CAP_IDX as usize, pd_reply_cap));
 
-        // Step 3-10 create I/O port objects on x86 platform.
+        // Step 3-9 Create spec and caps to IRQs
+        for irq in pd.irqs.iter() {
+            // Create IRQ object and add it to the special `irqs` vec in the spec.
+            let irq_obj_id = capdl_util_make_irq_obj(&mut spec, &pd.name, irq);
+            spec.add_irq(irq.irq_num(), irq_obj_id);
+
+            // Create a IRQ handler cap and insert into the requested CSpace's slot.
+            let irq_handle_cap = capdl_util_make_irq_handler_cap(irq_obj_id, &irq.kind);
+            let irq_cap_idx = BASE_IRQ_CAP + irq.id;
+            caps_to_insert_to_cspace.push((irq_cap_idx as usize, irq_handle_cap));
+
+            // Now bind the IRQ into the PD's notification object with the correct badge.
+            let pd_irq_ntfn_cap = capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 1 << irq.id);
+            capdl_util_bind_irq_to_ntfn(&mut spec, irq_obj_id, pd_irq_ntfn_cap);
+        }
+
+        // Step 3-10 Create I/O port objects on x86 platform.
         for ioport in pd.ioports.iter() {
-            let ioport_obj_id = capdl_util_make_ioport_obj(&mut spec, &pd.name, ioport.addr, ioport.size);
+            let ioport_obj_id =
+                capdl_util_make_ioport_obj(&mut spec, &pd.name, ioport.addr, ioport.size);
             let ioport_cap = capdl_util_make_ioport_cap(ioport_obj_id);
             caps_to_insert_to_cspace.push(((BASE_IOPORT_CAP + ioport.id) as usize, ioport_cap));
         }
 
-        // Create CSpace and add all caps that the PD code and libmicrokit need to access.
+        // Step 3-11 Create CSpace and add all caps that the PD code and libmicrokit need to access.
         let pd_cnode_obj_id = capdl_util_make_cnode_obj(
             &mut spec,
             &pd.name,
@@ -593,12 +613,12 @@ pub fn build_capdl_spec(
         caps_to_bind_to_tcb.push((TCB_SLOT_CSPACE as usize, pd_cnode_cap));
         pd_id_to_cspace_id.insert(pd_id, pd_cnode_obj_id);
 
-        // Set the TCB parameters and all the various caps that we need to bind to this TCB.
+        // Step 3-12 Set the TCB parameters and all the various caps that we need to bind to this TCB.
         if let Object::Tcb(pc_tcb) = &mut spec.get_root_object_mut(pd_tcb_obj_id).unwrap().object {
             pc_tcb.extra.sp = kernel_config.pd_stack_top();
             pc_tcb.extra.master_fault_ep = Some(FAULT_EP_CAP_IDX);
             pc_tcb.extra.prio = pd.priority;
-            pc_tcb.extra.max_prio = pd.priority; // Prevent priority escalation.
+            pc_tcb.extra.max_prio = pd.priority;
             pc_tcb.extra.resume = true;
 
             pc_tcb.slots.extend(caps_to_bind_to_tcb);
@@ -606,12 +626,17 @@ pub fn build_capdl_spec(
             unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
         }
 
-        // Step 3-n write libmicrokit symbols.
-        // @billn add one for ioports as well.
+        // Step 3-13 write libmicrokit symbols.
         let name = pd.name.as_bytes();
         let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
-        elf_obj.borrow_mut().write_symbol("microkit_name", &name[..name_length]).unwrap();
-        elf_obj.borrow_mut().write_symbol("microkit_passive", &[pd.passive as u8]).unwrap();
+        elf_obj
+            .borrow_mut()
+            .write_symbol("microkit_name", &name[..name_length])
+            .unwrap();
+        elf_obj
+            .borrow_mut()
+            .write_symbol("microkit_passive", &[pd.passive as u8])
+            .unwrap();
 
         let mut notification_bits: u64 = 0;
         let mut pp_bits: u64 = 0;
@@ -633,10 +658,18 @@ pub fn build_capdl_spec(
                 }
             }
         }
-        elf_obj.borrow_mut().write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
-        elf_obj.borrow_mut().write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
-        elf_obj.borrow_mut().write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
-        elf_obj.borrow_mut().write_symbol("microkit_ioports", &pd.ioport_bits().to_le_bytes())?;
+        elf_obj
+            .borrow_mut()
+            .write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
+        elf_obj
+            .borrow_mut()
+            .write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
+        elf_obj
+            .borrow_mut()
+            .write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
+        elf_obj
+            .borrow_mut()
+            .write_symbol("microkit_ioports", &pd.ioport_bits().to_le_bytes())?;
     }
 
     // *********************************
@@ -653,28 +686,50 @@ pub fn build_capdl_spec(
         let pd_a_ntfn_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + channel.end_a.id;
         let pd_a_ntfn_badge = 1 << channel.end_b.id;
         let pd_a_ntfn_cap = capdl_util_make_ntfn_cap(pd_b_ntfn_id, true, true, pd_a_ntfn_badge);
-        capdl_util_insert_cap_into_cspace(&mut spec, pd_a_cspace_id, pd_a_ntfn_cap_idx as usize, pd_a_ntfn_cap);
+        capdl_util_insert_cap_into_cspace(
+            &mut spec,
+            pd_a_cspace_id,
+            pd_a_ntfn_cap_idx as usize,
+            pd_a_ntfn_cap,
+        );
 
         let pd_b_ntfn_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + channel.end_b.id;
         let pd_b_ntfn_badge = 1 << channel.end_a.id;
         let pd_b_ntfn_cap = capdl_util_make_ntfn_cap(pd_a_ntfn_id, true, true, pd_b_ntfn_badge);
-        capdl_util_insert_cap_into_cspace(&mut spec, pd_b_cspace_id, pd_b_ntfn_cap_idx as usize, pd_b_ntfn_cap);
+        capdl_util_insert_cap_into_cspace(
+            &mut spec,
+            pd_b_cspace_id,
+            pd_b_ntfn_cap_idx as usize,
+            pd_b_ntfn_cap,
+        );
 
         // ...and optionally an endpoint if a PPC is required.
         if channel.end_a.pp {
             let pd_a_ep_cap_idx = BASE_OUTPUT_ENDPOINT_CAP + channel.end_a.id;
             let pd_a_ep_badge = PPC_BADGE | channel.end_b.id;
             let pd_b_ep_id = *pd_id_to_ep_id.get(&channel.end_b.pd).unwrap();
-            let pd_a_ep_cap = capdl_util_make_endpoint_cap(pd_b_ep_id, true, true, true, pd_a_ep_badge);
-            capdl_util_insert_cap_into_cspace(&mut spec, pd_a_cspace_id, pd_a_ep_cap_idx as usize, pd_a_ep_cap);
+            let pd_a_ep_cap =
+                capdl_util_make_endpoint_cap(pd_b_ep_id, true, true, true, pd_a_ep_badge);
+            capdl_util_insert_cap_into_cspace(
+                &mut spec,
+                pd_a_cspace_id,
+                pd_a_ep_cap_idx as usize,
+                pd_a_ep_cap,
+            );
         }
 
         if channel.end_b.pp {
             let pd_b_ep_cap_idx = BASE_OUTPUT_ENDPOINT_CAP + channel.end_b.id;
             let pd_b_ep_badge = PPC_BADGE | channel.end_a.id;
             let pd_a_ep_id = *pd_id_to_ep_id.get(&channel.end_a.pd).unwrap();
-            let pd_b_ep_cap = capdl_util_make_endpoint_cap(pd_a_ep_id, true, true, true, pd_b_ep_badge);
-            capdl_util_insert_cap_into_cspace(&mut spec, pd_b_cspace_id, pd_b_ep_cap_idx as usize, pd_b_ep_cap);
+            let pd_b_ep_cap =
+                capdl_util_make_endpoint_cap(pd_a_ep_id, true, true, true, pd_b_ep_badge);
+            capdl_util_insert_cap_into_cspace(
+                &mut spec,
+                pd_b_cspace_id,
+                pd_b_ep_cap_idx as usize,
+                pd_b_ep_cap,
+            );
         }
     }
 
@@ -711,7 +766,7 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 7. Sort the root objects
     // *********************************
-    // The CapDL loader expects objects with paddr to come first, then sorted by size so that the
+    // The CapDL initialiser expects objects with paddr to come first, then sorted by size so that the
     // allocation algorithm at run-time can run more efficiently.
     // Capabilities to objects in CapDL are referenced by the object's index in the root objects
     // vector. Since sorting the objects will shuffle them, we need to:
@@ -727,23 +782,30 @@ pub fn build_capdl_spec(
     }
 
     // Step 7-2
-    // @billn revisit, seems like some cases with paddrs doesnt work as expected
+    // @billn revisit, seems like some stuff is not workijng correctly
     spec.objects.sort_by(|a, b| {
         // Objects with paddrs come first.
-        if a.object.paddr().is_none() && a.object.paddr().is_some() {
-            return Ordering::Less;
-        } else if a.object.paddr().is_some() && a.object.paddr().is_none() {
+        if a.object.paddr().is_none() && b.object.paddr().is_some() {
             return Ordering::Greater;
+        } else if a.object.paddr().is_some() && b.object.paddr().is_none() {
+            return Ordering::Less;
         }
 
-        // If both have paddrs and not equal, make the lower paddr comes first.
+        // If both have paddrs and not equal, break tie by object size, then make lower paddr come first
         if a.object.paddr().is_some() && b.object.paddr().is_some() {
-            let a_paddr = a.object.paddr().unwrap();
-            let b_paddr = b.object.paddr().unwrap();
-            if a_paddr != b_paddr {
-                return a_paddr.cmp(&b_paddr);
-            } else {
-                unreachable!("found two objects with the same paddr at 0x{:x}", a_paddr);
+            let size_cmp = a
+                .object
+                .physical_size_bits(kernel_config)
+                .cmp(&b.object.physical_size_bits(kernel_config))
+                .reverse();
+            if size_cmp == Ordering::Equal {
+                let a_paddr = a.object.paddr().unwrap();
+                let b_paddr = b.object.paddr().unwrap();
+                if a_paddr != b_paddr {
+                    return a_paddr.cmp(&b_paddr);
+                } else {
+                    unreachable!("found two objects with the same paddr at 0x{:x}", a_paddr);
+                }
             }
         }
         // Both have no paddr or equal paddr, break tie by object size and name.
@@ -783,6 +845,9 @@ pub fn build_capdl_spec(
             }
             None => continue,
         }
+    }
+    for irq in spec.irqs.iter_mut() {
+        irq.handler = *obj_old_id_to_new_id.get(&irq.handler).unwrap();
     }
 
     Ok(spec)

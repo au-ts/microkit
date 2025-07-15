@@ -274,10 +274,11 @@ pub mod object {
         pub extra: ArmIrqExtraInfo,
     }
 
+    // Revisit this when doing RISC-V, should just be the same and change the name to be something more universal
     #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct ArmIrqExtraInfo {
         pub trigger: Word,
-        pub target: Word,
+        pub target: Word, // target CPU
     }
 
     #[derive(Serialize, Clone, Eq, PartialEq)]
