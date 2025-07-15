@@ -35,7 +35,7 @@ const VCPU_MAX_ID: u64 = PD_MAX_ID;
 
 const PD_MAX_PRIORITY: u8 = 254;
 /// In microseconds
-const BUDGET_DEFAULT: u64 = 1000;
+pub const BUDGET_DEFAULT: u64 = 1000;
 
 /// Default to a stack size of a single page
 const PD_DEFAULT_STACK_SIZE: u64 = 0x1000;

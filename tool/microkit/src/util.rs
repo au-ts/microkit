@@ -222,61 +222,6 @@ pub fn monitor_serialise_names(
     names_bytes
 }
 
-pub fn pd_write_symbols(
-    pds: &[ProtectionDomain],
-    channels: &[Channel],
-    pd_elf_files: &mut [ElfFile],
-    pd_setvar_values: &[Vec<u64>],
-) -> Result<(), String> {
-    for (i, pd) in pds.iter().enumerate() {
-        let elf = &mut pd_elf_files[i];
-        let name = pd.name.as_bytes();
-        let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
-        elf.write_symbol("microkit_name", &name[..name_length])?;
-        elf.write_symbol("microkit_passive", &[pd.passive as u8])?;
-
-        let mut notification_bits: u64 = 0;
-        let mut pp_bits: u64 = 0;
-        for channel in channels {
-            if channel.end_a.pd == i {
-                if channel.end_a.notify {
-                    notification_bits |= 1 << channel.end_a.id;
-                }
-                if channel.end_a.pp {
-                    pp_bits |= 1 << channel.end_a.id;
-                }
-            }
-            if channel.end_b.pd == i {
-                if channel.end_b.notify {
-                    notification_bits |= 1 << channel.end_b.id;
-                }
-                if channel.end_b.pp {
-                    pp_bits |= 1 << channel.end_b.id;
-                }
-            }
-        }
-
-        elf.write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
-        elf.write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
-        elf.write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
-
-        for (setvar_idx, setvar) in pd.setvars.iter().enumerate() {
-            let value = pd_setvar_values[i][setvar_idx];
-            let result = elf.write_symbol(&setvar.symbol, &value.to_le_bytes());
-            if result.is_err() {
-                return Err(format!(
-                    "No symbol named '{}' in ELF '{}' for PD '{}'",
-                    setvar.symbol,
-                    pd.program_image.display(),
-                    pd.name
-                ));
-            }
-        }
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
