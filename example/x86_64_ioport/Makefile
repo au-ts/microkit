@@ -36,7 +36,7 @@ AS := $(TOOLCHAIN)-as
 OBJCOPY := $(TOOLCHAIN)-objcopy
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
-IMAGES := server.elf client.elf
+IMAGES := server.elf client.elf hpet_timer.elf
 CFLAGS := -nostdlib -ffreestanding -g -O3 -Wall -Wno-unused-function -Werror -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
 LDFLAGS := -L$(BOARD_DIR)/lib -z noexecstack
 LIBS := -lmicrokit -Tmicrokit.ld
@@ -52,10 +52,14 @@ $(BUILD_DIR)/client.o: client.c Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
 $(BUILD_DIR)/server.o: server.c Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
+$(BUILD_DIR)/hpet_timer.o: hpet_timer.c Makefile
+	$(CC) -c $(CFLAGS) $< -o $@
 
 $(BUILD_DIR)/client.elf: $(BUILD_DIR)/client.o
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 $(BUILD_DIR)/server.elf: $(BUILD_DIR)/server.o
+	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
+$(BUILD_DIR)/hpet_timer.elf: $(BUILD_DIR)/hpet_timer.o
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
 $(INITIAL_TASK): $(addprefix $(BUILD_DIR)/, $(IMAGES)) hello.system

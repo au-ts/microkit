@@ -7,8 +7,10 @@
 <system>
     <memory_region name="small_test_mr" size="0x1000" phys_addr="0x3231_0000"/>
     <memory_region name="large_test_mr" size="0x200_000" page_size="0x200_000" phys_addr="0x2000_0000"/>
+    
+    <memory_region name="hpet" size="0x1000" phys_addr="0xfed00000"/>
 
-    <protection_domain name="hello_server" priority="2">
+    <protection_domain name="hello_server" priority="3">
         <program_image path="server.elf" />
 
         <map mr="small_test_mr" vaddr="0x1234_00_0000" perms="rw" setvar_vaddr="small_memory_region_vaddr" setvar_size="small_memory_region_size"/>
@@ -21,7 +23,7 @@
 
     </protection_domain>
 
-    <protection_domain name="hello_client" priority="1">
+    <protection_domain name="hello_client" priority="2">
         <program_image path="client.elf" />
 
         <map mr="small_test_mr" vaddr="0x1234_00_0000" perms="rw" setvar_vaddr="small_memory_region_vaddr" setvar_size="small_memory_region_size"/>
@@ -31,8 +33,16 @@
         <setvar symbol="large_memory_region_paddr" region_paddr="large_test_mr" />
     </protection_domain>
 
+    <protection_domain name="ticking_timer" priority="1">
+        <program_image path="hpet_timer.elf" />
+
+        <map mr="hpet" vaddr="0x4000_0000" perms="rw" setvar_vaddr="hpet_regs" />
+        <irq pcidev="0:0.0" handle="0" vector="0" id="0" />
+    </protection_domain>
+
     <channel>
         <end pd="hello_client" id="11" pp="true"/>
         <end pd="hello_server" id="10" />
     </channel>
 </system>
+
