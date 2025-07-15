@@ -334,7 +334,7 @@ pub fn build_capdl_spec(
         .unwrap(); // @billn check error
 
     // Create monitor fault endpoint object + cap
-    let mon_fault_ep_obj_id = capdl_util_make_endpoint_obj(&mut spec, "monitor");
+    let mon_fault_ep_obj_id = capdl_util_make_endpoint_obj(&mut spec, "monitor", true);
     let mon_fault_ep_cap = capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, 0);
 
     // Create monitor reply object object + cap
@@ -418,6 +418,10 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 3. Create the PDs' spec
     // *********************************
+    // Keep tabs on each PD's CSpace, Notification and Endpoint objects so we can create channels between them at a later step.
+    let mut pd_id_to_cspace_id: HashMap<usize, ObjectId> = HashMap::new();
+    let mut pd_id_to_ntfn_id: HashMap<usize, ObjectId> = HashMap::new();
+    let mut pd_id_to_ep_id: HashMap<usize, ObjectId> = HashMap::new();
     for (pd_id, pd) in system.protection_domains.iter().enumerate() {
         let elf_obj = pd_elf_files[pd_id].clone();
 
@@ -516,6 +520,7 @@ pub fn build_capdl_spec(
             );
             let stack_frame_cap =
                 capdl_util_make_frame_cap(stack_frame_obj_id, true, true, false, true);
+                // @billn make arch agnostic
             memory::X86_64::map_page(
                 &mut spec,
                 &pd.name,
@@ -535,6 +540,7 @@ pub fn build_capdl_spec(
         caps_to_bind_to_tcb.push((TCB_SLOT_SC as usize, pd_sc_cap));
 
         // Step 3-6 Create fault Endpoint cap to monitor
+        // @billn handle parent & child pd
         let pd_fault_ep_cap =
             capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, pd_id as u64);
         let pd_fault_ep_cap_clone = pd_fault_ep_cap.clone();
@@ -547,14 +553,28 @@ pub fn build_capdl_spec(
 
         }
 
-        // Step 3-8 Create endpoint object for the PD if it have inwards PPC, else it will be a notification
+        // Step 3-8 Create endpoint object for the PD if it have childrens/inwards PPC, else it will be a notification
+        let pd_ntfn_obj_id = capdl_util_make_ntfn_obj(&mut spec, &pd.name);
+        let pd_ntfn_cap = capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0);
+        pd_id_to_ntfn_id.insert(pd_id, pd_ntfn_obj_id);
         if pd.needs_ep(pd_id, &system.channels) {
-
+            let pd_ep_obj_id = capdl_util_make_endpoint_obj(&mut spec, &pd.name, false);
+            let pd_ep_cap = capdl_util_make_endpoint_cap(pd_ep_obj_id, true, true, true, 0);
+            pd_id_to_ep_id.insert(pd_id, pd_ep_obj_id);
+            caps_to_insert_to_cspace.push((INPUT_CAP_IDX as usize, pd_ep_cap));
+            caps_to_bind_to_tcb.push((TCB_SLOT_BOUND_NOTIFICATION as usize, pd_ntfn_cap));
         } else {
-
+            let pd_ntfn_cap_clone = pd_ntfn_cap.clone();
+            caps_to_insert_to_cspace.push((INPUT_CAP_IDX as usize, pd_ntfn_cap));
+            caps_to_bind_to_tcb.push((TCB_SLOT_BOUND_NOTIFICATION as usize, pd_ntfn_cap_clone));
         }
 
-        // Step 3-9 create I/O port objects on x86 platform.
+        // Step 3-9 Create Reply obj + cap and insert into CSpace
+        let pd_reply_obj_id = capdl_util_make_reply_obj(&mut spec, &pd.name);
+        let pd_reply_cap = capdl_util_make_reply_cap(pd_reply_obj_id);
+        caps_to_insert_to_cspace.push((REPLY_CAP_IDX as usize, pd_reply_cap));
+
+        // Step 3-10 create I/O port objects on x86 platform.
         for ioport in pd.ioports.iter() {
             let ioport_obj_id = capdl_util_make_ioport_obj(&mut spec, &pd.name, ioport.addr, ioport.size);
             let ioport_cap = capdl_util_make_ioport_cap(ioport_obj_id);
@@ -571,6 +591,7 @@ pub fn build_capdl_spec(
         // @billn understand???: guard_size: kernel_config.cap_address_bits - PD_CAP_BITS,
         let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, 55);
         caps_to_bind_to_tcb.push((TCB_SLOT_CSPACE as usize, pd_cnode_cap));
+        pd_id_to_cspace_id.insert(pd_id, pd_cnode_obj_id);
 
         // Set the TCB parameters and all the various caps that we need to bind to this TCB.
         if let Object::Tcb(pc_tcb) = &mut spec.get_root_object_mut(pd_tcb_obj_id).unwrap().object {
@@ -618,11 +639,36 @@ pub fn build_capdl_spec(
     }
 
     // *********************************
-    // Step 4. Write ELF symbols in the monitor.
+    // Step 4. Create channels
+    // *********************************
+    for channel in system.channels.iter() {
+        let pd_a_cspace_id = *pd_id_to_cspace_id.get(&channel.end_a.pd).unwrap();
+        let pd_b_cspace_id = *pd_id_to_cspace_id.get(&channel.end_b.pd).unwrap();
+        let pd_a_ntfn_id = *pd_id_to_ntfn_id.get(&channel.end_a.pd).unwrap();
+        let pd_b_ntfn_id = *pd_id_to_ntfn_id.get(&channel.end_b.pd).unwrap();
+
+        // We trust that the SDF parsing code have checked for duplicate IDs.
+        // A channel is always associated with a notification...
+        let pd_a_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + channel.end_a.id;
+        let pd_a_badge = 1 << channel.end_b.id;
+        let pd_a_ntfn_cap = capdl_util_make_ntfn_cap(pd_b_ntfn_id, true, true, pd_a_badge);
+        capdl_util_insert_cap_into_cspace(&mut spec, pd_a_cspace_id, pd_a_cap_idx as usize, pd_a_ntfn_cap);
+
+        let pd_b_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + channel.end_b.id;
+        let pd_b_badge = 1 << channel.end_a.id;
+        let pd_b_ntfn_cap = capdl_util_make_ntfn_cap(pd_a_ntfn_id, true, true, pd_b_badge);
+        capdl_util_insert_cap_into_cspace(&mut spec, pd_b_cspace_id, pd_b_cap_idx as usize, pd_b_ntfn_cap);
+
+        // ...and optionally and endpoint if a PPC is required.
+
+    }
+
+    // *********************************
+    // Step 5. Write ELF symbols in the monitor.
     // *********************************
 
     // *********************************
-    // Step 5. Fill in the data for all ELF loadable frames.
+    // Step 6. Fill in the data for all ELF loadable frames.
     // *********************************
     // Previously, spec.add_elf_to_spec() already created all the frame objects for us and book-keeped where
     // the data for each frame should come from. We now fetch it from the ELF objects *after* all symbols have been
@@ -648,7 +694,7 @@ pub fn build_capdl_spec(
     }
 
     // *********************************
-    // Step 6. Sort the root objects
+    // Step 7. Sort the root objects
     // *********************************
     // The CapDL loader expects objects with paddr to come first, then sorted by size so that the
     // allocation algorithm at run-time can run more efficiently.
@@ -659,13 +705,13 @@ pub fn build_capdl_spec(
     // 3. Record all of the root objects new index.
     // 4. Recurse through every cap, for any cap bearing the original object ID, write the new object ID.
 
-    // Step 6-1
+    // Step 7-1
     let mut obj_name_to_old_id: HashMap<String, ObjectId> = HashMap::new();
     for (id, obj) in spec.objects.iter().enumerate() {
         obj_name_to_old_id.insert(obj.name.clone(), id);
     }
 
-    // Step 6-2
+    // Step 7-2
     // @billn revisit, seems like some cases with paddrs doesnt work as expected
     spec.objects.sort_by(|a, b| {
         // Objects with paddrs come first.
@@ -704,13 +750,13 @@ pub fn build_capdl_spec(
         }
     });
 
-    // Step 6-3
+    // Step 7-3
     let mut obj_old_id_to_new_id: HashMap<ObjectId, ObjectId> = HashMap::new();
     for (new_id, obj) in spec.objects.iter().enumerate() {
         obj_old_id_to_new_id.insert(*obj_name_to_old_id.get(&obj.name).unwrap(), new_id);
     }
 
-    // Step 6-4
+    // Step 7-4
     for obj in spec.objects.iter_mut() {
         match obj.object.get_cap_entries_mut() {
             Some(caps) => {

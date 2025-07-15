@@ -85,9 +85,13 @@ pub fn capdl_util_get_vspace_id_from_tcb_id(spec: &CapDLSpec, tcb_obj_id: Object
     vspace_cap.unwrap().1.obj()
 }
 
-pub fn capdl_util_make_endpoint_obj(spec: &mut CapDLSpec, pd_name: &str) -> ObjectId {
+pub fn capdl_util_make_endpoint_obj(
+    spec: &mut CapDLSpec,
+    pd_name: &str,
+    is_fault: bool,
+) -> ObjectId {
     let fault_ep_obj = NamedObject {
-        name: format!("ep_fault_{}", pd_name).to_string(),
+        name: format!("ep_{}{}", if is_fault { "fault_" } else { "" }, pd_name).to_string(),
         object: Object::Endpoint,
     };
     spec.add_root_object(fault_ep_obj)
@@ -107,6 +111,28 @@ pub fn capdl_util_make_endpoint_cap(
             read,
             write,
             grant,
+            grant_reply: false,
+        },
+    })
+}
+
+pub fn capdl_util_make_ntfn_obj(spec: &mut CapDLSpec, pd_name: &str) -> ObjectId {
+    let ntfn_obj = NamedObject {
+        name: format!("ntfn_{}", pd_name),
+        object: Object::Notification,
+    };
+    spec.add_root_object(ntfn_obj)
+}
+
+pub fn capdl_util_make_ntfn_cap(ntfn_obj_id: ObjectId, read: bool, write: bool, badge: u64) -> Cap {
+    Cap::Notification(cap::Notification {
+        object: ntfn_obj_id,
+        badge: badge,
+        rights: Rights {
+            read,
+            write,
+            // Irrelevant for notifications, seL4 manual v13.0.0 pg11
+            grant: false,
             grant_reply: false,
         },
     })
@@ -181,7 +207,7 @@ pub fn capdl_util_make_ioport_obj(
     spec: &mut CapDLSpec,
     pd_name: &str,
     start_addr: u64,
-    size: u64
+    size: u64,
 ) -> ObjectId {
     let ioport_inner_obj = Object::IOPorts(object::IOPorts {
         start_port: start_addr,
@@ -189,13 +215,27 @@ pub fn capdl_util_make_ioport_obj(
     });
     let ioport_obj = NamedObject {
         name: format!("ioports_0x{:x}_{}", start_addr, pd_name),
-        object: ioport_inner_obj
+        object: ioport_inner_obj,
     };
     spec.add_root_object(ioport_obj)
 }
 
 pub fn capdl_util_make_ioport_cap(ioport_obj_id: ObjectId) -> Cap {
     Cap::IOPorts(cap::IOPorts {
-        object: ioport_obj_id
+        object: ioport_obj_id,
     })
+}
+
+pub fn capdl_util_insert_cap_into_cspace(
+    spec: &mut CapDLSpec,
+    cspace_obj_id: ObjectId,
+    idx: usize,
+    cap: Cap,
+) {
+    let cspace_obj = spec.get_root_object_mut(cspace_obj_id).unwrap();
+    if let Object::CNode(cspace_inner_obj) = &mut cspace_obj.object {
+        cspace_inner_obj.slots.push((idx, cap));
+    } else {
+        unreachable!("internal bug: capdl_util_insert_cap_into_cspace() got a non CNode object.");
+    }
 }
