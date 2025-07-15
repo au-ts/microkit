@@ -636,6 +636,7 @@ pub fn build_capdl_spec(
         elf_obj.borrow_mut().write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
         elf_obj.borrow_mut().write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
         elf_obj.borrow_mut().write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
+        elf_obj.borrow_mut().write_symbol("microkit_ioports", &pd.ioport_bits().to_le_bytes())?;
     }
 
     // *********************************

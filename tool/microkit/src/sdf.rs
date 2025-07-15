@@ -354,6 +354,15 @@ impl ProtectionDomain {
         irqs
     }
 
+    pub fn ioport_bits(&self) -> u64 {
+        let mut ioports = 0;
+        for ioport in &self.ioports {
+            ioports |= 1 << ioport.id;
+        }
+
+        ioports
+    }
+
     fn from_xml(
         config: &Config,
         xml_sdf: &XmlSystemDescription,
