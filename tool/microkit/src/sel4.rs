@@ -400,7 +400,7 @@ impl PageSize {
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 /// The same values apply to all kernel architectures
-pub enum IrqTrigger {
+pub enum ArmRiscvIrqTrigger {
     Level = 0,
     Edge = 1,
 }

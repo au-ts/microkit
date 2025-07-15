@@ -16,7 +16,7 @@
 /// but few seem to be concerned with giving any introspection regarding the parsed
 /// XML. The roxmltree project allows us to work on a lower-level than something based
 /// on serde and so we can report proper user errors.
-use crate::sel4::{Arch, Config, IrqTrigger, PageSize};
+use crate::sel4::{Arch, ArmRiscvIrqTrigger, Config, PageSize};
 use crate::util::str_to_bool;
 use crate::MAX_PDS;
 use std::path::{Path, PathBuf};
@@ -130,10 +130,41 @@ impl SysMemoryRegion {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
+pub enum SysIrqKind {
+    Conventional {
+        irq: u64,
+        trigger: ArmRiscvIrqTrigger,
+    },
+    IOAPIC {
+        ioapic: u64,
+        pin: u64,
+        level: u64,
+        polarity: u64,
+        vector: u64,
+    },
+    MSI {
+        pci_bus: u64,
+        pci_dev: u64,
+        pci_func: u64,
+        handle: u64,
+        vector: u64,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct SysIrq {
-    pub irq: u64,
     pub id: u64,
-    pub trigger: IrqTrigger,
+    pub kind: SysIrqKind,
+}
+
+impl SysIrq {
+    pub fn irq_num(&self) -> u64 {
+        match self.kind {
+            SysIrqKind::Conventional { irq, .. } => irq,
+            SysIrqKind::IOAPIC { vector, .. } => vector,
+            SysIrqKind::MSI { vector, .. } => vector,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -579,10 +610,6 @@ impl ProtectionDomain {
                     maps.push(map);
                 }
                 "irq" => {
-                    check_attributes(xml_sdf, &child, &["irq", "id", "trigger"])?;
-                    let irq = checked_lookup(xml_sdf, &child, "irq")?
-                        .parse::<u64>()
-                        .unwrap();
                     let id = checked_lookup(xml_sdf, &child, "id")?
                         .parse::<i64>()
                         .unwrap();
@@ -597,29 +624,120 @@ impl ProtectionDomain {
                         return Err(value_error(xml_sdf, &child, "id must be >= 0".to_string()));
                     }
 
-                    let trigger = if let Some(trigger_str) = child.attribute("trigger") {
-                        match trigger_str {
-                            "level" => IrqTrigger::Level,
-                            "edge" => IrqTrigger::Edge,
-                            _ => {
-                                return Err(value_error(
-                                    xml_sdf,
-                                    &child,
-                                    "trigger must be either 'level' or 'edge'".to_string(),
-                                ))
+                    if let Some(irq_str) = child.attribute("irq") {
+                        // ARM and RISC-V interrupts must have an "irq" attribute.
+                        check_attributes(xml_sdf, &child, &["irq", "id", "trigger"])?;
+                        let irq = irq_str.parse::<u64>().unwrap();
+                        let trigger = if let Some(trigger_str) = child.attribute("trigger") {
+                            match trigger_str {
+                                "level" => ArmRiscvIrqTrigger::Level,
+                                "edge" => ArmRiscvIrqTrigger::Edge,
+                                _ => {
+                                    return Err(value_error(
+                                        xml_sdf,
+                                        &child,
+                                        "trigger must be either 'level' or 'edge'".to_string(),
+                                    ))
+                                }
                             }
-                        }
-                    } else {
-                        // Default the level triggered
-                        IrqTrigger::Level
-                    };
+                        } else {
+                            // Default to level triggered
+                            ArmRiscvIrqTrigger::Level
+                        };
+                        let irq = SysIrq {
+                            id: id as u64,
+                            kind: SysIrqKind::Conventional {
+                                irq: irq,
+                                trigger: trigger,
+                            },
+                        };
+                        irqs.push(irq);
+                    } else if let Some(pin_str) = child.attribute("pin") {
+                        // IOAPIC interrupts (X86_64) must have a "pin" attribute.
+                        check_attributes(
+                            xml_sdf,
+                            &child,
+                            &["id", "ioapic", "pin", "level", "polarity", "vector"],
+                        )?;
+                        let ioapic = if let Some(ioapic_str) = child.attribute("ioapic") {
+                            ioapic_str.parse::<u64>().unwrap()
+                        } else {
+                            // Default to the first unit.
+                            0
+                        };
+                        let pin = pin_str.parse::<u64>().unwrap();
+                        let level = if let Some(level_str) = child.attribute("level") {
+                            level_str.parse::<u64>().unwrap()
+                        } else {
+                            // Default to level trigger.
+                            1
+                        };
+                        let polarity = if let Some(polarity_str) = child.attribute("polarity") {
+                            polarity_str.parse::<u64>().unwrap()
+                        } else {
+                            // Default to normal polarity
+                            1
+                        };
+                        let vector = checked_lookup(xml_sdf, &child, "vector")?
+                            .parse::<u64>()
+                            .unwrap();
+                        let irq = SysIrq {
+                            id: id as u64,
+                            kind: SysIrqKind::IOAPIC {
+                                ioapic: ioapic,
+                                pin: pin,
+                                level: level,
+                                polarity: polarity,
+                                vector: vector,
+                            },
+                        };
+                        irqs.push(irq);
+                    } else if let Some(pcidev_str) = child.attribute("pcidev") {
+                        // MSI interrupts (X86_64) have a "pcidev" attribute.
+                        check_attributes(xml_sdf, &child, &["id", "pcidev", "handle", "vector"])?;
 
-                    let irq = SysIrq {
-                        irq,
-                        id: id as u64,
-                        trigger,
-                    };
-                    irqs.push(irq);
+                        let pciparts: Vec<u64> = pcidev_str
+                            .split(|c: char| c == ':' || c == '.')
+                            .map(str::trim)
+                            .map(|x| {
+                                u64::from_str_radix(x, 16).expect(
+                                    "Error: Failed to parse parts of the PCI device address",
+                                )
+                            })
+                            .collect();
+                        if pciparts.len() != 3 {
+                            return Err(format!(
+                                "Error: failed to parse PCI address '{}' on element '{}'",
+                                pcidev_str,
+                                child.tag_name().name()
+                            ));
+                        }
+                        let handle = checked_lookup(xml_sdf, &child, "handle")?
+                            .parse::<u64>()
+                            .unwrap();
+                        let vector = checked_lookup(xml_sdf, &child, "vector")?
+                            .parse::<u64>()
+                            .unwrap();
+                        let irq = SysIrq {
+                            id: id as u64,
+                            kind: SysIrqKind::MSI {
+                                pci_bus: pciparts[0],
+                                pci_dev: pciparts[1],
+                                pci_func: pciparts[2],
+                                handle: handle,
+                                vector: vector,
+                            },
+                        };
+                        irqs.push(irq);
+                    } else {
+                        // We can't figure out what type interrupt is specified.
+                        return Err(value_error(
+                            xml_sdf,
+                            &child,
+                            format!("Missing required attribute 'irq' (ARM & RISC-V), or 'pin' (x86 IOAPIC), or 'pcidev' (x86 MSI) on element '{}'",
+                                    child.tag_name().name())
+                        ));
+                    }
                 }
                 "ioport" => {
                     if let Arch::X86_64 = config.arch {
@@ -1343,13 +1461,13 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
     let mut all_irqs = Vec::new();
     for pd in &pds {
         for sysirq in &pd.irqs {
-            if all_irqs.contains(&sysirq.irq) {
+            if all_irqs.contains(&sysirq.irq_num()) {
                 return Err(format!(
-                    "Error: duplicate irq: {} in protection domain: '{}' @ {}:{}:{}",
-                    sysirq.irq, pd.name, filename, pd.text_pos.row, pd.text_pos.col
+                    "Error: duplicate irq number/vector: {} in protection domain: '{}' @ {}:{}:{}",
+                    sysirq.irq_num(), pd.name, filename, pd.text_pos.row, pd.text_pos.col
                 ));
             }
-            all_irqs.push(sysirq.irq);
+            all_irqs.push(sysirq.irq_num());
         }
     }
 
