@@ -53,9 +53,8 @@ seL4_Word pd_names_len;
 char vm_names[MAX_VMS][MAX_NAME_LEN] __attribute__((unused));
 seL4_Word vm_names_len;
 
-// @billn use ELF symbol patching from tool
-seL4_Word fault_ep = 2;
-seL4_Word reply = 4;
+seL4_Word fault_ep;
+seL4_Word reply;
 seL4_Word pd_tcbs[MAX_PDS];
 seL4_Word vm_tcbs[MAX_VMS];
 seL4_Word scheduling_contexts[MAX_PDS];
@@ -555,7 +554,67 @@ static void print_tcb_registers(seL4_UserContext *regs)
     puthex64(regs->tpidrro_el0);
     puts("\n");
 #elif ARCH_x86_64
-    // @billn fill in
+    puts("Registers: \n");
+    puts("rip : ");
+    puthex64(regs->rip);
+    puts("\n");
+    puts("rsp: ");
+    puthex64(regs->rsp);
+    puts("\n");
+    puts("rflags : ");
+    puthex64(regs->rflags);
+    puts("\n");
+    puts("rax : ");
+    puthex64(regs->rax);
+    puts("\n");
+    puts("rbx : ");
+    puthex64(regs->rbx);
+    puts("\n");
+    puts("rcx : ");
+    puthex64(regs->rcx);
+    puts("\n");
+    puts("rdx : ");
+    puthex64(regs->rdx);
+    puts("\n");
+    puts("rsi : ");
+    puthex64(regs->rsi);
+    puts("\n");
+    puts("rdi : ");
+    puthex64(regs->rdi);
+    puts("\n");
+    puts("rbp : ");
+    puthex64(regs->rbp);
+    puts("\n");
+    puts("r8 : ");
+    puthex64(regs->r8);
+    puts("\n");
+    puts("r9 : ");
+    puthex64(regs->r9);
+    puts("\n");
+    puts("r10 : ");
+    puthex64(regs->r10);
+    puts("\n");
+    puts("r11 : ");
+    puthex64(regs->r11);
+    puts("\n");
+    puts("r12 : ");
+    puthex64(regs->r12);
+    puts("\n");
+    puts("r13 : ");
+    puthex64(regs->r13);
+    puts("\n");
+    puts("r14 : ");
+    puthex64(regs->r14);
+    puts("\n");
+    puts("r15 : ");
+    puthex64(regs->r15);
+    puts("\n");
+    puts("fs_base : ");
+    puthex64(regs->fs_base);
+    puts("\n");
+    puts("gs_base : ");
+    puthex64(regs->gs_base);
+    puts("\n");
 #endif
 
 }
@@ -842,14 +901,12 @@ void main(seL4_BootInfo *bi)
      * If we end up doing various different kinds of system calls we should add
      * support in the tooling and make the monitor generic.
      */
-
-    // @billn fix for capdl tool
-    // for (unsigned idx = 1; idx < pd_names_len + 1; idx++) {
-    //     seL4_DebugNameThread(pd_tcbs[idx], pd_names[idx]);
-    // }
-    // for (unsigned idx = 1; idx < vm_names_len + 1; idx++) {
-    //     seL4_DebugNameThread(vm_tcbs[idx], vm_names[idx]);
-    // }
+    for (unsigned idx = 1; idx < pd_names_len + 1; idx++) {
+        seL4_DebugNameThread(pd_tcbs[idx], pd_names[idx]);
+    }
+    for (unsigned idx = 1; idx < vm_names_len + 1; idx++) {
+        seL4_DebugNameThread(vm_tcbs[idx], vm_names[idx]);
+    }
 #endif
 
     puts("MON|INFO: Microkit Monitor started!\n");
