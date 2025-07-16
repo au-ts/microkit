@@ -25,7 +25,12 @@ use crate::{
             FrameInit, IrqEntry, NamedObject, Object, ObjectId, TemporaryContent, UntypedCover,
         },
         util::*,
-    }, elf::ElfFile, sdf::{self, SysMapPerms, SysMemoryRegion, SystemDescription, BUDGET_DEFAULT}, sel4::{Config, PageSize}, util::{monitor_serialise_names, round_down}, MAX_PDS, PD_MAX_NAME_LENGTH
+    },
+    elf::ElfFile,
+    sdf::{self, SysMapPerms, SysMemoryRegion, SystemDescription, BUDGET_DEFAULT},
+    sel4::{Config, PageSize},
+    util::{monitor_serialise_names, round_down},
+    MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH, VM_MAX_NAME_LENGTH,
 };
 
 // Corresponds to the IPC buffer symbol in libmicrokit and the monitor
@@ -43,24 +48,35 @@ const TCB_SLOT_FAULT_EP: u64 = 5;
 const TCB_SLOT_SC: u64 = 6;
 // const TCB_SLOT_TEMP_FAULT_EP: u64 = 7;
 const TCB_SLOT_BOUND_NOTIFICATION: u64 = 8;
-const SLOT_VCPU: u64 = 9; // @billn revisit sel4-capdl-initialiser. it doesnt support multiple vCPUs
+const SLOT_VCPU: u64 = 9; // @billn revisit sel4-capdl-initialiser. seems like it doesnt support multiple vCPUs, unless im thinking about it wrong...
+
+// Where caps must be in the Monitor's CSpace
+const MON_FAULT_EP_CAP_IDX: u64 = 1;
+const MON_REPLY_CAP_IDX: u64 = 2;
+
+const MON_BASE_PD_TCB_CAP: u64 = 10;
+const MON_BASE_VM_TCB_CAP: u64 = MON_BASE_PD_TCB_CAP + 64;
+const MON_BASE_SCHED_CONTEXT_CAP: u64 = MON_BASE_VM_TCB_CAP + 64;
+const MON_BASE_NOTIFICATION_CAP: u64 = MON_BASE_SCHED_CONTEXT_CAP + 64;
 
 // Where caps must be in a PD's CSpace
-const INPUT_CAP_IDX: u64 = 1;
-const FAULT_EP_CAP_IDX: u64 = 2;
-const VSPACE_CAP_IDX: u64 = 3;
-const REPLY_CAP_IDX: u64 = 4;
-const MONITOR_EP_CAP_IDX: u64 = 5;
-const TCB_CAP_IDX: u64 = 6;
-const SMC_CAP_IDX: u64 = 7;
+const PD_INPUT_CAP_IDX: u64 = 1;
+const PD_FAULT_EP_CAP_IDX: u64 = 2;
+const PD_VSPACE_CAP_IDX: u64 = 3;
+const PD_REPLY_CAP_IDX: u64 = 4;
+// Valid only if the PD is passive.
+const PD_MONITOR_EP_CAP_IDX: u64 = 5;
+// Valid only in benchmark configuration.
+const PD_TCB_CAP_IDX: u64 = 6;
+const PD_ARM_SMC_CAP_IDX: u64 = 7;
 
-const BASE_OUTPUT_NOTIFICATION_CAP: u64 = 10;
-const BASE_OUTPUT_ENDPOINT_CAP: u64 = BASE_OUTPUT_NOTIFICATION_CAP + 64;
-const BASE_IRQ_CAP: u64 = BASE_OUTPUT_ENDPOINT_CAP + 64;
-const BASE_PD_TCB_CAP: u64 = BASE_IRQ_CAP + 64;
-const BASE_VM_TCB_CAP: u64 = BASE_PD_TCB_CAP + 64;
-const BASE_VCPU_CAP: u64 = BASE_VM_TCB_CAP + 64;
-const BASE_IOPORT_CAP: u64 = BASE_VCPU_CAP + 64;
+const PD_BASE_OUTPUT_NOTIFICATION_CAP: u64 = 10;
+const PD_BASE_OUTPUT_ENDPOINT_CAP: u64 = PD_BASE_OUTPUT_NOTIFICATION_CAP + 64;
+const PD_BASE_IRQ_CAP: u64 = PD_BASE_OUTPUT_ENDPOINT_CAP + 64;
+const PD_BASE_PD_TCB_CAP: u64 = PD_BASE_IRQ_CAP + 64;
+const PD_BASE_VM_TCB_CAP: u64 = PD_BASE_PD_TCB_CAP + 64;
+const PD_BASE_VCPU_CAP: u64 = PD_BASE_VM_TCB_CAP + 64;
+const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
 
 const PD_CAP_SIZE: u64 = 512;
 const PD_CAP_BITS: u64 = PD_CAP_SIZE.ilog2() as u64;
@@ -350,8 +366,8 @@ pub fn build_capdl_spec(
         "monitor",
         PD_CAP_BITS as usize,
         [
-            (FAULT_EP_CAP_IDX as usize, mon_fault_ep_cap),
-            (REPLY_CAP_IDX as usize, mon_reply_cap),
+            (MON_FAULT_EP_CAP_IDX as usize, mon_fault_ep_cap),
+            (MON_REPLY_CAP_IDX as usize, mon_reply_cap),
         ]
         .to_vec(),
     );
@@ -436,12 +452,20 @@ pub fn build_capdl_spec(
         // This is necessary for accessing kernel's benchmark API.
         if kernel_config.benchmark {
             caps_to_insert_to_cspace.push((
-                TCB_CAP_IDX as usize,
+                PD_TCB_CAP_IDX as usize,
                 Cap::Tcb(cap::Tcb {
                     object: pd_tcb_obj_id,
                 }),
             ));
         }
+
+        // Allow PD to access their own VSpace for ops such as cache cleaning on ARM.
+        caps_to_insert_to_cspace.push((
+            PD_VSPACE_CAP_IDX as usize,
+            Cap::PageTable(cap::PageTable {
+                object: pd_vspace_obj_id,
+            }),
+        ));
 
         // Step 3-2: Map in all Memory Regions, keep tabs on what MR is mapped where so we can setvar later
         let mut mr_to_vaddr: HashMap<&String, u64> = HashMap::new();
@@ -538,23 +562,29 @@ pub fn build_capdl_spec(
             PD_SCHEDCONTEXT_EXTRA_SIZE_BITS as usize,
             pd.period,
             pd.budget,
-            0,
+            0x100 + pd_id as u64,
         );
         let pd_sc_cap = capdl_util_make_sc_cap(pd_sc_obj_id);
         caps_to_bind_to_tcb.push((TCB_SLOT_SC as usize, pd_sc_cap));
 
         // Step 3-6 Create fault Endpoint cap to parent/monitor
-        // @billn handle parent & child pd
-        let pd_fault_ep_cap =
-            capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, pd_id as u64);
+        // @billn handle parent & child pd, which will need FAULT_BADGE
+        let pd_fault_ep_cap = if pd.parent.is_none() {
+            // badge = pd_idx + 1 because seL4 considers badge = 0 as no badge, which allows PD to mint this endpoint cap
+            // with a different badge and impersonate another PD.
+            capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, pd_id as u64 + 1)
+        } else {
+            todo!()
+        };
         let pd_fault_ep_cap_clone = pd_fault_ep_cap.clone();
-        caps_to_insert_to_cspace.push((FAULT_EP_CAP_IDX as usize, pd_fault_ep_cap));
+        caps_to_insert_to_cspace.push((PD_FAULT_EP_CAP_IDX as usize, pd_fault_ep_cap));
         caps_to_bind_to_tcb.push((TCB_SLOT_FAULT_EP as usize, pd_fault_ep_cap_clone));
 
         // Step 3-7 Create cap to Monitor's endpoint for passive PDs.
         if pd.passive {
-            let pd_monitor_ep_cap = capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, pd_id as u64);
-            caps_to_insert_to_cspace.push((MONITOR_EP_CAP_IDX as usize, pd_monitor_ep_cap));
+            let pd_monitor_ep_cap =
+                capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, pd_id as u64 + 1);
+            caps_to_insert_to_cspace.push((PD_MONITOR_EP_CAP_IDX as usize, pd_monitor_ep_cap));
         }
 
         // Step 3-8 Create endpoint object for the PD if it have childrens/inwards PPC, else it will be a notification
@@ -565,18 +595,18 @@ pub fn build_capdl_spec(
             let pd_ep_obj_id = capdl_util_make_endpoint_obj(&mut spec, &pd.name, false);
             let pd_ep_cap = capdl_util_make_endpoint_cap(pd_ep_obj_id, true, true, true, 0);
             pd_id_to_ep_id.insert(pd_id, pd_ep_obj_id);
-            caps_to_insert_to_cspace.push((INPUT_CAP_IDX as usize, pd_ep_cap));
+            caps_to_insert_to_cspace.push((PD_INPUT_CAP_IDX as usize, pd_ep_cap));
             caps_to_bind_to_tcb.push((TCB_SLOT_BOUND_NOTIFICATION as usize, pd_ntfn_cap));
         } else {
             let pd_ntfn_cap_clone = pd_ntfn_cap.clone();
-            caps_to_insert_to_cspace.push((INPUT_CAP_IDX as usize, pd_ntfn_cap));
+            caps_to_insert_to_cspace.push((PD_INPUT_CAP_IDX as usize, pd_ntfn_cap));
             caps_to_bind_to_tcb.push((TCB_SLOT_BOUND_NOTIFICATION as usize, pd_ntfn_cap_clone));
         }
 
         // Step 3-9 Create Reply obj + cap and insert into CSpace
         let pd_reply_obj_id = capdl_util_make_reply_obj(&mut spec, &pd.name);
         let pd_reply_cap = capdl_util_make_reply_cap(pd_reply_obj_id);
-        caps_to_insert_to_cspace.push((REPLY_CAP_IDX as usize, pd_reply_cap));
+        caps_to_insert_to_cspace.push((PD_REPLY_CAP_IDX as usize, pd_reply_cap));
 
         // Step 3-10 Create spec and caps to IRQs
         for irq in pd.irqs.iter() {
@@ -586,7 +616,7 @@ pub fn build_capdl_spec(
 
             // Create a IRQ handler cap and insert into the requested CSpace's slot.
             let irq_handle_cap = capdl_util_make_irq_handler_cap(irq_obj_id, &irq.kind);
-            let irq_cap_idx = BASE_IRQ_CAP + irq.id;
+            let irq_cap_idx = PD_BASE_IRQ_CAP + irq.id;
             caps_to_insert_to_cspace.push((irq_cap_idx as usize, irq_handle_cap));
 
             // Now bind the IRQ into the PD's notification object with the correct badge.
@@ -599,7 +629,7 @@ pub fn build_capdl_spec(
             let ioport_obj_id =
                 capdl_util_make_ioport_obj(&mut spec, &pd.name, ioport.addr, ioport.size);
             let ioport_cap = capdl_util_make_ioport_cap(ioport_obj_id);
-            caps_to_insert_to_cspace.push(((BASE_IOPORT_CAP + ioport.id) as usize, ioport_cap));
+            caps_to_insert_to_cspace.push(((PD_BASE_IOPORT_CAP + ioport.id) as usize, ioport_cap));
         }
 
         // Step 3-12 Create CSpace and add all caps that the PD code and libmicrokit need to access.
@@ -617,7 +647,7 @@ pub fn build_capdl_spec(
         // Step 3-13 Set the TCB parameters and all the various caps that we need to bind to this TCB.
         if let Object::Tcb(pc_tcb) = &mut spec.get_root_object_mut(pd_tcb_obj_id).unwrap().object {
             pc_tcb.extra.sp = kernel_config.pd_stack_top();
-            pc_tcb.extra.master_fault_ep = Some(FAULT_EP_CAP_IDX);
+            pc_tcb.extra.master_fault_ep = Some(PD_FAULT_EP_CAP_IDX);
             pc_tcb.extra.prio = pd.priority;
             pc_tcb.extra.max_prio = pd.priority;
             pc_tcb.extra.resume = true;
@@ -684,7 +714,7 @@ pub fn build_capdl_spec(
 
         // We trust that the SDF parsing code have checked for duplicate IDs.
         // A channel is always associated with a notification...
-        let pd_a_ntfn_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + channel.end_a.id;
+        let pd_a_ntfn_cap_idx = PD_BASE_OUTPUT_NOTIFICATION_CAP + channel.end_a.id;
         let pd_a_ntfn_badge = 1 << channel.end_b.id;
         let pd_a_ntfn_cap = capdl_util_make_ntfn_cap(pd_b_ntfn_id, true, true, pd_a_ntfn_badge);
         capdl_util_insert_cap_into_cspace(
@@ -694,7 +724,7 @@ pub fn build_capdl_spec(
             pd_a_ntfn_cap,
         );
 
-        let pd_b_ntfn_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + channel.end_b.id;
+        let pd_b_ntfn_cap_idx = PD_BASE_OUTPUT_NOTIFICATION_CAP + channel.end_b.id;
         let pd_b_ntfn_badge = 1 << channel.end_a.id;
         let pd_b_ntfn_cap = capdl_util_make_ntfn_cap(pd_a_ntfn_id, true, true, pd_b_ntfn_badge);
         capdl_util_insert_cap_into_cspace(
@@ -706,7 +736,7 @@ pub fn build_capdl_spec(
 
         // ...and optionally an endpoint if a PPC is required.
         if channel.end_a.pp {
-            let pd_a_ep_cap_idx = BASE_OUTPUT_ENDPOINT_CAP + channel.end_a.id;
+            let pd_a_ep_cap_idx = PD_BASE_OUTPUT_ENDPOINT_CAP + channel.end_a.id;
             let pd_a_ep_badge = PPC_BADGE | channel.end_b.id;
             let pd_b_ep_id = *pd_id_to_ep_id.get(&channel.end_b.pd).unwrap();
             let pd_a_ep_cap =
@@ -720,7 +750,7 @@ pub fn build_capdl_spec(
         }
 
         if channel.end_b.pp {
-            let pd_b_ep_cap_idx = BASE_OUTPUT_ENDPOINT_CAP + channel.end_b.id;
+            let pd_b_ep_cap_idx = PD_BASE_OUTPUT_ENDPOINT_CAP + channel.end_b.id;
             let pd_b_ep_badge = PPC_BADGE | channel.end_a.id;
             let pd_a_ep_id = *pd_id_to_ep_id.get(&channel.end_a.pd).unwrap();
             let pd_b_ep_cap =
@@ -737,19 +767,6 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 5. Write ELF symbols in the monitor.
     // *********************************
-    // let pd_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.pd_tcb_caps);
-    // let vm_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.vm_tcb_caps);
-    // let sched_cap_bytes = monitor_serialise_u64_vec(&built_system.sched_caps);
-    // let ntfn_cap_bytes = monitor_serialise_u64_vec(&built_system.ntfn_caps);
-    // let pd_stack_addrs_bytes = monitor_serialise_u64_vec(&built_system.pd_stack_addrs);
-
-    monitor_elf.borrow_mut().write_symbol("fault_ep", &FAULT_EP_CAP_IDX.to_le_bytes())?;
-    monitor_elf.borrow_mut().write_symbol("reply", &REPLY_CAP_IDX.to_le_bytes())?;
-    // monitor_elf.write_symbol("pd_tcbs", &pd_tcb_cap_bytes)?;
-    // monitor_elf.write_symbol("vm_tcbs", &vm_tcb_cap_bytes)?;
-    // monitor_elf.write_symbol("scheduling_contexts", &sched_cap_bytes)?;
-    // monitor_elf.write_symbol("notification_caps", &ntfn_cap_bytes)?;
-    // monitor_elf.write_symbol("pd_stack_addrs", &pd_stack_addrs_bytes)?;
     let pd_names = system
         .protection_domains
         .iter()
@@ -759,20 +776,23 @@ pub fn build_capdl_spec(
         "pd_names",
         &monitor_serialise_names(pd_names, MAX_PDS, PD_MAX_NAME_LENGTH),
     )?;
-    // monitor_elf.write_symbol(
-    //     "pd_names_len",
-    //     &system.protection_domains.len().to_le_bytes(),
-    // )?;
-    // let vm_names: Vec<&String> = system
-    //     .protection_domains
-    //     .iter()
-    //     .filter_map(|pd| pd.virtual_machine.as_ref().map(|vm| &vm.name))
-    //     .collect();
-    // monitor_elf.write_symbol("vm_names_len", &vm_names.len().to_le_bytes())?;
-    // monitor_elf.write_symbol(
-    //     "vm_names",
-    //     &monitor_serialise_names(vm_names, MAX_VMS, VM_MAX_NAME_LENGTH),
-    // )?;
+    monitor_elf.borrow_mut().write_symbol(
+        "pd_names_len",
+        &system.protection_domains.len().to_le_bytes(),
+    )?;
+
+    let vm_names: Vec<&String> = system
+        .protection_domains
+        .iter()
+        .filter_map(|pd| pd.virtual_machine.as_ref().map(|vm| &vm.name))
+        .collect();
+    monitor_elf
+        .borrow_mut()
+        .write_symbol("vm_names_len", &vm_names.len().to_le_bytes())?;
+    monitor_elf.borrow_mut().write_symbol(
+        "vm_names",
+        &monitor_serialise_names(vm_names, MAX_VMS, VM_MAX_NAME_LENGTH),
+    )?;
 
     // *********************************
     // Step 6. Fill in the data for all ELF loadable frames.
