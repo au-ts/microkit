@@ -143,6 +143,7 @@ pub enum ObjectType {
     LargePage,
     PageTable,
     Vcpu,
+    AsidPool
 }
 
 impl ObjectType {
@@ -189,30 +190,13 @@ impl ObjectType {
                 Arch::Aarch64 => Some(12),
                 _ => panic!("Unexpected architecture asking for vCPU size bits"),
             },
+            ObjectType::AsidPool => Some(12),
             _ => None,
         }
     }
 
     pub fn fixed_size(self, config: &Config) -> Option<u64> {
         self.fixed_size_bits(config).map(|bits| 1 << bits)
-    }
-
-    pub fn to_str(self) -> &'static str {
-        match self {
-            ObjectType::Untyped => "SEL4_UNTYPED_OBJECT",
-            ObjectType::Tcb => "SEL4_TCB_OBJECT",
-            ObjectType::Endpoint => "SEL4_ENDPOINT_OBJECT",
-            ObjectType::Notification => "SEL4_NOTIFICATION_OBJECT",
-            ObjectType::CNode => "SEL4_CNODE_OBJECT",
-            ObjectType::SchedContext => "SEL4_SCHEDCONTEXT_OBJECT",
-            ObjectType::Reply => "SEL4_REPLY_OBJECT",
-            ObjectType::HugePage => "SEL4_HUGE_PAGE_OBJECT",
-            ObjectType::VSpace => "SEL4_VSPACE_OBJECT",
-            ObjectType::SmallPage => "SEL4_SMALL_PAGE_OBJECT",
-            ObjectType::LargePage => "SEL4_LARGE_PAGE_OBJECT",
-            ObjectType::PageTable => "SEL4_PAGE_TABLE_OBJECT",
-            ObjectType::Vcpu => "SEL4_VCPU_OBJECT",
-        }
     }
 }
 

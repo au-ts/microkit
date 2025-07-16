@@ -8,7 +8,7 @@ use std::{cell::RefCell, rc::Rc};
 use sel4_capdl_initializer_types::Word;
 use serde::{Deserialize, Serialize};
 
-use crate::{elf::ElfFile, sel4::{Config, ObjectType}};
+use crate::{capdl::SLOT_BITS, elf::ElfFile, sel4::{Config, ObjectType}};
 
 pub type ObjectId = usize;
 pub type Badge = Word;
@@ -112,18 +112,18 @@ impl Object {
         match self {
             Object::Endpoint => ObjectType::Endpoint.fixed_size_bits(sel4_config).unwrap(),
             Object::Notification => ObjectType::Notification.fixed_size_bits(sel4_config).unwrap(),
-            Object::CNode(cnode) => cnode.size_bits as u64 + 5, // @billn figure out where RHS come from
+            Object::CNode(cnode) => cnode.size_bits as u64 + SLOT_BITS,
             Object::Tcb(_) => ObjectType::Tcb.fixed_size_bits(sel4_config).unwrap(),
             Object::Irq(_) => 0,
             Object::VCpu => ObjectType::Vcpu.fixed_size_bits(sel4_config).unwrap(),
             Object::Frame(frame) => frame.size_bits as u64,
             Object::PageTable(_) => ObjectType::PageTable.fixed_size_bits(sel4_config).unwrap(),
-            Object::AsidPool(_) => 0, // This isn't zero on x86, is it also zero on arm? do we even use this? @billn revisit
+            Object::AsidPool(_) => ObjectType::AsidPool.fixed_size_bits(sel4_config).unwrap(),
             Object::ArmIrq(_) => 0,
             Object::IrqMsi(_) => 0,
             Object::IrqIOApic(_) => 0,
             Object::IOPorts(_) => 0,
-            Object::SchedContext(sched_context) => sched_context.size_bits as u64, // @billn fix, there should be a base size
+            Object::SchedContext(sched_context) => sched_context.size_bits as u64,
             Object::Reply => ObjectType::Reply.fixed_size_bits(sel4_config).unwrap(),
         }
     }

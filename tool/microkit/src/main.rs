@@ -297,7 +297,7 @@ fn main() -> Result<(), String> {
         );
         std::process::exit(1);
     }
-    // @billn make more user frenly by announcing that the platform does not support non-capdl loading rather than the onminous error
+    // @billn revisit
     // if !loader_elf_path.exists() {
     //     eprintln!(
     //         "Error: loader ELF '{}' does not exist",
@@ -466,10 +466,8 @@ fn main() -> Result<(), String> {
     // We have parsed the XML and all ELF files, create the CapDL spec of the system described in the XML.
     let spec = build_capdl_spec(&kernel_config, monitor_elf, &mut pd_elf_files, &system)?;
 
-    // Now embed the built spec into the CapDL initialiser.
+    // Eagerly write out the spec so we can debug in case something crash later.
     let spec_as_json = serde_json::to_string_pretty(&spec).unwrap();
-
-    // Eagerly write out the report so we can debug in case something crash later.
     fs::write(args.report, &spec_as_json).unwrap();
 
     // Reserialise the spec into a type that can be understood by rust-sel4.
@@ -479,6 +477,7 @@ fn main() -> Result<(), String> {
     // MUST match up with the frame size when creating ELF specs.
     let granule_size_bits = PageSize::Small.fixed_size_bits(&kernel_config) as usize;
 
+    // Now embed the built spec into the CapDL initialiser.
     // A re-implementation of dep/rust-sel4/crates/sel4-capdl-initializer/add-spec/src/main.rs
     // so we don't have to call out to it as a subprocess.
     let serialized_spec = reserialize_spec::reserialize_spec(
@@ -487,7 +486,6 @@ fn main() -> Result<(), String> {
     );
 
     let footprint = serialized_spec.len();
-    // @billn this was from the original impl, do we need it to be configurable though? : TODO make configurable
     let heap_size = footprint * 2 + 16 * 4096;
 
     let render_elf_args = render_elf::RenderElfArgs {
