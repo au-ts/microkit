@@ -37,7 +37,7 @@
         <program_image path="stack_overflow.elf" />
     </protection_domain>
 
-    <protection_domain name="ticking_timer" priority="90">
+    <protection_domain name="ticking_timer" priority="90" passive="true">
         <program_image path="hpet_timer.elf" />
 
         <map mr="hpet" vaddr="0x4000_0000" perms="rw" setvar_vaddr="hpet_regs" />
