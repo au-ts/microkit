@@ -169,6 +169,8 @@ void init(void)
     puthex64(get_time());
     microkit_dbg_puts("\n");
 
+    microkit_irq_ack(IRQ_CH);
+
     uint64_t now = get_time();
     set_timeout(now + 1000000);
 }

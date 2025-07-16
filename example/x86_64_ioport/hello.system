@@ -40,7 +40,7 @@
     <protection_domain name="ticking_timer" priority="90" passive="true">
         <program_image path="hpet_timer.elf" />
 
-        <map mr="hpet" vaddr="0x4000_0000" perms="rw" setvar_vaddr="hpet_regs" />
+        <map mr="hpet" vaddr="0x4000_0000" perms="rw" setvar_vaddr="hpet_regs" cached="false" />
         <irq pcidev="0:0.0" handle="0" vector="0" id="0" />
     </protection_domain>
 
