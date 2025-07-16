@@ -36,8 +36,8 @@ AS := $(TOOLCHAIN)-as
 OBJCOPY := $(TOOLCHAIN)-objcopy
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
-IMAGES := server.elf client.elf hpet_timer.elf
-CFLAGS := -nostdlib -ffreestanding -g -O3 -Wall -Wno-unused-function -Werror -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
+IMAGES := server.elf client.elf hpet_timer.elf stack_overflow.elf
+CFLAGS := -nostdlib -ffreestanding -g3 -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
 LDFLAGS := -L$(BOARD_DIR)/lib -z noexecstack
 LIBS := -lmicrokit -Tmicrokit.ld
 
@@ -49,10 +49,12 @@ REPORT = $(BUILD_DIR)/report.json
 all qemu: $(COPIED_KERNEL) $(INITIAL_TASK)
 
 $(BUILD_DIR)/client.o: client.c Makefile
-	$(CC) -c $(CFLAGS) $< -o $@
+	$(CC) -c $(CFLAGS) -Wall -Wno-unused-function -Werror $< -o $@
 $(BUILD_DIR)/server.o: server.c Makefile
-	$(CC) -c $(CFLAGS) $< -o $@
+	$(CC) -c $(CFLAGS) -Wall -Wno-unused-function -Werror $< -o $@
 $(BUILD_DIR)/hpet_timer.o: hpet_timer.c Makefile
+	$(CC) -c $(CFLAGS) -Wall -Wno-unused-function -Werror $< -o $@
+$(BUILD_DIR)/stack_overflow.o: stack_overflow.c Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
 
 $(BUILD_DIR)/client.elf: $(BUILD_DIR)/client.o
@@ -60,6 +62,8 @@ $(BUILD_DIR)/client.elf: $(BUILD_DIR)/client.o
 $(BUILD_DIR)/server.elf: $(BUILD_DIR)/server.o
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 $(BUILD_DIR)/hpet_timer.elf: $(BUILD_DIR)/hpet_timer.o
+	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
+$(BUILD_DIR)/stack_overflow.elf: $(BUILD_DIR)/stack_overflow.o
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
 $(INITIAL_TASK): $(addprefix $(BUILD_DIR)/, $(IMAGES)) hello.system

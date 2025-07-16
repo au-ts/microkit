@@ -10,7 +10,7 @@
     
     <memory_region name="hpet" size="0x1000" phys_addr="0xfed00000"/>
 
-    <protection_domain name="hello_server" priority="3">
+    <protection_domain name="hello_server" priority="100" >
         <program_image path="server.elf" />
 
         <map mr="small_test_mr" vaddr="0x1234_00_0000" perms="rw" setvar_vaddr="small_memory_region_vaddr" setvar_size="small_memory_region_size"/>
@@ -23,7 +23,7 @@
 
     </protection_domain>
 
-    <protection_domain name="hello_client" priority="2">
+    <protection_domain name="hello_client" priority="99">
         <program_image path="client.elf" />
 
         <map mr="small_test_mr" vaddr="0x1234_00_0000" perms="rw" setvar_vaddr="small_memory_region_vaddr" setvar_size="small_memory_region_size"/>
@@ -33,7 +33,11 @@
         <setvar symbol="large_memory_region_paddr" region_paddr="large_test_mr" />
     </protection_domain>
 
-    <protection_domain name="ticking_timer" priority="1">
+    <protection_domain name="stack_overflow" priority="98" stack_size="0x2000">
+        <program_image path="stack_overflow.elf" />
+    </protection_domain>
+
+    <protection_domain name="ticking_timer" priority="90">
         <program_image path="hpet_timer.elf" />
 
         <map mr="hpet" vaddr="0x4000_0000" perms="rw" setvar_vaddr="hpet_regs" />
