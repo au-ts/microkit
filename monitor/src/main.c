@@ -61,7 +61,7 @@ char vm_names[MAX_VMS][MAX_NAME_LEN] __attribute__((unused));
 seL4_Word vm_names_len;
 
 /* For reporting potential stack overflows, keep track of the stack regions for each PD. */
-seL4_Word pd_stack_addrs[MAX_PDS];
+seL4_Word pd_stack_bottom_addrs[MAX_PDS];
 
 /* Sanity check that the architecture specific macro have been set. */
 #if defined(ARCH_aarch64)
@@ -853,7 +853,7 @@ static void monitor(void)
 #endif
 
             seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr);
-            seL4_Word stack_addr = pd_stack_addrs[pd_id];
+            seL4_Word stack_addr = pd_stack_bottom_addrs[pd_id];
             if (fault_addr < stack_addr && fault_addr >= stack_addr - 0x1000) {
                 puts("MON|ERROR: potential stack overflow, fault address within one page outside of stack region\n");
             }
