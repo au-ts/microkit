@@ -711,25 +711,28 @@ pub fn build_capdl_spec(
             .borrow_mut()
             .write_symbol("microkit_ioports", &pd.ioport_bits().to_le_bytes())?;
 
-        // Step 3-15 bind this PD's TCB, sched context and ntfn to the monitor
+        // Step 3-15 bind this PD's TCB to the monitor so that its registers can be read on fault.
         capdl_util_insert_cap_into_cspace(
             &mut spec,
             mon_cnode_obj_id,
             MON_BASE_PD_TCB_CAP as usize + pd_id,
             capdl_util_make_tcb_cap(pd_tcb_obj_id),
         );
-        capdl_util_insert_cap_into_cspace(
-            &mut spec,
-            mon_cnode_obj_id,
-            MON_BASE_SCHED_CONTEXT_CAP as usize + pd_id,
-            capdl_util_make_sc_cap(pd_sc_obj_id),
-        );
-        capdl_util_insert_cap_into_cspace(
-            &mut spec,
-            mon_cnode_obj_id,
-            MON_BASE_NOTIFICATION_CAP as usize + pd_id,
-            capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0),
-        );
+        if pd.passive {
+            // Bind the Scheduling Context and Notification to the monitor if the PD is passive.
+            capdl_util_insert_cap_into_cspace(
+                &mut spec,
+                mon_cnode_obj_id,
+                MON_BASE_SCHED_CONTEXT_CAP as usize + pd_id,
+                capdl_util_make_sc_cap(pd_sc_obj_id),
+            );
+            capdl_util_insert_cap_into_cspace(
+                &mut spec,
+                mon_cnode_obj_id,
+                MON_BASE_NOTIFICATION_CAP as usize + pd_id,
+                capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0),
+            );
+        }
     }
 
     // *********************************
