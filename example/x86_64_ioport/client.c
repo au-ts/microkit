@@ -57,6 +57,9 @@ init(void)
 
     serial_puts("CLIENT: PPC return\n");
 
+    serial_puts("CLIENT: CRASHING NOW!!!!!\n");
+    uint32_t *crash = (uint32_t *) 0xdeadbeef;
+    *crash = 0x5e145e14;
 }
 
 void
