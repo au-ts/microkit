@@ -262,6 +262,8 @@ static char *page_fault_to_string(seL4_Word fsr) {
     case 3 | 4:
         return "page-protection violation from write at ring 3";
     case 16:
+        // Note that seL4 currently does not implement the NX/XD bit
+        // to mark a page as non-executable so we will never see the below message.
         return "instruction fetch from non-executable page";
     default:
         return "invalid FSR or unimplemented decoding";
