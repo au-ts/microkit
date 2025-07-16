@@ -26,7 +26,7 @@ use crate::{
         util::*,
     },
     elf::ElfFile,
-    sdf::{self, SysMapPerms, SysMemoryRegion, SystemDescription, BUDGET_DEFAULT},
+    sdf::{self, SysMapPerms, SysMemoryRegion, SystemDescription},
     sel4::{Config, PageSize},
     util::{monitor_serialise_names, monitor_serialise_u64_vec, round_down},
     MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH, VM_MAX_NAME_LENGTH,
@@ -351,8 +351,8 @@ pub fn build_capdl_spec(
         &mut spec,
         "monitor",
         PD_SCHEDCONTEXT_EXTRA_SIZE_BITS as usize,
-        BUDGET_DEFAULT,
-        BUDGET_DEFAULT,
+        100,
+        100,
         0,
     );
     let mon_sc_cap = capdl_util_make_sc_cap(mon_sc_obj_id);
@@ -436,15 +436,15 @@ pub fn build_capdl_spec(
 
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
-    for (pd_id, pd) in system.protection_domains.iter().enumerate() {
-        let elf_obj = pd_elf_files[pd_id].clone();
+    for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
+        let elf_obj = pd_elf_files[pd_global_idx].clone();
 
         let mut caps_to_bind_to_tcb: Vec<CapTableEntry> = Vec::new();
         let mut caps_to_insert_to_cspace: Vec<CapTableEntry> = Vec::new();
 
         // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
         let pd_tcb_obj_id = spec
-            .add_elf_to_spec(kernel_config, &pd.name, pd_elf_files[pd_id].clone())
+            .add_elf_to_spec(kernel_config, &pd.name, pd_elf_files[pd_global_idx].clone())
             .unwrap();
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec, pd_tcb_obj_id);
 
@@ -459,7 +459,8 @@ pub fn build_capdl_spec(
 
         // Allow PD to access their own VSpace for ops such as cache cleaning on ARM.
         caps_to_insert_to_cspace.push((
-            PD_VSPACE_CAP_IDX as usize, capdl_util_make_page_table_cap(pd_vspace_obj_id)
+            PD_VSPACE_CAP_IDX as usize,
+            capdl_util_make_page_table_cap(pd_vspace_obj_id),
         ));
 
         // Step 3-2: Map in all Memory Regions, keep tabs on what MR is mapped where so we can setvar later
@@ -514,7 +515,7 @@ pub fn build_capdl_spec(
                 Err(err) => return Err(err),
             }
         }
-        let elf_obj = pd_elf_files[pd_id].clone();
+        let elf_obj = pd_elf_files[pd_global_idx].clone();
         for (sym_name, value) in symbols_to_write.iter() {
             elf_obj
                 .borrow_mut()
@@ -558,7 +559,7 @@ pub fn build_capdl_spec(
             PD_SCHEDCONTEXT_EXTRA_SIZE_BITS as usize,
             pd.period,
             pd.budget,
-            0x100 + pd_id as u64,
+            0x100 + pd_global_idx as u64,
         );
         let pd_sc_cap = capdl_util_make_sc_cap(pd_sc_obj_id);
         caps_to_bind_to_tcb.push((TCB_SLOT_SC as usize, pd_sc_cap));
@@ -568,9 +569,25 @@ pub fn build_capdl_spec(
         let pd_fault_ep_cap = if pd.parent.is_none() {
             // badge = pd_idx + 1 because seL4 considers badge = 0 as no badge, which allows PD to mint this endpoint cap
             // with a different badge and impersonate another PD.
-            capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, pd_id as u64 + 1)
+            let badge: u64 = pd_global_idx as u64 + 1;
+            capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, badge)
         } else {
-            todo!()
+            assert!(pd_global_idx > pd.parent.unwrap());
+            let badge: u64 = FAULT_BADGE | pd.id.unwrap();
+            let parent_ep_obj_id = pd_id_to_ep_id.get(&pd.parent.unwrap()).unwrap();
+            let fault_ep_cap =
+                capdl_util_make_endpoint_cap(*parent_ep_obj_id, true, true, true, badge);
+
+            // Allow the parent PD to access the child's TCB:
+            let parent_cspace_obj_id = pd_id_to_cspace_id.get(&pd.parent.unwrap()).unwrap();
+            capdl_util_insert_cap_into_cspace(
+                &mut spec,
+                *parent_cspace_obj_id,
+                (PD_BASE_PD_TCB_CAP + pd.id.unwrap()) as usize,
+                capdl_util_make_tcb_cap(pd_tcb_obj_id),
+            );
+
+            fault_ep_cap
         };
         let pd_fault_ep_cap_clone = pd_fault_ep_cap.clone();
         caps_to_insert_to_cspace.push((PD_FAULT_EP_CAP_IDX as usize, pd_fault_ep_cap));
@@ -583,7 +600,7 @@ pub fn build_capdl_spec(
                 true,
                 true,
                 true,
-                pd_id as u64 + 1,
+                pd_global_idx as u64 + 1,
             );
             caps_to_insert_to_cspace.push((PD_MONITOR_EP_CAP_IDX as usize, pd_monitor_ep_cap));
         }
@@ -591,11 +608,11 @@ pub fn build_capdl_spec(
         // Step 3-8 Create endpoint object for the PD if it have childrens/inwards PPC, else it will be a notification
         let pd_ntfn_obj_id = capdl_util_make_ntfn_obj(&mut spec, &pd.name);
         let pd_ntfn_cap = capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0);
-        pd_id_to_ntfn_id.insert(pd_id, pd_ntfn_obj_id);
-        if pd.needs_ep(pd_id, &system.channels) {
+        pd_id_to_ntfn_id.insert(pd_global_idx, pd_ntfn_obj_id);
+        if pd.needs_ep(pd_global_idx, &system.channels) {
             let pd_ep_obj_id = capdl_util_make_endpoint_obj(&mut spec, &pd.name, false);
             let pd_ep_cap = capdl_util_make_endpoint_cap(pd_ep_obj_id, true, true, true, 0);
-            pd_id_to_ep_id.insert(pd_id, pd_ep_obj_id);
+            pd_id_to_ep_id.insert(pd_global_idx, pd_ep_obj_id);
             caps_to_insert_to_cspace.push((PD_INPUT_CAP_IDX as usize, pd_ep_cap));
             caps_to_bind_to_tcb.push((TCB_SLOT_BOUND_NOTIFICATION as usize, pd_ntfn_cap));
         } else {
@@ -643,7 +660,7 @@ pub fn build_capdl_spec(
         // @billn understand???: guard_size: kernel_config.cap_address_bits - PD_CAP_BITS,
         let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, 55);
         caps_to_bind_to_tcb.push((TCB_SLOT_CSPACE as usize, pd_cnode_cap));
-        pd_id_to_cspace_id.insert(pd_id, pd_cnode_obj_id);
+        pd_id_to_cspace_id.insert(pd_global_idx, pd_cnode_obj_id);
 
         // Step 3-13 Set the TCB parameters and all the various caps that we need to bind to this TCB.
         if let Object::Tcb(pc_tcb) = &mut spec.get_root_object_mut(pd_tcb_obj_id).unwrap().object {
@@ -673,7 +690,7 @@ pub fn build_capdl_spec(
         let mut notification_bits: u64 = 0;
         let mut pp_bits: u64 = 0;
         for channel in system.channels.iter() {
-            if channel.end_a.pd == pd_id {
+            if channel.end_a.pd == pd_global_idx {
                 if channel.end_a.notify {
                     notification_bits |= 1 << channel.end_a.id;
                 }
@@ -681,7 +698,7 @@ pub fn build_capdl_spec(
                     pp_bits |= 1 << channel.end_a.id;
                 }
             }
-            if channel.end_b.pd == pd_id {
+            if channel.end_b.pd == pd_global_idx {
                 if channel.end_b.notify {
                     notification_bits |= 1 << channel.end_b.id;
                 }
@@ -707,7 +724,7 @@ pub fn build_capdl_spec(
         capdl_util_insert_cap_into_cspace(
             &mut spec,
             mon_cnode_obj_id,
-            MON_BASE_PD_TCB_CAP as usize + pd_id,
+            MON_BASE_PD_TCB_CAP as usize + pd_global_idx,
             capdl_util_make_tcb_cap(pd_tcb_obj_id),
         );
         if pd.passive {
@@ -715,13 +732,13 @@ pub fn build_capdl_spec(
             capdl_util_insert_cap_into_cspace(
                 &mut spec,
                 mon_cnode_obj_id,
-                MON_BASE_SCHED_CONTEXT_CAP as usize + pd_id,
+                MON_BASE_SCHED_CONTEXT_CAP as usize + pd_global_idx,
                 capdl_util_make_sc_cap(pd_sc_obj_id),
             );
             capdl_util_insert_cap_into_cspace(
                 &mut spec,
                 mon_cnode_obj_id,
-                MON_BASE_NOTIFICATION_CAP as usize + pd_id,
+                MON_BASE_NOTIFICATION_CAP as usize + pd_global_idx,
                 capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0),
             );
         }
