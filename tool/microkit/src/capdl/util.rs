@@ -62,6 +62,10 @@ pub fn capdl_util_make_frame_cap(
     })
 }
 
+pub fn capdl_util_make_tcb_cap(tcb_obj_id: ObjectId) -> Cap {
+    Cap::Tcb(cap::Tcb { object: tcb_obj_id })
+}
+
 // Given a TCB object ID, return that TCB's VSpace object ID.
 pub fn capdl_util_get_vspace_id_from_tcb_id(spec: &CapDLSpec, tcb_obj_id: ObjectId) -> ObjectId {
     let tcb = match spec.get_root_object(tcb_obj_id) {
@@ -307,13 +311,13 @@ pub fn capdl_util_bind_irq_to_ntfn(spec: &mut CapDLSpec, irq_obj_id: ObjectId, n
     match &mut spec.get_root_object_mut(irq_obj_id).unwrap().object {
         Object::ArmIrq(arm_irq) => {
             arm_irq.slots.push((0, ntfn_cap));
-        },
+        }
         Object::IrqMsi(irq_msi) => {
             irq_msi.slots.push((0, ntfn_cap));
-        },
+        }
         Object::IrqIOApic(irq_ioapic) => {
             irq_ioapic.slots.push((0, ntfn_cap));
-        },
+        }
         _ => unreachable!("internal bug: capdl_util_bind_irq_to_ntfn() got non irq object"),
     }
 }
