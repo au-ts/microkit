@@ -249,9 +249,24 @@ static char *data_abort_dfsc_to_string(uintptr_t dfsc)
 }
 #endif
 
-// @billn fill in
 #ifdef ARCH_x86_64
-
+static char *page_fault_to_string(seL4_Word fsr) {
+    // https://wiki.osdev.org/Exceptions#Page_Fault
+    switch (fsr) {
+    case 0 | 4:
+        return "read to a non-present page at ring 3";
+    case 1 | 4:
+        return "page-protection violation from read at ring 3";
+    case 2 | 4:
+        return "write to a non-present page at ring 3";
+    case 3 | 4:
+        return "page-protection violation from write at ring 3";
+    case 16:
+        return "instruction fetch from non-executable page";
+    default:
+        return "invalid FSR or unimplemented decoding";
+    }
+}
 #endif
 
 /* UBSAN decoding related functionality */
@@ -645,7 +660,7 @@ static void riscv_print_vm_fault()
 static void x86_64_print_vm_fault() {
     seL4_Word ip = seL4_GetMR(seL4_VMFault_IP);
     seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr);
-    // seL4_Word prefetch_fault = seL4_GetMR(seL4_VMFault_PrefetchFault);
+    seL4_Word is_instruction = seL4_GetMR(seL4_VMFault_PrefetchFault);
     seL4_Word fsr = seL4_GetMR(seL4_VMFault_FSR);
     puts("MON|ERROR: VMFault: ip=");
     puthex64(ip);
@@ -653,16 +668,13 @@ static void x86_64_print_vm_fault() {
     puthex64(fault_addr);
     puts("  fsr=");
     puthex64(fsr);
-
+    puts("  ");
+    puts(is_instruction ? "(instruction fault)" : "(data fault)");
     puts("\n");
     
-    // @billn work out how to decode these values for x86
-    // puts("  ");
-    // puts(is_instruction ? "(instruction fault)" : "(data fault)");
-    // puts("\n");
-    // puts("MON|ERROR: description of fault: ");
-    // puts(riscv_fsr_to_string(fsr));
-    // puts("\n");
+    puts("MON|ERROR: description of fault: ");
+    puts(page_fault_to_string(fsr));
+    puts("\n");
 }
 #endif
 
