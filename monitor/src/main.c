@@ -43,6 +43,13 @@
 #define MAX_PDS 64
 #define MAX_NAME_LEN 64
 
+#define FAULT_EP_CAP 1
+#define REPLY_CAP 2
+#define BASE_PD_TCB_CAP 10
+#define BASE_VM_TCB_CAP 74
+#define BASE_SCHED_CONTEXT_CAP 138
+#define BASE_NOTIFICATION_CAP 202
+
 extern seL4_IPCBuffer __sel4_ipc_buffer_obj;
 seL4_IPCBuffer *__sel4_ipc_buffer = &__sel4_ipc_buffer_obj;
 
@@ -52,13 +59,6 @@ char pd_names[MAX_PDS][MAX_NAME_LEN];
 seL4_Word pd_names_len;
 char vm_names[MAX_VMS][MAX_NAME_LEN] __attribute__((unused));
 seL4_Word vm_names_len;
-
-seL4_Word fault_ep;
-seL4_Word reply;
-seL4_Word pd_tcbs[MAX_PDS];
-seL4_Word vm_tcbs[MAX_VMS];
-seL4_Word scheduling_contexts[MAX_PDS];
-seL4_Word notification_caps[MAX_PDS];
 
 /* For reporting potential stack overflows, keep track of the stack regions for each PD. */
 seL4_Word pd_stack_addrs[MAX_PDS];
@@ -733,20 +733,21 @@ static void monitor(void)
         seL4_MessageInfo_t tag;
         seL4_Error err;
 
-        tag = seL4_Recv(fault_ep, &badge, reply);
+        tag = seL4_Recv(FAULT_EP_CAP, &badge, REPLY_CAP);
         label = seL4_MessageInfo_get_label(tag);
 
-        seL4_Word tcb_cap = pd_tcbs[badge];
+        seL4_Word pd_id = badge - 1;
+        seL4_Word tcb_cap = BASE_PD_TCB_CAP + pd_id;
 
-        if (label == seL4_Fault_NullFault && badge < MAX_PDS) {
+        if (label == seL4_Fault_NullFault && pd_id < MAX_PDS) {
             /* This is a request from our PD to become passive */
-            err = seL4_SchedContext_UnbindObject(scheduling_contexts[badge], tcb_cap);
-            err = seL4_SchedContext_Bind(scheduling_contexts[badge], notification_caps[badge]);
+            err = seL4_SchedContext_UnbindObject(BASE_SCHED_CONTEXT_CAP + pd_id, tcb_cap);
+            err = seL4_SchedContext_Bind(BASE_SCHED_CONTEXT_CAP + pd_id, BASE_NOTIFICATION_CAP + pd_id);
             if (err != seL4_NoError) {
                 puts("MON|ERROR: could not bind scheduling context to notification object");
             } else {
                 puts("MON|INFO: PD '");
-                puts(pd_names[badge]);
+                puts(pd_names[pd_id]);
                 puts("' is now passive!\n");
             }
             continue;
@@ -760,9 +761,9 @@ static void monitor(void)
         puthex64(tcb_cap);
         puts("\n");
 
-        if (badge < MAX_PDS && pd_names[badge][0] != 0) {
+        if (pd_id < MAX_PDS && pd_names[pd_id][0] != 0) {
             puts("MON|ERROR: faulting PD: ");
-            puts(pd_names[badge]);
+            puts(pd_names[pd_id]);
             puts("\n");
         } else {
             fail("MON|ERROR: unknown/invalid badge\n");
@@ -852,7 +853,7 @@ static void monitor(void)
 #endif
 
             seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr);
-            seL4_Word stack_addr = pd_stack_addrs[badge];
+            seL4_Word stack_addr = pd_stack_addrs[pd_id];
             if (fault_addr < stack_addr && fault_addr >= stack_addr - 0x1000) {
                 puts("MON|ERROR: potential stack overflow, fault address within one page outside of stack region\n");
             }
@@ -901,12 +902,12 @@ void main(seL4_BootInfo *bi)
      * If we end up doing various different kinds of system calls we should add
      * support in the tooling and make the monitor generic.
      */
-    for (unsigned idx = 1; idx < pd_names_len + 1; idx++) {
-        seL4_DebugNameThread(pd_tcbs[idx], pd_names[idx]);
-    }
-    for (unsigned idx = 1; idx < vm_names_len + 1; idx++) {
-        seL4_DebugNameThread(vm_tcbs[idx], vm_names[idx]);
-    }
+    // for (unsigned idx = 0; idx < pd_names_len; idx++) {
+    //     seL4_DebugNameThread(BASE_PD_TCB_CAP + idx, pd_names[idx]);
+    // }
+    // for (unsigned idx = 0; idx < vm_names_len; idx++) {
+    //     seL4_DebugNameThread(BASE_VM_TCB_CAP + idx, vm_names[idx]);
+    // }
 #endif
 
     puts("MON|INFO: Microkit Monitor started!\n");
