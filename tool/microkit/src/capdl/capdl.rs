@@ -29,7 +29,7 @@ use crate::{
     elf::ElfFile,
     sdf::{self, SysMapPerms, SysMemoryRegion, SystemDescription, BUDGET_DEFAULT},
     sel4::{Config, PageSize},
-    util::{monitor_serialise_names, round_down},
+    util::{monitor_serialise_names, monitor_serialise_u64_vec, round_down},
     MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH, VM_MAX_NAME_LENGTH,
 };
 
@@ -436,6 +436,9 @@ pub fn build_capdl_spec(
     let mut pd_id_to_cspace_id: HashMap<usize, ObjectId> = HashMap::new();
     let mut pd_id_to_ntfn_id: HashMap<usize, ObjectId> = HashMap::new();
     let mut pd_id_to_ep_id: HashMap<usize, ObjectId> = HashMap::new();
+
+    // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
+    let mut pd_stack_bottoms: Vec<u64> = Vec::new();
     for (pd_id, pd) in system.protection_domains.iter().enumerate() {
         let elf_obj = pd_elf_files[pd_id].clone();
 
@@ -529,6 +532,7 @@ pub fn build_capdl_spec(
 
         // Step 3-4: Create and map in the stack (bottom up)
         let mut cur_stack_vaddr = kernel_config.pd_stack_bottom(pd.stack_size);
+        pd_stack_bottoms.push(cur_stack_vaddr);
         let num_stack_frames = pd.stack_size / PageSize::Small as u64;
         for stack_frame_seq in 0..num_stack_frames {
             let stack_frame_obj_id = capdl_util_make_frame_obj(
@@ -582,8 +586,13 @@ pub fn build_capdl_spec(
 
         // Step 3-7 Create cap to Monitor's endpoint for passive PDs.
         if pd.passive {
-            let pd_monitor_ep_cap =
-                capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, pd_id as u64 + 1);
+            let pd_monitor_ep_cap = capdl_util_make_endpoint_cap(
+                mon_fault_ep_obj_id,
+                true,
+                true,
+                true,
+                pd_id as u64 + 1,
+            );
             caps_to_insert_to_cspace.push((PD_MONITOR_EP_CAP_IDX as usize, pd_monitor_ep_cap));
         }
 
@@ -772,14 +781,20 @@ pub fn build_capdl_spec(
         .iter()
         .map(|pd| &pd.name)
         .collect();
-    monitor_elf.borrow_mut().write_symbol(
-        "pd_names",
-        &monitor_serialise_names(pd_names, MAX_PDS, PD_MAX_NAME_LENGTH),
-    )?;
-    monitor_elf.borrow_mut().write_symbol(
-        "pd_names_len",
-        &system.protection_domains.len().to_le_bytes(),
-    )?;
+    monitor_elf
+        .borrow_mut()
+        .write_symbol(
+            "pd_names",
+            &monitor_serialise_names(pd_names, MAX_PDS, PD_MAX_NAME_LENGTH),
+        )
+        .unwrap();
+    monitor_elf
+        .borrow_mut()
+        .write_symbol(
+            "pd_names_len",
+            &system.protection_domains.len().to_le_bytes(),
+        )
+        .unwrap();
 
     let vm_names: Vec<&String> = system
         .protection_domains
@@ -788,11 +803,23 @@ pub fn build_capdl_spec(
         .collect();
     monitor_elf
         .borrow_mut()
-        .write_symbol("vm_names_len", &vm_names.len().to_le_bytes())?;
-    monitor_elf.borrow_mut().write_symbol(
-        "vm_names",
-        &monitor_serialise_names(vm_names, MAX_VMS, VM_MAX_NAME_LENGTH),
-    )?;
+        .write_symbol("vm_names_len", &vm_names.len().to_le_bytes())
+        .unwrap();
+    monitor_elf
+        .borrow_mut()
+        .write_symbol(
+            "vm_names",
+            &monitor_serialise_names(vm_names, MAX_VMS, VM_MAX_NAME_LENGTH),
+        )
+        .unwrap();
+
+    monitor_elf
+        .borrow_mut()
+        .write_symbol(
+            "pd_stack_bottom_addrs",
+            &monitor_serialise_u64_vec(&pd_stack_bottoms),
+        )
+        .unwrap();
 
     // *********************************
     // Step 6. Fill in the data for all ELF loadable frames.

@@ -178,12 +178,11 @@ pub unsafe fn bytes_to_struct<T>(bytes: &[u8]) -> &T {
     &body[0]
 }
 
-/// Serialise an array of u64 to a Vector of bytes. Pads the Vector of bytes
-/// such that the first entry is empty.
+/// Serialise an array of u64 to a Vector of bytes.
 pub fn monitor_serialise_u64_vec(vec: &[u64]) -> Vec<u8> {
     let mut bytes = vec![0; (1 + vec.len()) * 8];
     for (i, value) in vec.iter().enumerate() {
-        let start = (i + 1) * 8;
+        let start = i * 8;
         let end = start + 8;
         bytes[start..end].copy_from_slice(&value.to_le_bytes());
     }
