@@ -67,19 +67,6 @@ pub fn mask(n: u64) -> u64 {
     (1 << n) - 1
 }
 
-/// Check that all objects in the list are adjacent
-// pub fn objects_adjacent(objects: &[Object]) -> bool {
-//     let mut prev_cap_addr = objects[0].cap_addr;
-//     for obj in &objects[1..] {
-//         if obj.cap_addr != prev_cap_addr + 1 {
-//             return false;
-//         }
-//         prev_cap_addr = obj.cap_addr;
-//     }
-
-//     true
-// }
-
 /// Product a 'human readable' string for the size.
 ///
 /// 'strict' means that it must be simply represented.
