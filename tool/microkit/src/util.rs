@@ -4,12 +4,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
-use std::cmp::min;
-
 // use crate::sel4::Object;
 use serde_json;
-
-use crate::{elf::ElfFile, sdf::{Channel, ProtectionDomain}, PD_MAX_NAME_LENGTH};
 
 pub fn msb(x: u64) -> u64 {
     64 - x.leading_zeros() as u64 - 1
@@ -195,8 +191,7 @@ pub fn monitor_serialise_u64_vec(vec: &[u64]) -> Vec<u8> {
     bytes
 }
 
-/// For serialising an array of PD or VM names. Pads the Vector of bytes such that
-/// the first entry is empty.
+/// For serialising an array of PD or VM names
 pub fn monitor_serialise_names(
     names: Vec<&String>,
     max_len: usize,
@@ -204,10 +199,8 @@ pub fn monitor_serialise_names(
 ) -> Vec<u8> {
     let mut names_bytes = vec![0; (max_len + 1) * max_name_len];
     for (i, name) in names.iter().enumerate() {
-        // The monitor will index into the array of names based on the badge, which
-        // starts at 1 and hence we cannot use the 0th entry in the array.
         let name_bytes = name.as_bytes();
-        let start = (i + 1) * max_name_len;
+        let start = i * max_name_len;
         // Here instead of giving an error we simply take the minimum of the name
         // and how large of a name we can encode. The name length is one less than
         // the maximum since we still have to add the null terminator.
