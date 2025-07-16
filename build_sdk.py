@@ -38,6 +38,7 @@ TOOLCHAIN_X86_64 = "x86_64-linux-gnu"
 KERNEL_CONFIG_TYPE = Union[bool, str]
 KERNEL_OPTIONS = Dict[str, Union[bool, str]]
 
+RUST_SEL4_DIR = Path("dep/rust-sel4").absolute()
 
 class KernelArch(IntEnum):
     AARCH64 = 1
@@ -816,8 +817,7 @@ def main() -> None:
                 build_elf_component("loader", root_dir, build_dir, board, config, loader_defines)
             build_elf_component("monitor", root_dir, build_dir, board, config, [])
             build_lib_component("libmicrokit", root_dir, build_dir, board, config)
-            # @billn make the rust sel4 path thing less hacky
-            build_capdl_initialiser("capdl_initialiser", Path("dep/rust-sel4").absolute(), root_dir, build_dir, board, config)
+            build_capdl_initialiser("capdl_initialiser", RUST_SEL4_DIR, root_dir, build_dir, board, config)
 
     # Setup the examples
     for example, example_path in EXAMPLES.items():
