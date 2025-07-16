@@ -19,9 +19,8 @@ use crate::{
     capdl::{
         memory::{self, ArchMethods, X86_64},
         spec::{
-            cap,
             object::{self},
-            AsidSlotEntry, BytesContent, Cap, CapTableEntry, Fill, FillEntry, FillEntryContent,
+            AsidSlotEntry, BytesContent, CapTableEntry, Fill, FillEntry, FillEntryContent,
             FrameInit, IrqEntry, NamedObject, Object, ObjectId, TemporaryContent, UntypedCover,
         },
         util::*,
@@ -150,9 +149,7 @@ impl CapDLSpec {
     ) -> Result<ObjectId, String> {
         // We assumes that ELFs and PDs have a one-to-one relationship. So for each ELF we create a VSpace.
         let vspace_obj_id = X86_64::create_vspace(self, pd_name); // @billn make arch agnostic
-        let vspace_cap = Cap::PageTable(cap::PageTable {
-            object: vspace_obj_id,
-        });
+        let vspace_cap = capdl_util_make_page_table_cap(vspace_obj_id);
 
         // For each loadable segment in the ELF, map it into the address space of this PD.
         let mut frame_sequence = 0; // For object naming purpose only.
@@ -456,18 +453,13 @@ pub fn build_capdl_spec(
         if kernel_config.benchmark {
             caps_to_insert_to_cspace.push((
                 PD_TCB_CAP_IDX as usize,
-                Cap::Tcb(cap::Tcb {
-                    object: pd_tcb_obj_id,
-                }),
+                capdl_util_make_tcb_cap(pd_tcb_obj_id),
             ));
         }
 
         // Allow PD to access their own VSpace for ops such as cache cleaning on ARM.
         caps_to_insert_to_cspace.push((
-            PD_VSPACE_CAP_IDX as usize,
-            Cap::PageTable(cap::PageTable {
-                object: pd_vspace_obj_id,
-            }),
+            PD_VSPACE_CAP_IDX as usize, capdl_util_make_page_table_cap(pd_vspace_obj_id)
         ));
 
         // Step 3-2: Map in all Memory Regions, keep tabs on what MR is mapped where so we can setvar later
@@ -807,15 +799,15 @@ pub fn build_capdl_spec(
     monitor_elf
         .borrow_mut()
         .write_symbol(
-            "pd_names",
-            &monitor_serialise_names(pd_names, MAX_PDS, PD_MAX_NAME_LENGTH),
+            "pd_names_len",
+            &system.protection_domains.len().to_le_bytes(),
         )
         .unwrap();
     monitor_elf
         .borrow_mut()
         .write_symbol(
-            "pd_names_len",
-            &system.protection_domains.len().to_le_bytes(),
+            "pd_names",
+            &monitor_serialise_names(pd_names, MAX_PDS, PD_MAX_NAME_LENGTH),
         )
         .unwrap();
 

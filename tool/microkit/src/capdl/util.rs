@@ -66,6 +66,10 @@ pub fn capdl_util_make_tcb_cap(tcb_obj_id: ObjectId) -> Cap {
     Cap::Tcb(cap::Tcb { object: tcb_obj_id })
 }
 
+pub fn capdl_util_make_page_table_cap(pt_obj_id: ObjectId) -> Cap {
+    Cap::PageTable(cap::PageTable { object: pt_obj_id })
+}
+
 // Given a TCB object ID, return that TCB's VSpace object ID.
 pub fn capdl_util_get_vspace_id_from_tcb_id(spec: &CapDLSpec, tcb_obj_id: ObjectId) -> ObjectId {
     let tcb = match spec.get_root_object(tcb_obj_id) {
