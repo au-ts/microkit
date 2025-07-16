@@ -55,6 +55,8 @@ pub fn capdl_util_make_frame_cap(
         rights: Rights {
             read,
             write,
+            // This is ignored on x86 by seL4. As the NX/XD bit that marks page as non-executable
+            // is unsupported on old hardware.
             grant: execute,
             grant_reply: false,
         },
