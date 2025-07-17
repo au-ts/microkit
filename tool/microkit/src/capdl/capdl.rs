@@ -465,7 +465,7 @@ pub fn build_capdl_spec(
         // Step 3-2: Map in all Memory Regions, keep tabs on what MR is mapped where so we can setvar later
         let mut mr_to_vaddr: HashMap<&String, u64> = HashMap::new();
         for map in pd.maps.iter() {
-            let cur_vaddr = map.vaddr;
+            let mut cur_vaddr = map.vaddr;
             let page_size = mr_to_xml_obj.get(&map.mr).unwrap().page_size;
             let read = map.perms & SysMapPerms::Read as u8 != 0;
             let write = map.perms & SysMapPerms::Write as u8 != 0;
@@ -485,6 +485,7 @@ pub fn build_capdl_spec(
                     cur_vaddr,
                 )
                 .unwrap();
+                cur_vaddr += page_size as u64;
             }
             mr_to_vaddr.insert(&map.mr, map.vaddr);
         }
