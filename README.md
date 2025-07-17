@@ -7,11 +7,12 @@
 
 The purpose of the seL4 Microkit is to enable system designers to create static software systems based on the seL4 microkernel.
 
-The seL4 Microkit consists of four parts:
+The seL4 Microkit consists of five components:
 
    * Microkit bootloader
+   * CapDL initialiser
    * Microkit library
-   * Microkit initial task
+   * Microkit monitor
    * Microkit tool
 
 The Microkit is distributed as a software development kit (SDK).
@@ -47,6 +48,7 @@ This section attempts to list the packages or external development tools which a
 * xmllint
 * qemu-system-aarch64
 * qemu-system-riscv64
+* qemu-system-x86
 
 To build the documentation you also need
 * pandoc
@@ -67,7 +69,7 @@ On a Debian-like system you can do:
         pandoc texlive-latex-base texlive-latex-recommended \
         texlive-fonts-recommended texlive-fonts-extra \
         python3.12 python3.12-venv \
-        qemu-system-arm qemu-system-misc \
+        qemu-system-arm qemu-system-misc qemu-system-x86 \
         gcc-riscv64-unknown-elf
     $ python3.12 -m venv pyenv
     $ ./pyenv/bin/pip install --upgrade pip setuptools wheel
@@ -221,6 +223,10 @@ The currently supported boards are:
 * star64
 * tqma8xqp1gb
 * ultra96v2
+* x86_64_haswell
+* x86_64_generic
+* x86_64_nehalem
+* x86_64_skylake
 * zcu102
 
 The currently supported configurations are:
