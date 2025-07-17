@@ -189,23 +189,20 @@ impl<'a> Args<'a> {
 
 fn main() -> Result<(), String> {
     let exe_path = std::env::current_exe().unwrap();
-    // @billn revisit
-    // let sdk_env = std::env::var("MICROKIT_SDK");
-    // let sdk_dir = match sdk_env {
-    //     Ok(ref value) => Path::new(value),
-    //     Err(err) => match err {
-    //         // If there is no MICROKIT_SDK explicitly set, use the one that the binary is in.
-    //         std::env::VarError::NotPresent => exe_path.parent().unwrap().parent().unwrap(),
-    //         _ => {
-    //             return Err(format!(
-    //                 "Could not read MICROKIT_SDK environment variable: {}",
-    //                 err
-    //             ))
-    //         }
-    //     },
-    // };
-
-    let sdk_dir = exe_path.parent().unwrap().parent().unwrap();
+    let sdk_env = std::env::var("MICROKIT_SDK");
+    let sdk_dir = match sdk_env {
+        Ok(ref value) => Path::new(value),
+        Err(err) => match err {
+            // If there is no MICROKIT_SDK explicitly set, use the one that the binary is in.
+            std::env::VarError::NotPresent => exe_path.parent().unwrap().parent().unwrap(),
+            _ => {
+                return Err(format!(
+                    "Could not read MICROKIT_SDK environment variable: {}",
+                    err
+                ))
+            }
+        },
+    };
 
     if !sdk_dir.exists() {
         eprintln!(
@@ -273,7 +270,7 @@ fn main() -> Result<(), String> {
         .join(args.board)
         .join(args.config)
         .join("elf");
-    // let loader_elf_path = elf_path.join("loader.elf");
+    let loader_elf_path = elf_path.join("loader.elf");
     let kernel_elf_path = elf_path.join("sel4.elf");
     let monitor_elf_path = elf_path.join("monitor.elf");
     let capdl_init_elf_path = elf_path.join("capdl_initialiser.elf"); 
@@ -297,14 +294,6 @@ fn main() -> Result<(), String> {
         );
         std::process::exit(1);
     }
-    // @billn revisit
-    // if !loader_elf_path.exists() {
-    //     eprintln!(
-    //         "Error: loader ELF '{}' does not exist",
-    //         loader_elf_path.display()
-    //     );
-    //     std::process::exit(1);
-    // }
     if !kernel_elf_path.exists() {
         eprintln!(
             "Error: kernel ELF '{}' does not exist",
@@ -418,6 +407,14 @@ fn main() -> Result<(), String> {
         x86_xsave_size,
         invocations_labels,
     };
+
+    if kernel_config.arch != Arch::X86_64 && !loader_elf_path.exists() {
+        eprintln!(
+            "Error: loader ELF '{}' does not exist",
+            loader_elf_path.display()
+        );
+        std::process::exit(1);
+    }
 
     if let Arch::Aarch64 = kernel_config.arch {
         assert!(

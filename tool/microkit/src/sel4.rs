@@ -106,6 +106,7 @@ impl Config {
     }
 }
 
+#[derive(PartialEq, Eq)]
 pub enum Arch {
     Aarch64,
     Riscv64,

@@ -367,8 +367,8 @@ pub fn build_capdl_spec(
         ]
         .to_vec(),
     );
-    // @billn understand???: guard_size: kernel_config.cap_address_bits - PD_CAP_BITS,
-    let mon_cnode_cap = capdl_util_make_cnode_cap(mon_cnode_obj_id, 0, 55);
+    let mon_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS;
+    let mon_cnode_cap = capdl_util_make_cnode_cap(mon_cnode_obj_id, 0, mon_guard_size);
 
     // At this point, all of the required objects for the monitor have been created and it caps inserted into
     // the correct slot in the CSpace. We need to bind those objects into the TCB for the monitor to use them.
@@ -564,7 +564,6 @@ pub fn build_capdl_spec(
         caps_to_bind_to_tcb.push((TCB_SLOT_SC as usize, pd_sc_cap));
 
         // Step 3-6 Create fault Endpoint cap to parent/monitor
-        // @billn handle parent & child pd, which will need FAULT_BADGE
         let pd_fault_ep_cap = if pd.parent.is_none() {
             // badge = pd_idx + 1 because seL4 considers badge = 0 as no badge, which allows PD to mint this endpoint cap
             // with a different badge and impersonate another PD.
@@ -628,7 +627,7 @@ pub fn build_capdl_spec(
         // Step 3-10 Create spec and caps to IRQs
         for irq in pd.irqs.iter() {
             // Create IRQ object and add it to the special `irqs` vec in the spec.
-            let irq_obj_id = capdl_util_make_irq_obj(&mut spec, &pd.name, irq);
+            let irq_obj_id = capdl_util_make_irq_obj(&mut spec, &pd.name, irq, None);
             spec.add_irq(irq.irq_num(), irq_obj_id);
 
             // Create a IRQ handler cap and insert into the requested CSpace's slot.
@@ -656,8 +655,8 @@ pub fn build_capdl_spec(
             PD_CAP_BITS as usize,
             caps_to_insert_to_cspace,
         );
-        // @billn understand???: guard_size: kernel_config.cap_address_bits - PD_CAP_BITS,
-        let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, 55);
+        let pd_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS;
+        let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, pd_guard_size);
         caps_to_bind_to_tcb.push((TCB_SLOT_CSPACE as usize, pd_cnode_cap));
         pd_id_to_cspace_id.insert(pd_global_idx, pd_cnode_obj_id);
 

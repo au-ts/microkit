@@ -253,13 +253,15 @@ pub fn capdl_util_insert_cap_into_cspace(
     }
 }
 
-pub fn capdl_util_make_irq_obj(spec: &mut CapDLSpec, pd_name: &str, sys_irq: &SysIrq) -> ObjectId {
+/// target_cpu is only valid for ARM.
+pub fn capdl_util_make_irq_obj(spec: &mut CapDLSpec, pd_name: &str, sys_irq: &SysIrq, target_cpu: Option<u64>) -> ObjectId {
+
     let irq_inner_obj = match sys_irq.kind {
         SysIrqKind::Conventional { trigger, .. } => Object::ArmIrq(object::ArmIrq {
             slots: [].to_vec(),
             extra: ArmIrqExtraInfo {
                 trigger: trigger as u64,
-                target: 0, // @billn revisit for SMP
+                target: target_cpu.unwrap(),
             },
         }),
         SysIrqKind::IOAPIC {
