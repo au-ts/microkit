@@ -324,7 +324,6 @@ SUPPORTED_BOARDS = (
         gcc_cpu="nehalem",
         loader_link_address=0x10000000,
         kernel_options = {
-            # @billn make vm work
             "KernelIsMCS": True,
             "KernelPlatform": "pc99",
             "KernelSel4Arch": "x86_64",
@@ -341,12 +340,43 @@ SUPPORTED_BOARDS = (
         gcc_cpu="generic",
         loader_link_address=0x10000000,
         kernel_options = {
-            # @billn make vm work
             "KernelIsMCS": True,
             "KernelPlatform": "pc99",
             "KernelSel4Arch": "x86_64",
             "KernelVTX": False,
             "KernelX86MicroArch": "generic",
+            "KernelSupportPCID": False,
+            "KernelFSGSBaseInst": False,
+            "KernelFPU": "FXSAVE",
+        },
+    ),
+    BoardInfo(
+        name="x86_64_skylake",
+        arch=KernelArch.X86_64,
+        gcc_cpu="skylake",
+        loader_link_address=0x10000000,
+        kernel_options = {
+            "KernelIsMCS": True,
+            "KernelPlatform": "pc99",
+            "KernelSel4Arch": "x86_64",
+            "KernelVTX": False,
+            "KernelX86MicroArch": "skylake",
+            "KernelSupportPCID": False,
+            "KernelFSGSBaseInst": False,
+            "KernelFPU": "FXSAVE",
+        },
+    ),
+    BoardInfo(
+        name="x86_64_haswell",
+        arch=KernelArch.X86_64,
+        gcc_cpu="haswell",
+        loader_link_address=0x10000000,
+        kernel_options = {
+            "KernelIsMCS": True,
+            "KernelPlatform": "pc99",
+            "KernelSel4Arch": "x86_64",
+            "KernelVTX": False,
+            "KernelX86MicroArch": "haswell",
             "KernelSupportPCID": False,
             "KernelFSGSBaseInst": False,
             "KernelFPU": "FXSAVE",
@@ -664,7 +694,6 @@ def build_capdl_initialiser(
     board: BoardInfo,
     config: ConfigInfo,
 ) -> None:
-    # @billn check that the git submodule is initalised and updated
     sel4_src_dir = build_dir / board.name / config.name / "sel4" / "install"
 
     cargo_cross_options = "-Z build-std=core,alloc,compiler_builtins -Z build-std-features=compiler-builtins-mem"
@@ -739,6 +768,10 @@ def main() -> None:
     sel4_dir = args.sel4.expanduser()
     if not sel4_dir.exists():
         raise Exception(f"sel4_dir: {sel4_dir} does not exist")
+    
+    rust_sel4_crates = RUST_SEL4_DIR / "crates"
+    if not rust_sel4_crates.exists():
+        raise Exception(f"rust-sel4 does not exist. Have you ran `git submodule init && git submodule update`?")
 
     root_dir = Path("release") / f"{NAME}-sdk-{version}"
     tar_file = Path("release") / f"{NAME}-sdk-{version}.tar.gz"
@@ -811,8 +844,6 @@ def main() -> None:
                     raise Exception("Unexpected ARM physical address bits defines")
                 loader_defines.append(("PHYSICAL_ADDRESS_BITS", arm_pa_size_bits))
 
-            # @billn, do we need the ukit bootloader on real x86 machines? or rely on grub?
-            # @billn, come back to when adding CapDL support for aarch64 and riscv
             if not board.arch.is_x86():
                 build_elf_component("loader", root_dir, build_dir, board, config, loader_defines)
             build_elf_component("monitor", root_dir, build_dir, board, config, [])
