@@ -224,7 +224,7 @@ pub fn capdl_util_make_ioport_obj(
 ) -> ObjectId {
     let ioport_inner_obj = Object::IOPorts(object::IOPorts {
         start_port: start_addr,
-        end_port: start_addr + size,
+        end_port: start_addr + size - 1,
     });
     let ioport_obj = NamedObject {
         name: format!("ioports_0x{:x}_{}", start_addr, pd_name),
