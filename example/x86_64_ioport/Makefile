@@ -37,7 +37,8 @@ OBJCOPY := $(TOOLCHAIN)-objcopy
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
 IMAGES := server.elf client.elf hpet_timer.elf stack_overflow.elf
-CFLAGS := -nostdlib -ffreestanding -g3 -O3 -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
+# We don't turn on compiler optimisation so that the crashing code doesn't get optimised out.
+CFLAGS := -nostdlib -ffreestanding -g3 -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
 LDFLAGS := -L$(BOARD_DIR)/lib -z noexecstack
 LIBS := -lmicrokit -Tmicrokit.ld
 
