@@ -348,6 +348,20 @@ SUPPORTED_BOARDS = (
             "KernelSupportPCID": False,
         },
     ),
+    BoardInfo(
+        name="x86_64_skylake",
+        arch=KernelArch.X86_64,
+        gcc_cpu="skylake",
+        loader_link_address=0x10000000,
+        kernel_options = {
+            "KernelIsMCS": True,
+            "KernelPlatform": "pc99",
+            "KernelSel4Arch": "x86_64",
+            "KernelVTX": False,
+            "KernelX86MicroArch": "skylake",
+            "KernelSupportPCID": False,
+        },
+    ),
 )
 
 SUPPORTED_CONFIGS = (
