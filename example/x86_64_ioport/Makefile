@@ -74,11 +74,11 @@ $(COPIED_KERNEL): $(KERNEL)
 	$(OBJCOPY) -O elf32-i386 $(KERNEL) $(COPIED_KERNEL)
 
 qemu:
-	qemu-system-x86_64                                                                         \
-			-cpu Nehalem,+fsgsbase,+pdpe1gb,+pcid,+invpcid,+xsave,+xsaves,+xsaveopt,+vmx,+vme \
-			-m "4G"                                                                             \
-			-display none                                                                       \
-			-serial mon:stdio                                                                   \
+	qemu-system-x86_64                      \
+			-cpu Nehalem,+fsgsbase,+pdpe1gb,+pcid,+invpcid,+xsave,+xsaves,+xsaveopt \
+			-m "4G"                         \
+			-display none                   \
+			-serial mon:stdio               \
 		-kernel $(COPIED_KERNEL) \
 		-initrd $(INITIAL_TASK)
 
