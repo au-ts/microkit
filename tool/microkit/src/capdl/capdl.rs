@@ -212,7 +212,7 @@ impl CapDLSpec {
                 let frame_obj_id = capdl_util_make_frame_obj(
                     self,
                     frame_init,
-                    &format!("elf_{}_{}", pd_name, frame_sequence),
+                    &format!("elf_{}_{:09}", pd_name, frame_sequence),
                     None,
                     PageSize::Small.fixed_size_bits(sel4_config) as usize,
                 );
@@ -253,7 +253,7 @@ impl CapDLSpec {
             FrameInit::Fill(Fill {
                 entries: [].to_vec(),
             }),
-            &format!("{}_ipcbuf", pd_name),
+            &format!("ipcbuf_{}", pd_name),
             None,
             // Must be consistent with the granule bits used in spec serialisation
             PageSize::Small.fixed_size_bits(sel4_config) as usize,
@@ -418,7 +418,7 @@ pub fn build_capdl_spec(
                     FrameInit::Fill(Fill {
                         entries: [].to_vec(),
                     }),
-                    &format!("mr_{}_{}", mr.name, frame_sequence),
+                    &format!("mr_{}_{:09}", mr.name, frame_sequence),
                     paddr,
                     frame_size_bits as usize,
                 ));
@@ -533,7 +533,7 @@ pub fn build_capdl_spec(
                 FrameInit::Fill(Fill {
                     entries: [].to_vec(),
                 }),
-                &format!("{}_stack_{}", pd.name, stack_frame_seq),
+                &format!("{}_stack_{:09}", pd.name, stack_frame_seq),
                 None,
                 PageSize::Small.fixed_size_bits(kernel_config) as usize,
             );
@@ -613,12 +613,11 @@ pub fn build_capdl_spec(
             let pd_ep_cap = capdl_util_make_endpoint_cap(pd_ep_obj_id, true, true, true, 0);
             pd_id_to_ep_id.insert(pd_global_idx, pd_ep_obj_id);
             caps_to_insert_to_cspace.push((PD_INPUT_CAP_IDX as usize, pd_ep_cap));
-            caps_to_bind_to_tcb.push((TCB_SLOT_BOUND_NOTIFICATION as usize, pd_ntfn_cap));
         } else {
             let pd_ntfn_cap_clone = pd_ntfn_cap.clone();
-            caps_to_insert_to_cspace.push((PD_INPUT_CAP_IDX as usize, pd_ntfn_cap));
-            caps_to_bind_to_tcb.push((TCB_SLOT_BOUND_NOTIFICATION as usize, pd_ntfn_cap_clone));
+            caps_to_insert_to_cspace.push((PD_INPUT_CAP_IDX as usize, pd_ntfn_cap_clone));
         }
+        caps_to_bind_to_tcb.push((TCB_SLOT_BOUND_NOTIFICATION as usize, pd_ntfn_cap));
 
         // Step 3-9 Create Reply obj + cap and insert into CSpace
         let pd_reply_obj_id = capdl_util_make_reply_obj(&mut spec, &pd.name);
