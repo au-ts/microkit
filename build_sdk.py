@@ -330,8 +330,6 @@ SUPPORTED_BOARDS = (
             "KernelVTX": False,
             "KernelX86MicroArch": "nehalem",
             "KernelSupportPCID": False,
-            "KernelFSGSBaseInst": False,
-            "KernelFPU": "FXSAVE",
         },
     ),
     BoardInfo(
@@ -346,8 +344,6 @@ SUPPORTED_BOARDS = (
             "KernelVTX": False,
             "KernelX86MicroArch": "generic",
             "KernelSupportPCID": False,
-            "KernelFSGSBaseInst": False,
-            "KernelFPU": "FXSAVE",
         },
     ),
     BoardInfo(
@@ -362,8 +358,6 @@ SUPPORTED_BOARDS = (
             "KernelVTX": False,
             "KernelX86MicroArch": "skylake",
             "KernelSupportPCID": False,
-            "KernelFSGSBaseInst": False,
-            "KernelFPU": "FXSAVE",
         },
     ),
     BoardInfo(
@@ -378,8 +372,6 @@ SUPPORTED_BOARDS = (
             "KernelVTX": False,
             "KernelX86MicroArch": "haswell",
             "KernelSupportPCID": False,
-            "KernelFSGSBaseInst": False,
-            "KernelFPU": "FXSAVE",
         },
     ),
 )
