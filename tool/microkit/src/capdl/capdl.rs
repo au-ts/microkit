@@ -19,7 +19,7 @@ use crate::{
     capdl::{
         memory::{self, ArchMethods, X86_64},
         spec::{
-            object::{self},
+            object::{self, TcbExtraInfo},
             AsidSlotEntry, BytesContent, CapTableEntry, Fill, FillEntry, FillEntryContent,
             FrameInit, IrqEntry, NamedObject, Object, ObjectId, TemporaryContent, UntypedCover,
         },
@@ -47,7 +47,7 @@ const TCB_SLOT_FAULT_EP: u64 = 5;
 const TCB_SLOT_SC: u64 = 6;
 // const TCB_SLOT_TEMP_FAULT_EP: u64 = 7;
 const TCB_SLOT_BOUND_NOTIFICATION: u64 = 8;
-const SLOT_VCPU: u64 = 9; // @billn revisit sel4-capdl-initialiser. seems like it doesnt support multiple vCPUs, unless im thinking about it wrong...
+const TCB_SLOT_VCPU: u64 = 9;
 
 // Where caps must be in the Monitor's CSpace
 const MON_FAULT_EP_CAP_IDX: u64 = 1;
@@ -601,9 +601,8 @@ pub fn build_capdl_spec(
 
             fault_ep_cap
         };
-        let pd_fault_ep_cap_clone = pd_fault_ep_cap.clone();
-        caps_to_insert_to_pd_cspace.push((PD_FAULT_EP_CAP_IDX as usize, pd_fault_ep_cap));
-        caps_to_bind_to_tcb.push((TCB_SLOT_FAULT_EP as usize, pd_fault_ep_cap_clone));
+        caps_to_insert_to_pd_cspace.push((PD_FAULT_EP_CAP_IDX as usize, pd_fault_ep_cap.clone()));
+        caps_to_bind_to_tcb.push((TCB_SLOT_FAULT_EP as usize, pd_fault_ep_cap.clone()));
 
         // Step 3-7 Create cap to Monitor's endpoint for passive PDs.
         if pd.passive {
@@ -620,11 +619,13 @@ pub fn build_capdl_spec(
         // Step 3-8 Create endpoint object for the PD if it have childrens/inwards PPC, else it will be a notification
         let pd_ntfn_obj_id = capdl_util_make_ntfn_obj(&mut spec, &pd.name);
         let pd_ntfn_cap = capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0);
+        let mut pd_ep_obj_id: Option<ObjectId> = None;
         pd_id_to_ntfn_id.insert(pd_global_idx, pd_ntfn_obj_id);
         if pd.needs_ep(pd_global_idx, &system.channels) {
-            let pd_ep_obj_id = capdl_util_make_endpoint_obj(&mut spec, &pd.name, false);
-            let pd_ep_cap = capdl_util_make_endpoint_cap(pd_ep_obj_id, true, true, true, 0);
-            pd_id_to_ep_id.insert(pd_global_idx, pd_ep_obj_id);
+            pd_ep_obj_id = Some(capdl_util_make_endpoint_obj(&mut spec, &pd.name, false));
+            let pd_ep_cap =
+                capdl_util_make_endpoint_cap(pd_ep_obj_id.unwrap(), true, true, true, 0);
+            pd_id_to_ep_id.insert(pd_global_idx, pd_ep_obj_id.unwrap());
             caps_to_insert_to_pd_cspace.push((PD_INPUT_CAP_IDX as usize, pd_ep_cap));
         } else {
             let pd_ntfn_cap_clone = pd_ntfn_cap.clone();
@@ -664,27 +665,92 @@ pub fn build_capdl_spec(
 
         // Step 3-12 Create VM Spec.
         if let Some(virtual_machine) = &pd.virtual_machine {
-            // A VM really just a special thread, it have its own TCB, Scheduling Context, etc...
+            // A VM really is just a collection of special threads, it have its own TCBs, Scheduling Contexts, etc...
             // The difference is that it have a vCPU to store the virtual CPU's state:
-            let mut caps_to_bind_to_vm_tcbs: Vec<CapTableEntry> = Vec::new();
 
             // Create VM's Address Space and map in all memory regions
             let vm_vspace_obj_id = X86_64::create_vspace(&mut spec, &virtual_machine.name); // @billn make arch agnostic
             let vm_vspace_cap = capdl_util_make_page_table_cap(vm_vspace_obj_id);
-            caps_to_bind_to_vm_tcbs.push((TCB_SLOT_VSPACE as usize, vm_vspace_cap.clone()));
             for map in virtual_machine.maps.iter() {
                 let page_size = mr_to_xml_obj.get(&map.mr).unwrap().page_size;
                 let frames = mr_to_frame_obj_ids.get(&map.mr).unwrap();
-                map_memory_region(&mut spec, &virtual_machine.name, map, page_size, vm_vspace_obj_id, frames);
+                map_memory_region(
+                    &mut spec,
+                    &virtual_machine.name,
+                    map,
+                    page_size,
+                    vm_vspace_obj_id,
+                    frames,
+                );
             }
 
-            for vcpu in virtual_machine.vcpus.iter() {
-                // let vm_vpu_sc_obj_id = capdl_util_make_sc_obj(&mut spec, &virtual_machine.name, PD_SCHEDCONTEXT_EXTRA_SIZE_BITS as usize, virtual_machine.period, virtual_machine.budget, badge)
+            for (vcpu_idx, vcpu) in virtual_machine.vcpus.iter().enumerate() {
+                // All vCPUs get to access the same address space.
+                let mut caps_to_bind_to_vm_tcbs: Vec<CapTableEntry> = Vec::new();
+                caps_to_bind_to_vm_tcbs.push((TCB_SLOT_VSPACE as usize, vm_vspace_cap.clone()));
 
-                let vm_vcpu_obj_id = capdl_util_make_vcpu_obj(&mut spec, &pd.name, vcpu.id);
+                // Create fault endpoint cap to the parent PD.
+                let vm_vcpu_fault_ep_cap = capdl_util_make_endpoint_cap(
+                    pd_ep_obj_id.unwrap(),
+                    true,
+                    true,
+                    true,
+                    FAULT_BADGE | vcpu.id,
+                );
+                caps_to_bind_to_vm_tcbs.push((TCB_SLOT_FAULT_EP as usize, vm_vcpu_fault_ep_cap));
+
+                // Create scheduling context
+                let vm_vcpu_sc_obj_id = capdl_util_make_sc_obj(
+                    &mut spec,
+                    &virtual_machine.name,
+                    PD_SCHEDCONTEXT_EXTRA_SIZE_BITS as usize,
+                    virtual_machine.period,
+                    virtual_machine.budget,
+                    0x100 + vcpu_idx as u64,
+                );
+                caps_to_bind_to_vm_tcbs.push((
+                    TCB_SLOT_SC as usize,
+                    capdl_util_make_sc_cap(vm_vcpu_sc_obj_id),
+                ));
+
+                // Create vCPU object
+                let vm_vcpu_obj_id = capdl_util_make_vcpu_obj(
+                    &mut spec,
+                    &format!("{}_{}", virtual_machine.name, vcpu.id),
+                );
+                caps_to_bind_to_vm_tcbs.push((
+                    TCB_SLOT_VCPU as usize,
+                    capdl_util_make_vcpu_cap(vm_vcpu_obj_id),
+                ));
+
+                // Finally create TCB, unlike PDs, VMs are suspended by default until resume'd by their parent.
+                let vm_vcpu_tcb_inner_obj = object::Tcb {
+                    slots: caps_to_bind_to_vm_tcbs,
+                    extra: TcbExtraInfo {
+                        ipc_buffer_addr: 0,
+                        affinity: 0, // @billn revisit for SMP
+                        prio: virtual_machine.priority,
+                        max_prio: virtual_machine.priority,
+                        resume: false,
+                        ip: 0,
+                        sp: 0,
+                        gprs: [].to_vec(),
+                        master_fault_ep: None, // Not used on MCS kernel.
+                    },
+                };
+                let vm_vcpu_tcb_obj_id = spec.add_root_object(NamedObject {
+                    name: format!("tcb_{}", virtual_machine.name),
+                    object: Object::Tcb(vm_vcpu_tcb_inner_obj),
+                });
+
+                // Allow parent PD to access this vCPU object and associated TCB
                 caps_to_insert_to_pd_cspace.push((
                     (PD_BASE_VCPU_CAP + vcpu.id) as usize,
                     capdl_util_make_vcpu_cap(vm_vcpu_obj_id),
+                ));
+                caps_to_insert_to_pd_cspace.push((
+                    (PD_BASE_VM_TCB_CAP + vcpu.id) as usize,
+                    capdl_util_make_tcb_cap(vm_vcpu_tcb_obj_id),
                 ));
             }
         }
@@ -704,7 +770,7 @@ pub fn build_capdl_spec(
         // Step 3-14 Set the TCB parameters and all the various caps that we need to bind to this TCB.
         if let Object::Tcb(pc_tcb) = &mut spec.get_root_object_mut(pd_tcb_obj_id).unwrap().object {
             pc_tcb.extra.sp = kernel_config.pd_stack_top();
-            pc_tcb.extra.master_fault_ep = Some(PD_FAULT_EP_CAP_IDX);
+            pc_tcb.extra.master_fault_ep = None; // Not used on MCS kernel.
             pc_tcb.extra.prio = pd.priority;
             pc_tcb.extra.max_prio = pd.priority;
             pc_tcb.extra.resume = true;

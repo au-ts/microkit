@@ -332,12 +332,11 @@ pub fn capdl_util_bind_irq_to_ntfn(spec: &mut CapDLSpec, irq_obj_id: ObjectId, n
 
 pub fn capdl_util_make_vcpu_obj(
     spec: &mut CapDLSpec,
-    parent_pd_name: &str,
-    id: u64
+    name: &String
 ) -> ObjectId {
     let vcpu_inner_obj = Object::VCpu;
     let vcpu_obj = NamedObject {
-        name: format!("vcpu_#{}_of_{}", id, parent_pd_name).to_string(),
+        name: format!("vcpu_{}", name).to_string(),
         object: vcpu_inner_obj,
     };
     spec.add_root_object(vcpu_obj)
