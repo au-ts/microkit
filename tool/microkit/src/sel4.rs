@@ -189,6 +189,7 @@ impl ObjectType {
             ObjectType::SmallPage => Some(12),
             ObjectType::Vcpu => match config.arch {
                 Arch::Aarch64 => Some(12),
+                Arch::X86_64 => Some(14),
                 _ => panic!("Unexpected architecture asking for vCPU size bits"),
             },
             ObjectType::AsidPool => Some(12),

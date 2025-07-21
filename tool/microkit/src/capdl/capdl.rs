@@ -26,7 +26,7 @@ use crate::{
         util::*,
     },
     elf::ElfFile,
-    sdf::{self, SysMapPerms, SysMemoryRegion, SystemDescription},
+    sdf::{self, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription},
     sel4::{Config, PageSize},
     util::{monitor_serialise_names, monitor_serialise_u64_vec, round_down},
     MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH, VM_MAX_NAME_LENGTH,
@@ -319,6 +319,31 @@ impl CapDLSpec {
     }
 }
 
+/// Given a SysMap, page size, VSpace object ID, and a Vec of frame object ids,
+/// map all frames into the given VSpace at the requested vaddr.
+fn map_memory_region(
+    spec: &mut CapDLSpec,
+    pd_name: &String,
+    map: &SysMap,
+    page_sz: PageSize,
+    target_vspace: ObjectId,
+    frames: &Vec<ObjectId>,
+) {
+    let mut cur_vaddr = map.vaddr;
+    let read = map.perms & SysMapPerms::Read as u8 != 0;
+    let write = map.perms & SysMapPerms::Write as u8 != 0;
+    let execute = map.perms & SysMapPerms::Execute as u8 != 0;
+    let cached = map.cached;
+    for frame_obj_id in frames.iter() {
+        // Make a cap for this frame.
+        let frame_cap = capdl_util_make_frame_cap(*frame_obj_id, read, write, execute, cached);
+        // Map it into this PD address space. @billn make arch agnositc
+        memory::X86_64::map_page(spec, pd_name, target_vspace, frame_cap, page_sz, cur_vaddr)
+            .unwrap();
+        cur_vaddr += page_sz as u64;
+    }
+}
+
 /// Build a CapDL Spec according to the System Description File.
 pub fn build_capdl_spec(
     kernel_config: &Config,
@@ -439,7 +464,7 @@ pub fn build_capdl_spec(
         let elf_obj = pd_elf_files[pd_global_idx].clone();
 
         let mut caps_to_bind_to_tcb: Vec<CapTableEntry> = Vec::new();
-        let mut caps_to_insert_to_cspace: Vec<CapTableEntry> = Vec::new();
+        let mut caps_to_insert_to_pd_cspace: Vec<CapTableEntry> = Vec::new();
 
         // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
         let pd_tcb_obj_id = spec
@@ -450,14 +475,14 @@ pub fn build_capdl_spec(
         // In the benchmark configuration, we allow PDs to access their own TCB.
         // This is necessary for accessing kernel's benchmark API.
         if kernel_config.benchmark {
-            caps_to_insert_to_cspace.push((
+            caps_to_insert_to_pd_cspace.push((
                 PD_TCB_CAP_IDX as usize,
                 capdl_util_make_tcb_cap(pd_tcb_obj_id),
             ));
         }
 
         // Allow PD to access their own VSpace for ops such as cache cleaning on ARM.
-        caps_to_insert_to_cspace.push((
+        caps_to_insert_to_pd_cspace.push((
             PD_VSPACE_CAP_IDX as usize,
             capdl_util_make_page_table_cap(pd_vspace_obj_id),
         ));
@@ -465,28 +490,16 @@ pub fn build_capdl_spec(
         // Step 3-2: Map in all Memory Regions, keep tabs on what MR is mapped where so we can setvar later
         let mut mr_to_vaddr: HashMap<&String, u64> = HashMap::new();
         for map in pd.maps.iter() {
-            let mut cur_vaddr = map.vaddr;
             let page_size = mr_to_xml_obj.get(&map.mr).unwrap().page_size;
-            let read = map.perms & SysMapPerms::Read as u8 != 0;
-            let write = map.perms & SysMapPerms::Write as u8 != 0;
-            let execute = map.perms & SysMapPerms::Execute as u8 != 0;
-            let cached = map.cached;
-            for frame_obj_id in mr_to_frame_obj_ids.get(&map.mr).unwrap() {
-                // Make a cap for this frame.
-                let frame_cap =
-                    capdl_util_make_frame_cap(*frame_obj_id, read, write, execute, cached);
-                // Map it into this PD address space. @billn make arch agnositc
-                memory::X86_64::map_page(
-                    &mut spec,
-                    &pd.name,
-                    pd_vspace_obj_id,
-                    frame_cap,
-                    page_size,
-                    cur_vaddr,
-                )
-                .unwrap();
-                cur_vaddr += page_size as u64;
-            }
+            let frames = mr_to_frame_obj_ids.get(&map.mr).unwrap();
+            map_memory_region(
+                &mut spec,
+                &pd.name,
+                map,
+                page_size,
+                pd_vspace_obj_id,
+                frames,
+            );
             mr_to_vaddr.insert(&map.mr, map.vaddr);
         }
 
@@ -589,7 +602,7 @@ pub fn build_capdl_spec(
             fault_ep_cap
         };
         let pd_fault_ep_cap_clone = pd_fault_ep_cap.clone();
-        caps_to_insert_to_cspace.push((PD_FAULT_EP_CAP_IDX as usize, pd_fault_ep_cap));
+        caps_to_insert_to_pd_cspace.push((PD_FAULT_EP_CAP_IDX as usize, pd_fault_ep_cap));
         caps_to_bind_to_tcb.push((TCB_SLOT_FAULT_EP as usize, pd_fault_ep_cap_clone));
 
         // Step 3-7 Create cap to Monitor's endpoint for passive PDs.
@@ -601,7 +614,7 @@ pub fn build_capdl_spec(
                 true,
                 pd_global_idx as u64 + 1,
             );
-            caps_to_insert_to_cspace.push((PD_MONITOR_EP_CAP_IDX as usize, pd_monitor_ep_cap));
+            caps_to_insert_to_pd_cspace.push((PD_MONITOR_EP_CAP_IDX as usize, pd_monitor_ep_cap));
         }
 
         // Step 3-8 Create endpoint object for the PD if it have childrens/inwards PPC, else it will be a notification
@@ -612,17 +625,17 @@ pub fn build_capdl_spec(
             let pd_ep_obj_id = capdl_util_make_endpoint_obj(&mut spec, &pd.name, false);
             let pd_ep_cap = capdl_util_make_endpoint_cap(pd_ep_obj_id, true, true, true, 0);
             pd_id_to_ep_id.insert(pd_global_idx, pd_ep_obj_id);
-            caps_to_insert_to_cspace.push((PD_INPUT_CAP_IDX as usize, pd_ep_cap));
+            caps_to_insert_to_pd_cspace.push((PD_INPUT_CAP_IDX as usize, pd_ep_cap));
         } else {
             let pd_ntfn_cap_clone = pd_ntfn_cap.clone();
-            caps_to_insert_to_cspace.push((PD_INPUT_CAP_IDX as usize, pd_ntfn_cap_clone));
+            caps_to_insert_to_pd_cspace.push((PD_INPUT_CAP_IDX as usize, pd_ntfn_cap_clone));
         }
         caps_to_bind_to_tcb.push((TCB_SLOT_BOUND_NOTIFICATION as usize, pd_ntfn_cap));
 
         // Step 3-9 Create Reply obj + cap and insert into CSpace
         let pd_reply_obj_id = capdl_util_make_reply_obj(&mut spec, &pd.name);
         let pd_reply_cap = capdl_util_make_reply_cap(pd_reply_obj_id);
-        caps_to_insert_to_cspace.push((PD_REPLY_CAP_IDX as usize, pd_reply_cap));
+        caps_to_insert_to_pd_cspace.push((PD_REPLY_CAP_IDX as usize, pd_reply_cap));
 
         // Step 3-10 Create spec and caps to IRQs
         for irq in pd.irqs.iter() {
@@ -633,7 +646,7 @@ pub fn build_capdl_spec(
             // Create a IRQ handler cap and insert into the requested CSpace's slot.
             let irq_handle_cap = capdl_util_make_irq_handler_cap(irq_obj_id, &irq.kind);
             let irq_cap_idx = PD_BASE_IRQ_CAP + irq.id;
-            caps_to_insert_to_cspace.push((irq_cap_idx as usize, irq_handle_cap));
+            caps_to_insert_to_pd_cspace.push((irq_cap_idx as usize, irq_handle_cap));
 
             // Now bind the IRQ into the PD's notification object with the correct badge.
             let pd_irq_ntfn_cap = capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 1 << irq.id);
@@ -645,22 +658,50 @@ pub fn build_capdl_spec(
             let ioport_obj_id =
                 capdl_util_make_ioport_obj(&mut spec, &pd.name, ioport.addr, ioport.size);
             let ioport_cap = capdl_util_make_ioport_cap(ioport_obj_id);
-            caps_to_insert_to_cspace.push(((PD_BASE_IOPORT_CAP + ioport.id) as usize, ioport_cap));
+            caps_to_insert_to_pd_cspace
+                .push(((PD_BASE_IOPORT_CAP + ioport.id) as usize, ioport_cap));
         }
 
-        // Step 3-12 Create CSpace and add all caps that the PD code and libmicrokit need to access.
+        // Step 3-12 Create VM Spec.
+        if let Some(virtual_machine) = &pd.virtual_machine {
+            // A VM really just a special thread, it have its own TCB, Scheduling Context, etc...
+            // The difference is that it have a vCPU to store the virtual CPU's state:
+            let mut caps_to_bind_to_vm_tcbs: Vec<CapTableEntry> = Vec::new();
+
+            // Create VM's Address Space and map in all memory regions
+            let vm_vspace_obj_id = X86_64::create_vspace(&mut spec, &virtual_machine.name); // @billn make arch agnostic
+            let vm_vspace_cap = capdl_util_make_page_table_cap(vm_vspace_obj_id);
+            caps_to_bind_to_vm_tcbs.push((TCB_SLOT_VSPACE as usize, vm_vspace_cap.clone()));
+            for map in virtual_machine.maps.iter() {
+                let page_size = mr_to_xml_obj.get(&map.mr).unwrap().page_size;
+                let frames = mr_to_frame_obj_ids.get(&map.mr).unwrap();
+                map_memory_region(&mut spec, &virtual_machine.name, map, page_size, vm_vspace_obj_id, frames);
+            }
+
+            for vcpu in virtual_machine.vcpus.iter() {
+                // let vm_vpu_sc_obj_id = capdl_util_make_sc_obj(&mut spec, &virtual_machine.name, PD_SCHEDCONTEXT_EXTRA_SIZE_BITS as usize, virtual_machine.period, virtual_machine.budget, badge)
+
+                let vm_vcpu_obj_id = capdl_util_make_vcpu_obj(&mut spec, &pd.name, vcpu.id);
+                caps_to_insert_to_pd_cspace.push((
+                    (PD_BASE_VCPU_CAP + vcpu.id) as usize,
+                    capdl_util_make_vcpu_cap(vm_vcpu_obj_id),
+                ));
+            }
+        }
+
+        // Step 3-13 Create CSpace and add all caps that the PD code and libmicrokit need to access.
         let pd_cnode_obj_id = capdl_util_make_cnode_obj(
             &mut spec,
             &pd.name,
             PD_CAP_BITS as usize,
-            caps_to_insert_to_cspace,
+            caps_to_insert_to_pd_cspace,
         );
         let pd_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS;
         let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, pd_guard_size);
         caps_to_bind_to_tcb.push((TCB_SLOT_CSPACE as usize, pd_cnode_cap));
         pd_id_to_cspace_id.insert(pd_global_idx, pd_cnode_obj_id);
 
-        // Step 3-13 Set the TCB parameters and all the various caps that we need to bind to this TCB.
+        // Step 3-14 Set the TCB parameters and all the various caps that we need to bind to this TCB.
         if let Object::Tcb(pc_tcb) = &mut spec.get_root_object_mut(pd_tcb_obj_id).unwrap().object {
             pc_tcb.extra.sp = kernel_config.pd_stack_top();
             pc_tcb.extra.master_fault_ep = Some(PD_FAULT_EP_CAP_IDX);
@@ -673,7 +714,7 @@ pub fn build_capdl_spec(
             unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
         }
 
-        // Step 3-14 write libmicrokit symbols.
+        // Step 3-15 write libmicrokit symbols.
         let name = pd.name.as_bytes();
         let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
         elf_obj
@@ -718,7 +759,7 @@ pub fn build_capdl_spec(
             .borrow_mut()
             .write_symbol("microkit_ioports", &pd.ioport_bits().to_le_bytes())?;
 
-        // Step 3-15 bind this PD's TCB to the monitor so that its registers can be read on fault.
+        // Step 3-16 bind this PD's TCB to the monitor so that its registers can be read on fault.
         capdl_util_insert_cap_into_cspace(
             &mut spec,
             mon_cnode_obj_id,
