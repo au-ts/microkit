@@ -17,13 +17,11 @@ use serde::Serialize;
 
 use crate::{
     capdl::{
-        memory::{self, ArchMethods, X86_64},
-        spec::{
+        memory::{create_vspace, map_page}, spec::{
             object::{self, TcbExtraInfo},
             AsidSlotEntry, BytesContent, CapTableEntry, Fill, FillEntry, FillEntryContent,
             FrameInit, IrqEntry, NamedObject, Object, ObjectId, TemporaryContent, UntypedCover,
-        },
-        util::*,
+        }, util::*
     },
     elf::ElfFile,
     sdf::{self, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription},
@@ -147,7 +145,7 @@ impl CapDLSpec {
         elf: Rc<RefCell<ElfFile>>,
     ) -> Result<ObjectId, String> {
         // We assumes that ELFs and PDs have a one-to-one relationship. So for each ELF we create a VSpace.
-        let vspace_obj_id = X86_64::create_vspace(self, pd_name); // @billn make arch agnostic
+        let vspace_obj_id = create_vspace(self, sel4_config, pd_name);
         let vspace_cap = capdl_util_make_page_table_cap(vspace_obj_id);
 
         // For each loadable segment in the ELF, map it into the address space of this PD.
@@ -224,9 +222,9 @@ impl CapDLSpec {
                     true,
                 );
 
-                // @billn make arch agnostic
-                match memory::X86_64::map_page(
+                match map_page(
                     self,
+                    sel4_config,
                     pd_name,
                     vspace_obj_id,
                     frame_cap,
@@ -268,8 +266,9 @@ impl CapDLSpec {
             .find_symbol(SYMBOL_IPC_BUFFER)
             .unwrap_or_else(|_| panic!("Could not find {}", SYMBOL_IPC_BUFFER))
             .0;
-        match memory::X86_64::map_page(
+        match map_page(
             self,
+            sel4_config,
             pd_name,
             vspace_obj_id,
             ipcbuf_frame_cap,
@@ -323,6 +322,7 @@ impl CapDLSpec {
 /// map all frames into the given VSpace at the requested vaddr.
 fn map_memory_region(
     spec: &mut CapDLSpec,
+    sel4_config: &Config,
     pd_name: &String,
     map: &SysMap,
     page_sz: PageSize,
@@ -338,7 +338,7 @@ fn map_memory_region(
         // Make a cap for this frame.
         let frame_cap = capdl_util_make_frame_cap(*frame_obj_id, read, write, execute, cached);
         // Map it into this PD address space. @billn make arch agnositc
-        memory::X86_64::map_page(spec, pd_name, target_vspace, frame_cap, page_sz, cur_vaddr)
+        map_page(spec, sel4_config, pd_name, target_vspace, frame_cap, page_sz, cur_vaddr)
             .unwrap();
         cur_vaddr += page_sz as u64;
     }
@@ -494,6 +494,7 @@ pub fn build_capdl_spec(
             let frames = mr_to_frame_obj_ids.get(&map.mr).unwrap();
             map_memory_region(
                 &mut spec,
+                kernel_config,
                 &pd.name,
                 map,
                 page_size,
@@ -552,9 +553,9 @@ pub fn build_capdl_spec(
             );
             let stack_frame_cap =
                 capdl_util_make_frame_cap(stack_frame_obj_id, true, true, false, true);
-            // @billn make arch agnostic
-            memory::X86_64::map_page(
+            map_page(
                 &mut spec,
+                kernel_config,
                 &pd.name,
                 pd_vspace_obj_id,
                 stack_frame_cap,
@@ -669,13 +670,14 @@ pub fn build_capdl_spec(
             // The difference is that it have a vCPU to store the virtual CPU's state:
 
             // Create VM's Address Space and map in all memory regions
-            let vm_vspace_obj_id = X86_64::create_vspace(&mut spec, &virtual_machine.name); // @billn make arch agnostic
+            let vm_vspace_obj_id = create_vspace(&mut spec, kernel_config, &virtual_machine.name);
             let vm_vspace_cap = capdl_util_make_page_table_cap(vm_vspace_obj_id);
             for map in virtual_machine.maps.iter() {
                 let page_size = mr_to_xml_obj.get(&map.mr).unwrap().page_size;
                 let frames = mr_to_frame_obj_ids.get(&map.mr).unwrap();
                 map_memory_region(
                     &mut spec,
+                    kernel_config,
                     &virtual_machine.name,
                     map,
                     page_size,
