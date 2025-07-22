@@ -386,7 +386,10 @@ SUPPORTED_CONFIGS = (
             "KernelArmExportPMUUser": True,
             "KernelDebugBuild": False,
             "KernelVerificationBuild": False,
-            "KernelBenchmarks": "track_utilisation"
+            "KernelBenchmarks": "track_utilisation",
+            "KernelExportPMCUser": True,
+            "KernelX86DangerousMSR": True,
+            "KernelSignalFastpath": True,
         },
     ),
 )
