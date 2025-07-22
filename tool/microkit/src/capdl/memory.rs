@@ -11,6 +11,27 @@ use crate::{
     sel4::{Config, PageSize},
 };
 
+/// For naming and debugging purposes only, no functional purpose.
+fn get_pt_level_name(sel4_config: &Config, level: u64) -> &str {
+    match sel4_config.arch {
+        crate::sel4::Arch::Aarch64 => match level {
+            0 => "pgd",
+            1 => "pud",
+            2 => "pd",
+            3 => "pt",
+            _ => unreachable!("unknown page table level {} for aarch64", level),
+        },
+        crate::sel4::Arch::Riscv64 => todo!(),
+        crate::sel4::Arch::X86_64 => match level {
+            0 => "pml4",
+            1 => "pdpt",
+            2 => "pd",
+            3 => "pt",
+            _ => unreachable!("unknown page table level {} for x86_64", level),
+        },
+    }
+}
+
 fn insert_cap_into_page_table_level(
     spec: &mut CapDLSpec,
     cur_level_obj_id: ObjectId,
@@ -102,7 +123,7 @@ fn map_intermediary_level_helper(
 
 pub fn create_vspace(spec: &mut CapDLSpec, sel4_config: &Config, pd_name: &str) -> ObjectId {
     spec.add_root_object(NamedObject {
-        name: format!("pml4_{}", pd_name),
+        name: format!("{}_{}", get_pt_level_name(sel4_config, 0), pd_name),
         object: Object::PageTable(object::PageTable {
             is_root: true,
             level: Some(0),
@@ -127,37 +148,37 @@ pub fn map_page(
             let frame_obj_id = frame_cap.obj();
 
             // Get slot indexes for the 4 levels of the page table
-            let pml4_slot = (vaddr >> (12 + 9 + 9 + 9)) & ((1 << 9) - 1);
-            let pdpt_slot = (vaddr >> (12 + 9 + 9)) & ((1 << 9) - 1);
-            let pd_slot = (vaddr >> (12 + 9)) & ((1 << 9) - 1);
-            let pt_slot = (vaddr >> (12)) & ((1 << 9) - 1);
+            let lv0_slot = (vaddr >> (12 + 9 + 9 + 9)) & ((1 << 9) - 1);
+            let lv1_slot = (vaddr >> (12 + 9 + 9)) & ((1 << 9) - 1);
+            let lv2_slot = (vaddr >> (12 + 9)) & ((1 << 9) - 1);
+            let lv3_slot = (vaddr >> (12)) & ((1 << 9) - 1);
 
             match map_intermediary_level_helper(
                 spec,
                 pd_name,
-                "pdpt",
+                get_pt_level_name(sel4_config, 1),
                 vspace_obj_id,
                 0,
-                pml4_slot,
+                lv0_slot,
             ) {
                 Ok(pdpt_obj_id) => {
                     match map_intermediary_level_helper(
                         spec,
                         pd_name,
-                        "pd",
+                        get_pt_level_name(sel4_config, 2),
                         pdpt_obj_id,
                         1,
-                        pdpt_slot,
+                        lv1_slot,
                     ) {
                         Ok(pd_obj_id) => {
                             match frame_size {
                                 PageSize::Small => {
                                     match map_intermediary_level_helper(
-                                        spec, pd_name, "pt", pd_obj_id, 2, pd_slot,
+                                        spec, pd_name, get_pt_level_name(sel4_config, 3), pd_obj_id, 2, lv2_slot,
                                     ) {
                                         Ok(pt_obj_id) => {
                                             match insert_cap_into_page_table_level(
-                                                spec, pt_obj_id, 3, pt_slot, frame_cap,
+                                                spec, pt_obj_id, 3, lv3_slot, frame_cap,
                                             ) {
                                                 Ok(_) => Ok(()),
                                                 Err(lvl3_small_err_reason) => Err(format!("map_page() failed to map small frame {} at vaddr 0x{:x} on page table level 3 to pd {} because: {}", frame_obj_id, vaddr, pd_name, lvl3_small_err_reason)),
@@ -168,7 +189,7 @@ pub fn map_page(
                                 },
                                 PageSize::Large => {
                                     match insert_cap_into_page_table_level(
-                                        spec, pd_obj_id, 2, pd_slot, frame_cap,
+                                        spec, pd_obj_id, 2, lv2_slot, frame_cap,
                                     ) {
                                         Ok(_) => Ok(()),
                                         Err(lvl2_large_err_reason) => Err(format!("map_page() failed to map large frame {} at vaddr 0x{:x} on page table level 2 to pd {} because: {}", frame_obj_id, vaddr, pd_name, lvl2_large_err_reason)),
@@ -182,9 +203,11 @@ pub fn map_page(
                 Err(lvl0_err_reason) => Err(format!("map_page() failed to map frame {} at vaddr 0x{:x} on page table level 0 to pd {} because: {}", frame_obj_id, vaddr, pd_name, lvl0_err_reason)),
             }
         }
-        _ => Err(format!(
+        _ => {
+            Err(format!(
             "map_page() received a non-Frame object: {:?}, for mapping at vaddr 0x{:x}, to pd {}",
             frame_cap.obj(), vaddr, pd_name
-        )),
+        ))
+        }
     }
 }

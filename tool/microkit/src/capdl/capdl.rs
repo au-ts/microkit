@@ -17,11 +17,13 @@ use serde::Serialize;
 
 use crate::{
     capdl::{
-        memory::{create_vspace, map_page}, spec::{
+        memory::{create_vspace, map_page},
+        spec::{
             object::{self, TcbExtraInfo},
             AsidSlotEntry, BytesContent, CapTableEntry, Fill, FillEntry, FillEntryContent,
             FrameInit, IrqEntry, NamedObject, Object, ObjectId, TemporaryContent, UntypedCover,
-        }, util::*
+        },
+        util::*,
     },
     elf::ElfFile,
     sdf::{self, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription},
@@ -338,8 +340,16 @@ fn map_memory_region(
         // Make a cap for this frame.
         let frame_cap = capdl_util_make_frame_cap(*frame_obj_id, read, write, execute, cached);
         // Map it into this PD address space. @billn make arch agnositc
-        map_page(spec, sel4_config, pd_name, target_vspace, frame_cap, page_sz, cur_vaddr)
-            .unwrap();
+        map_page(
+            spec,
+            sel4_config,
+            pd_name,
+            target_vspace,
+            frame_cap,
+            page_sz,
+            cur_vaddr,
+        )
+        .unwrap();
         cur_vaddr += page_sz as u64;
     }
 }
@@ -642,7 +652,7 @@ pub fn build_capdl_spec(
         // Step 3-10 Create spec and caps to IRQs
         for irq in pd.irqs.iter() {
             // Create IRQ object and add it to the special `irqs` vec in the spec.
-            let irq_obj_id = capdl_util_make_irq_obj(&mut spec, &pd.name, irq, None);
+            let irq_obj_id = capdl_util_make_irq_obj(&mut spec, &pd.name, irq, Some(0)); // @billn revisit for smp
             spec.add_irq(irq.irq_num(), irq_obj_id);
 
             // Create a IRQ handler cap and insert into the requested CSpace's slot.
