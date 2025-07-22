@@ -72,7 +72,7 @@ pub fn mask(n: u64) -> u64 {
 /// 'strict' means that it must be simply represented.
 ///  Specifically, it must be a multiple of standard power-of-two.
 ///  (e.g. KiB, MiB, GiB, TiB, PiB, EiB)
-pub fn human_size_strict(size: u64) -> (String, &'static str) {
+pub fn human_size_strict(size: u64) -> String {
     for (bits, label) in [
         (60, "EiB"),
         (50, "PiB"),
@@ -89,12 +89,12 @@ pub fn human_size_strict(size: u64) -> (String, &'static str) {
                 let (d_count, extra) = divmod(size, base);
                 count = d_count;
                 if extra != 0 {
-                    return (format!("{:.2}", size as f64 / base as f64), label);
+                    return format!("{:.2} {}", size as f64 / base as f64, label);
                 }
             } else {
                 count = size;
             }
-            return (comma_sep_u64(count), label);
+            return format!("{} {}", comma_sep_u64(count), label);
         }
     }
 
