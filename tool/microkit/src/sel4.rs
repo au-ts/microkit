@@ -3,6 +3,90 @@
 //
 // SPDX-License-Identifier: BSD-2-Clause
 //
+use serde::Deserialize;
+
+use crate::{elf::ElfFile, DisjointMemoryRegion, MemoryRegion};
+
+pub struct KernelPartialBootInfo {
+    device_memory: DisjointMemoryRegion,
+    normal_memory: DisjointMemoryRegion,
+    boot_region: MemoryRegion,
+}
+
+fn kernel_self_mem(kernel_elf: &ElfFile) -> MemoryRegion {
+    let segments = kernel_elf.loadable_segments();
+    let base = segments[0].phys_addr;
+    let (ki_end_v, _) = kernel_elf
+        .find_symbol("ki_end")
+        .expect("Could not find 'ki_end' symbol");
+    let ki_end_p = ki_end_v - segments[0].virt_addr + base;
+
+    MemoryRegion::new(base, ki_end_p)
+}
+
+fn kernel_boot_mem(kernel_elf: &ElfFile) -> MemoryRegion {
+    let segments = kernel_elf.loadable_segments();
+    let base = segments[0].phys_addr;
+    let (ki_boot_end_v, _) = kernel_elf
+        .find_symbol("ki_boot_end")
+        .expect("Could not find 'ki_boot_end' symbol");
+    let ki_boot_end_p = ki_boot_end_v - segments[0].virt_addr + base;
+
+    MemoryRegion::new(base, ki_boot_end_p)
+}
+
+///
+/// Emulate what happens during a kernel boot, up to the point
+/// where the reserved region is allocated to determine the memory ranges
+/// available. Only valid for ARM and RISC-V platforms.
+///
+fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile) -> KernelPartialBootInfo {
+    // Determine the untyped caps of the system
+    // This lets allocations happen correctly.
+    let mut device_memory = DisjointMemoryRegion::default();
+    let mut normal_memory = DisjointMemoryRegion::default();
+
+    for r in kernel_config.device_regions.as_ref().unwrap().iter() {
+        device_memory.insert_region(r.start, r.end);
+    }
+    for r in kernel_config.normal_regions.as_ref().unwrap().iter() {
+        normal_memory.insert_region(r.start, r.end);
+    }
+
+    // Remove the kernel image itself
+    let self_mem = kernel_self_mem(kernel_elf);
+    normal_memory.remove_region(self_mem.base, self_mem.end);
+
+    // but get the boot region, we'll add that back later
+    // @ivanv: Why calculate it now if we add it back later?
+    let boot_region = kernel_boot_mem(kernel_elf);
+
+    KernelPartialBootInfo {
+        device_memory,
+        normal_memory,
+        boot_region,
+    }
+}
+
+pub fn emulate_kernel_boot_partial(
+    kernel_config: &Config,
+    kernel_elf: &ElfFile,
+) -> (DisjointMemoryRegion, MemoryRegion) {
+    let partial_info = kernel_partial_boot(kernel_config, kernel_elf);
+    (partial_info.normal_memory, partial_info.boot_region)
+}
+
+#[derive(Deserialize)]
+pub struct PlatformConfigRegion {
+    pub start: u64,
+    pub end: u64,
+}
+
+#[derive(Deserialize)]
+pub struct PlatformConfig {
+    pub devices: Vec<PlatformConfigRegion>,
+    pub memory: Vec<PlatformConfigRegion>,
+}
 
 pub struct Config {
     pub arch: Arch,
@@ -27,6 +111,9 @@ pub struct Config {
     /// x86 specific, user context size
     pub x86_xsave_size: Option<usize>,
     pub invocations_labels: serde_json::Value,
+    /// The two remaining fields are only valid on ARM and RISC-V
+    pub device_regions: Option<Vec<PlatformConfigRegion>>,
+    pub normal_regions: Option<Vec<PlatformConfigRegion>>,
 }
 
 impl Config {

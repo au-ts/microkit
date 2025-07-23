@@ -28,10 +28,8 @@ const DEFAULT_KERNEL_CONFIG: sel4::Config = sel4::Config {
     x86_xsave_size: None,
     // Not necessary for SDF parsing
     invocations_labels: json!(null),
-    // platform_config: Some(PlatformConfig {
-    //     devices: vec![],
-    //     memory: vec![],
-    // }),
+    device_regions: None,
+    normal_regions: None,
 };
 
 fn check_error(test_name: &str, expected_err: &str) {

@@ -8,23 +8,19 @@
 #![allow(clippy::assertions_on_constants)]
 
 use microkit_tool::capdl::spec::BytesContent;
-use microkit_tool::elf::ElfFile;
-// use loader::Loader;
 use microkit_tool::capdl::{build_capdl_spec, render_elf, reserialize_spec};
-use microkit_tool::sdf::{
-    parse,
-};
+use microkit_tool::elf::ElfFile;
+use microkit_tool::loader::Loader;
+use microkit_tool::sdf::parse;
 use microkit_tool::sel4::{
-    Arch, Config, PageSize, RiscvVirtualMemory
+    emulate_kernel_boot_partial, Arch, Config, PageSize, PlatformConfig, RiscvVirtualMemory,
 };
+use microkit_tool::util::{human_size_strict, json_str, json_str_as_bool, json_str_as_u64};
 use sel4_capdl_initializer_types::{ObjectNamesLevel, Spec};
 use std::cell::RefCell;
 use std::fs::{self};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use microkit_tool::util::{
-    json_str, json_str_as_bool, json_str_as_u64,
-};
 
 fn get_full_path(path: &Path, search_paths: &Vec<PathBuf>) -> Option<PathBuf> {
     for search_path in search_paths {
@@ -273,7 +269,7 @@ fn main() -> Result<(), String> {
     let loader_elf_path = elf_path.join("loader.elf");
     let kernel_elf_path = elf_path.join("sel4.elf");
     let monitor_elf_path = elf_path.join("monitor.elf");
-    let capdl_init_elf_path = elf_path.join("capdl_initialiser.elf"); 
+    let capdl_init_elf_path = elf_path.join("capdl_initialiser.elf");
 
     let kernel_config_path = sdk_dir
         .join("board")
@@ -354,6 +350,34 @@ fn main() -> Result<(), String> {
         _ => panic!("Unsupported kernel config architecture"),
     };
 
+    let (device_regions, normal_regions) = match arch {
+        Arch::X86_64 => (None, None),
+        _ => {
+            let kernel_platform_config_path = sdk_dir
+                .join("board")
+                .join(args.board)
+                .join(args.config)
+                .join("platform_gen.json");
+
+            if !kernel_platform_config_path.exists() {
+                eprintln!(
+                    "Error: kernel platform configuration file '{}' does not exist",
+                    kernel_platform_config_path.display()
+                );
+                std::process::exit(1);
+            }
+
+            let kernel_platform_config: PlatformConfig =
+                serde_json::from_str(&fs::read_to_string(kernel_platform_config_path).unwrap())
+                    .unwrap();
+
+            (
+                Some(kernel_platform_config.devices),
+                Some(kernel_platform_config.memory),
+            )
+        }
+    };
+
     let hypervisor = match arch {
         Arch::Aarch64 => json_str_as_bool(&kernel_config_json, "ARM_HYPERVISOR_SUPPORT")?,
         // Hypervisor mode is not available on RISC-V and x86_64
@@ -362,14 +386,14 @@ fn main() -> Result<(), String> {
 
     let arm_pa_size_bits = match arch {
         Arch::Aarch64 => {
-                        if json_str_as_bool(&kernel_config_json, "ARM_PA_SIZE_BITS_40")? {
-                            Some(40)
-                        } else if json_str_as_bool(&kernel_config_json, "ARM_PA_SIZE_BITS_44")? {
-                            Some(44)
-                        } else {
-                            panic!("Expected ARM platform to have 40 or 44 physical address bits")
-                        }
+            if json_str_as_bool(&kernel_config_json, "ARM_PA_SIZE_BITS_40")? {
+                Some(40)
+            } else if json_str_as_bool(&kernel_config_json, "ARM_PA_SIZE_BITS_44")? {
+                Some(44)
+            } else {
+                panic!("Expected ARM platform to have 40 or 44 physical address bits")
             }
+        }
         _ => None,
     };
 
@@ -380,7 +404,7 @@ fn main() -> Result<(), String> {
 
     let x86_xsave_size = match arch {
         Arch::X86_64 => Some(json_str_as_u64(&kernel_config_json, "XSAVE_SIZE").unwrap() as usize),
-        _ => None
+        _ => None,
     };
 
     let kernel_frame_size = match arch {
@@ -406,6 +430,8 @@ fn main() -> Result<(), String> {
         riscv_pt_levels: Some(RiscvVirtualMemory::Sv39),
         x86_xsave_size,
         invocations_labels,
+        device_regions,
+        normal_regions,
     };
 
     if kernel_config.arch != Arch::X86_64 && !loader_elf_path.exists() {
@@ -436,7 +462,8 @@ fn main() -> Result<(), String> {
         }
     };
 
-    let monitor_elf: Rc<RefCell<ElfFile>> = Rc::new(ElfFile::from_path(&monitor_elf_path).unwrap().into());
+    let monitor_elf: Rc<RefCell<ElfFile>> =
+        Rc::new(ElfFile::from_path(&monitor_elf_path).unwrap().into());
 
     let mut search_paths = vec![std::env::current_dir().unwrap()];
     for path in args.search_paths {
@@ -468,7 +495,8 @@ fn main() -> Result<(), String> {
     fs::write(args.report, &spec_as_json).unwrap();
 
     // Reserialise the spec into a type that can be understood by rust-sel4.
-    let spec_reserialised = serde_json::from_str::<Spec<String, BytesContent, ()>>(&spec_as_json).unwrap();
+    let spec_reserialised =
+        serde_json::from_str::<Spec<String, BytesContent, ()>>(&spec_as_json).unwrap();
 
     // Frame size bits for embedding into the CapDL spec from ELFs.
     // MUST match up with the frame size when creating ELF specs.
@@ -477,10 +505,8 @@ fn main() -> Result<(), String> {
     // Now embed the built spec into the CapDL initialiser.
     // A re-implementation of dep/rust-sel4/crates/sel4-capdl-initializer/add-spec/src/main.rs
     // so we don't have to call out to it as a subprocess.
-    let serialized_spec = reserialize_spec::reserialize_spec(
-        &spec_reserialised,
-        &ObjectNamesLevel::All,
-    );
+    let serialized_spec =
+        reserialize_spec::reserialize_spec(&spec_reserialised, &ObjectNamesLevel::All);
 
     let footprint = serialized_spec.len();
     let heap_size = footprint * 2 + 16 * 4096;
@@ -491,7 +517,14 @@ fn main() -> Result<(), String> {
         heap_size,
     };
 
-    // Patch the CapDL initialiser ELF with the spec and write it out.
+    println!(
+        "BUILT: number of root objects = {}, spec footprint = {}, initialiser heap size = {}",
+        spec.objects.len(),
+        human_size_strict(footprint as u64),
+        human_size_strict(heap_size as u64)
+    );
+
+    // Patch the CapDL initialiser ELF with the spec.
     let initializer_elf_buf = fs::read(capdl_init_elf_path).unwrap();
     let rendered_initializer_elf_buf = match object::File::parse(&*initializer_elf_buf).unwrap() {
         object::File::Elf32(initializer_elf) => render_elf_args.call_with(&initializer_elf),
@@ -501,7 +534,39 @@ fn main() -> Result<(), String> {
         }
     };
 
-    fs::write(args.output, rendered_initializer_elf_buf).unwrap();
+    // For x86 we write out the initialiser ELF as is, but on ARM and RISC-V we build the loader image.
+    if kernel_config.arch == Arch::X86_64 {
+        fs::write(args.output, rendered_initializer_elf_buf).unwrap();
+    } else {
+        // Determine what are the available physical memory segments after the kernel boots by partially emulating the boot process.
+        // This is so that we can place the initial task (CapDL initialiser) after the kernel's window.
+        let kernel_elf = ElfFile::from_path(&kernel_elf_path).unwrap();
+        let (available_memory, kernel_boot_region) =
+            emulate_kernel_boot_partial(&kernel_config, &kernel_elf);
+
+        // Then create the loader image.
+        // @billn fix this stupid roundabout serialisation and deserialisation, and 2 different ELF type
+        // would involve either expanding elf.rs to support adding segment and re-rendering ELF,
+        // or use rust-sel4's Builder throughout everything (e.g. elf.rs would just be an adapter around rust-sel4's elf stuff)
+        let initial_task_elf: object::read::elf::ElfFile<
+            '_,
+            object::elf::FileHeader64<object::Endianness>,
+        > = match object::File::parse(&*rendered_initializer_elf_buf).unwrap() {
+            object::File::Elf64(initializer_elf) => initializer_elf,
+            _ => {
+                panic!()
+            }
+        };
+        let loader = Loader::new(
+            &kernel_config,
+            available_memory,
+            kernel_boot_region,
+            Path::new(&loader_elf_path),
+            &kernel_elf,
+            &initial_task_elf,
+        );
+        loader.write_image(Path::new(args.output));
+    }
 
     Ok(())
 }

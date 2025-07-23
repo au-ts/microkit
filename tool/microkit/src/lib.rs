@@ -4,6 +4,10 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
+use std::{cmp::min, fmt};
+
+use crate::sel4::Config;
+
 pub mod capdl;
 pub mod elf;
 pub mod loader;
@@ -20,3 +24,196 @@ pub const MAX_VMS: usize = 63;
 // the monitor and libmicrokit.
 pub const PD_MAX_NAME_LENGTH: usize = 64;
 pub const VM_MAX_NAME_LENGTH: usize = 64;
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct MemoryRegion {
+    /// Note: base is inclusive, end is exclusive
+    /// MemoryRegion(1, 5) would have a size of 4
+    /// and cover [1, 2, 3, 4]
+    pub base: u64,
+    pub end: u64,
+}
+
+impl fmt::Display for MemoryRegion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "MemoryRegion(base=0x{:x}, end=0x{:x})",
+            self.base, self.end
+        )
+    }
+}
+
+impl MemoryRegion {
+    pub fn new(base: u64, end: u64) -> MemoryRegion {
+        MemoryRegion { base, end }
+    }
+
+    pub fn size(&self) -> u64 {
+        self.end - self.base
+    }
+
+    pub fn aligned_power_of_two_regions(
+        &self,
+        config: &Config,
+        max_bits: u64,
+    ) -> Vec<MemoryRegion> {
+        // During the boot phase, the kernel creates all of the untyped regions
+        // based on the kernel virtual addresses, rather than the physical
+        // memory addresses. This has a subtle side affect in the process of
+        // creating untypeds as even though all the kernel virtual addresses are
+        // a constant offset of the corresponding physical address, overflow can
+        // occur when dealing with virtual addresses. This precisely occurs in
+        // this function, causing different regions depending on whether
+        // you use kernel virtual or physical addresses. In order to properly
+        // emulate the kernel booting process, we also have to emulate the unsigned integer
+        // overflow that can occur.
+        let mut regions = Vec::new();
+        let mut base = config.paddr_to_kernel_vaddr(self.base);
+        let end = config.paddr_to_kernel_vaddr(self.end);
+        let mut bits;
+        while base != end {
+            let size = end.wrapping_sub(base);
+            let size_bits = util::msb(size);
+            if base == 0 {
+                bits = size_bits;
+            } else {
+                bits = min(size_bits, util::lsb(base));
+            }
+
+            if bits > max_bits {
+                bits = max_bits;
+            }
+            let sz = 1 << bits;
+            let base_paddr = config.kernel_vaddr_to_paddr(base);
+            let end_paddr = config.kernel_vaddr_to_paddr(base.wrapping_add(sz));
+            regions.push(MemoryRegion::new(base_paddr, end_paddr));
+            base = base.wrapping_add(sz);
+        }
+
+        regions
+    }
+}
+
+#[derive(Default)]
+pub struct DisjointMemoryRegion {
+    pub regions: Vec<MemoryRegion>,
+}
+
+impl DisjointMemoryRegion {
+    fn check(&self) {
+        // Ensure that regions are sorted and non-overlapping
+        let mut last_end: Option<u64> = None;
+        for region in &self.regions {
+            if last_end.is_some() {
+                assert!(region.base >= last_end.unwrap());
+            }
+            last_end = Some(region.end)
+        }
+    }
+
+    pub fn insert_region(&mut self, base: u64, end: u64) {
+        let mut insert_idx = self.regions.len();
+        for (idx, region) in self.regions.iter().enumerate() {
+            if end <= region.base {
+                insert_idx = idx;
+                break;
+            }
+        }
+        // FIXME: Should extend here if adjacent rather than
+        // inserting now
+        self.regions
+            .insert(insert_idx, MemoryRegion::new(base, end));
+        self.check();
+    }
+
+    pub fn remove_region(&mut self, base: u64, end: u64) {
+        let mut maybe_idx = None;
+        for (i, r) in self.regions.iter().enumerate() {
+            if base >= r.base && end <= r.end {
+                maybe_idx = Some(i);
+                break;
+            }
+        }
+        if maybe_idx.is_none() {
+            panic!("Internal error: attempting to remove region [0x{base:x}-0x{end:x}) that is not currently covered");
+        }
+
+        let idx = maybe_idx.unwrap();
+
+        let region = self.regions[idx];
+
+        if region.base == base && region.end == end {
+            // Covers exactly, so just remove
+            self.regions.remove(idx);
+        } else if region.base == base {
+            // Trim the start of the region
+            self.regions[idx] = MemoryRegion::new(end, region.end);
+        } else if region.end == end {
+            // Trim end of the region
+            self.regions[idx] = MemoryRegion::new(region.base, base);
+        } else {
+            // Splitting
+            self.regions[idx] = MemoryRegion::new(region.base, base);
+            self.regions
+                .insert(idx + 1, MemoryRegion::new(end, region.end));
+        }
+
+        self.check();
+    }
+
+    pub fn aligned_power_of_two_regions(
+        &self,
+        config: &Config,
+        max_bits: u64,
+    ) -> Vec<MemoryRegion> {
+        let mut aligned_regions = Vec::new();
+        for region in &self.regions {
+            aligned_regions.extend(region.aligned_power_of_two_regions(config, max_bits));
+        }
+
+        aligned_regions
+    }
+
+    /// Allocate region of 'size' bytes, returning the base address.
+    /// The allocated region is removed from the disjoint memory region.
+    /// Allocation policy is simple first fit.
+    /// Possibly a 'best fit' policy would be better.
+    /// 'best' may be something that best matches a power-of-two
+    /// allocation
+    pub fn allocate(&mut self, size: u64) -> u64 {
+        let mut region_to_remove: Option<MemoryRegion> = None;
+        for region in &self.regions {
+            if size <= region.size() {
+                region_to_remove = Some(*region);
+                break;
+            }
+        }
+
+        match region_to_remove {
+            Some(region) => {
+                self.remove_region(region.base, region.base + size);
+                region.base
+            }
+            None => panic!("Unable to allocate {size} bytes"),
+        }
+    }
+
+    pub fn allocate_from(&mut self, size: u64, lower_bound: u64) -> u64 {
+        let mut region_to_remove = None;
+        for region in &self.regions {
+            if size <= region.size() && region.base >= lower_bound {
+                region_to_remove = Some(*region);
+                break;
+            }
+        }
+
+        match region_to_remove {
+            Some(region) => {
+                self.remove_region(region.base, region.base + size);
+                region.base
+            }
+            None => panic!("Unable to allocate {size} bytes from lower_bound 0x{lower_bound:x}"),
+        }
+    }
+}
