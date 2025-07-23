@@ -143,7 +143,7 @@ pub fn map_page(
 ) -> Result<(), String> {
     match &frame_cap {
         Cap::Frame(_) => {
-            assert!(vaddr % frame_size as u64 == 0);
+            assert_eq!(vaddr % frame_size as u64, 0);
 
             let frame_obj_id = frame_cap.obj();
 

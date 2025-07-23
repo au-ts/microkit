@@ -4,11 +4,15 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 use core::ops::Range;
-use std::{cell::RefCell, rc::Rc};
 use sel4_capdl_initializer_types::Word;
 use serde::{Deserialize, Serialize};
+use std::{cell::RefCell, rc::Rc};
 
-use crate::{capdl::SLOT_BITS, elf::ElfFile, sel4::{Config, ObjectType}};
+use crate::{
+    capdl::SLOT_BITS,
+    elf::ElfFile,
+    sel4::{Arch, Config, ObjectType},
+};
 
 pub type ObjectId = usize;
 pub type Badge = Word;
@@ -56,12 +60,12 @@ pub struct FillEntry {
 #[derive(Serialize, Clone, Eq, PartialEq)]
 pub enum FillEntryContent {
     Data(BytesContent),
-    Temp(TemporaryContent)
+    Temp(TemporaryContent),
 }
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub struct BytesContent {
-    pub bytes: Vec<u8>
+    pub bytes: Vec<u8>,
 }
 
 // This is not valid CapDL, it is only used internally as a placeholder
@@ -70,12 +74,13 @@ pub struct BytesContent {
 pub struct TemporaryContent {
     pub elf_source: Rc<RefCell<ElfFile>>,
     pub elf_segment_id: usize,
-    pub elf_seg_data_range: Range<usize>
+    pub elf_seg_data_range: Range<usize>,
 }
 impl Serialize for TemporaryContent {
     fn serialize<S>(&self, _: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer {
+        S: serde::Serializer,
+    {
         unreachable!("All TemporaryContent should have already been converted to BytesContent at spec serialisation time!")
     }
 }
@@ -106,18 +111,32 @@ impl Object {
             _ => None,
         }
     }
-    
+
     /// CNode and SchedContext are quirky as they have variable size.
     pub fn physical_size_bits(&self, sel4_config: &Config) -> u64 {
         match self {
             Object::Endpoint => ObjectType::Endpoint.fixed_size_bits(sel4_config).unwrap(),
-            Object::Notification => ObjectType::Notification.fixed_size_bits(sel4_config).unwrap(),
+            Object::Notification => ObjectType::Notification
+                .fixed_size_bits(sel4_config)
+                .unwrap(),
             Object::CNode(cnode) => cnode.size_bits as u64 + SLOT_BITS,
             Object::Tcb(_) => ObjectType::Tcb.fixed_size_bits(sel4_config).unwrap(),
             Object::Irq(_) => 0,
             Object::VCpu => ObjectType::Vcpu.fixed_size_bits(sel4_config).unwrap(),
             Object::Frame(frame) => frame.size_bits as u64,
-            Object::PageTable(_) => ObjectType::PageTable.fixed_size_bits(sel4_config).unwrap(),
+            Object::PageTable(pt) => {
+                let base_size = ObjectType::PageTable.fixed_size_bits(sel4_config).unwrap();
+                // Matches up with seL4/libsel4/sel4_arch_include/aarch64/sel4/sel4_arch/constants.h
+                if sel4_config.arch == Arch::Aarch64
+                    && sel4_config.hypervisor
+                    && sel4_config.arm_pa_size_bits == Some(40)
+                    && pt.is_root
+                {
+                    base_size + 1
+                } else {
+                    base_size
+                }
+            }
             Object::AsidPool(_) => ObjectType::AsidPool.fixed_size_bits(sel4_config).unwrap(),
             Object::ArmIrq(_) => 0,
             Object::IrqMsi(_) => 0,

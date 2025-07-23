@@ -243,7 +243,6 @@ impl Loader {
 
         println!("INITIAL TASK: vaddr = [0x{:x}..0x{:x}], entry = 0x{:x}, paddr = 0x{:x}, p_v_offset = 0x{:x}\n", inittask_first_vaddr, inittask_last_vaddr, inittask_v_entry, inittask_first_paddr, inittask_p_v_offset);
 
-        // Note: For now we include any zeroes. We could optimize in the future
         let initial_task_source_data = initial_task_elf.data();
         let mut initial_task_data: Vec<u8> = vec!(0; initial_task_size as usize);
         for segment in initial_task_segments.iter() {
@@ -251,6 +250,7 @@ impl Loader {
             let memsz = segment.p_memsz.get(object::Endianness::Little) as usize;
             let source = segment.data(object::Endianness::Little, initial_task_source_data).unwrap();
 
+            // Doing this manually for now as the source may be smaller than the destination.
             let mut i = 0;
             let copy_len = min(source.len(), memsz);
             while i < copy_len {
