@@ -280,7 +280,8 @@ impl CapDLSpec {
             Ok(_) => {}
             Err(map_err_reason) => {
                 return Err(format!(
-                    "build_capdl_spec(): failed to map ipc buffer frame to monitor because: {}",
+                    "build_capdl_spec(): failed to map ipc buffer frame to {} because: {}",
+                    pd_name,
                     map_err_reason
                 ))
             }
@@ -1041,7 +1042,7 @@ pub fn build_capdl_spec(
             let name_cmp = a.name.cmp(&b.name);
             if name_cmp == Ordering::Equal {
                 // Make sure the sorting function implement a total order to comply with .sort_by()'s doc.
-                unreachable!("internal bug: object names must be unique!");
+                unreachable!("internal bug: object names must be unique! {}", a.name);
             }
             name_cmp
         } else {
