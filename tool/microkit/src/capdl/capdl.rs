@@ -6,11 +6,7 @@
 use core::ops::Range;
 
 use std::{
-    cell::RefCell,
-    cmp::{min, Ordering},
-    collections::HashMap,
-    rc::Rc,
-    u8,
+    cell::RefCell, cmp::{min, Ordering}, collections::HashMap, iter::repeat, rc::Rc, u8
 };
 
 use serde::Serialize;
@@ -281,8 +277,7 @@ impl CapDLSpec {
             Err(map_err_reason) => {
                 return Err(format!(
                     "build_capdl_spec(): failed to map ipc buffer frame to {} because: {}",
-                    pd_name,
-                    map_err_reason
+                    pd_name, map_err_reason
                 ))
             }
         };
@@ -468,6 +463,9 @@ pub fn build_capdl_spec(
     let mut pd_id_to_cspace_id: HashMap<usize, ObjectId> = HashMap::new();
     let mut pd_id_to_ntfn_id: HashMap<usize, ObjectId> = HashMap::new();
     let mut pd_id_to_ep_id: HashMap<usize, ObjectId> = HashMap::new();
+
+    // Keep track of the global count of vCPU objects so we can bind them to the monitor for setting TCB name in debug config.
+    let mut vcpu_index_accumulator = 0;
 
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
@@ -702,6 +700,32 @@ pub fn build_capdl_spec(
                 let mut caps_to_bind_to_vm_tcbs: Vec<CapTableEntry> = Vec::new();
                 caps_to_bind_to_vm_tcbs.push((TCB_SLOT_VSPACE as usize, vm_vspace_cap.clone()));
 
+                // Create an empty CSpace
+                let vm_cnode_obj_id = capdl_util_make_cnode_obj(
+                    &mut spec,
+                    &format!("{}_{}", virtual_machine.name, vcpu.id),
+                    PD_CAP_BITS as usize,
+                    [].to_vec(),
+                );
+                let vm_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS;
+                let vm_cnode_cap = capdl_util_make_cnode_cap(vm_cnode_obj_id, 0, vm_guard_size);
+                caps_to_bind_to_vm_tcbs.push((TCB_SLOT_CSPACE as usize, vm_cnode_cap));
+
+                // Create and map the IPC buffer.
+                let vm_ipcbuf_frame_obj_id = capdl_util_make_frame_obj(
+                    &mut spec,
+                    FrameInit::Fill(Fill {
+                        entries: [].to_vec(),
+                    }),
+                    &format!("ipcbuf_{}_{}", virtual_machine.name, vcpu.id),
+                    None,
+                    // Must be consistent with the granule bits used in spec serialisation
+                    PageSize::Small.fixed_size_bits(kernel_config) as usize,
+                );
+                let vm_ipcbuf_frame_cap =
+                    capdl_util_make_frame_cap(vm_ipcbuf_frame_obj_id, true, true, false, true);
+                caps_to_bind_to_vm_tcbs.push((TCB_SLOT_IPC_BUFFER as usize, vm_ipcbuf_frame_cap));
+
                 // Create fault endpoint cap to the parent PD.
                 let vm_vcpu_fault_ep_cap = capdl_util_make_endpoint_cap(
                     pd_ep_obj_id.unwrap(),
@@ -715,7 +739,7 @@ pub fn build_capdl_spec(
                 // Create scheduling context
                 let vm_vcpu_sc_obj_id = capdl_util_make_sc_obj(
                     &mut spec,
-                    &virtual_machine.name,
+                    &&format!("{}_{}", virtual_machine.name, vcpu.id),
                     PD_SCHEDCONTEXT_EXTRA_SIZE_BITS as usize,
                     virtual_machine.period,
                     virtual_machine.budget,
@@ -741,7 +765,7 @@ pub fn build_capdl_spec(
                     slots: caps_to_bind_to_vm_tcbs,
                     extra: TcbExtraInfo {
                         ipc_buffer_addr: 0,
-                        affinity: 0, // @billn revisit for SMP
+                        affinity: 0, // @billn revisit for SMP, need a way to specify node id in the XML
                         prio: virtual_machine.priority,
                         max_prio: virtual_machine.priority,
                         resume: false,
@@ -752,7 +776,7 @@ pub fn build_capdl_spec(
                     },
                 };
                 let vm_vcpu_tcb_obj_id = spec.add_root_object(NamedObject {
-                    name: format!("tcb_{}", virtual_machine.name),
+                    name: format!("tcb_{}_{}", virtual_machine.name, vcpu.id),
                     object: Object::Tcb(vm_vcpu_tcb_inner_obj),
                 });
 
@@ -765,6 +789,15 @@ pub fn build_capdl_spec(
                     (PD_BASE_VM_TCB_CAP + vcpu.id) as usize,
                     capdl_util_make_tcb_cap(vm_vcpu_tcb_obj_id),
                 ));
+
+                // Bind vCPU's TCB to the monitor so that the name can be set at start up in debug config
+                capdl_util_insert_cap_into_cspace(
+                    &mut spec,
+                    mon_cnode_obj_id,
+                    MON_BASE_VM_TCB_CAP as usize + vcpu_index_accumulator,
+                    capdl_util_make_tcb_cap(vm_vcpu_tcb_obj_id),
+                );
+                vcpu_index_accumulator += 1;
             }
         }
 
@@ -838,7 +871,9 @@ pub fn build_capdl_spec(
             .borrow_mut()
             .write_symbol("microkit_ioports", &pd.ioport_bits().to_le_bytes())?;
 
-        // Step 3-16 bind this PD's TCB to the monitor so that its registers can be read on fault.
+        // Step 3-16 bind this PD's TCB to the monitor, this accomplish two purposes:
+        // 1. Allow PDs' TCBs to be named to their proper name in SDF in debug config.
+        // 2. Allow passive PDs.
         capdl_util_insert_cap_into_cspace(
             &mut spec,
             mon_cnode_obj_id,
@@ -846,7 +881,8 @@ pub fn build_capdl_spec(
             capdl_util_make_tcb_cap(pd_tcb_obj_id),
         );
         if pd.passive {
-            // Bind the Scheduling Context and Notification to the monitor if the PD is passive.
+            // When a PD is passive, it will signal the Monitor once init() returns. The monitor will
+            // then unbind the PD's TCB from its Scheduling Context and bind it to its Notification.
             capdl_util_insert_cap_into_cspace(
                 &mut spec,
                 mon_cnode_obj_id,
@@ -926,10 +962,10 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 5. Write ELF symbols in the monitor.
     // *********************************
-    let pd_names = system
+    let pd_names: Vec<String> = system
         .protection_domains
         .iter()
-        .map(|pd| &pd.name)
+        .map(|pd| pd.name.clone())
         .collect();
     monitor_elf
         .borrow_mut()
@@ -942,15 +978,21 @@ pub fn build_capdl_spec(
         .borrow_mut()
         .write_symbol(
             "pd_names",
-            &monitor_serialise_names(pd_names, MAX_PDS, PD_MAX_NAME_LENGTH),
+            &monitor_serialise_names(&pd_names, MAX_PDS, PD_MAX_NAME_LENGTH),
         )
         .unwrap();
 
-    let vm_names: Vec<&String> = system
+    let vm_names: Vec<String> = system
         .protection_domains
         .iter()
-        .filter_map(|pd| pd.virtual_machine.as_ref().map(|vm| &vm.name))
+        .filter(|pd| pd.virtual_machine.is_some())
+        .flat_map(|pd_with_vm| {
+            let vm = pd_with_vm.virtual_machine.as_ref().unwrap();
+            let num_vcpus = vm.vcpus.len();
+            repeat(vm.name.clone()).take(num_vcpus)
+        })
         .collect();
+
     monitor_elf
         .borrow_mut()
         .write_symbol("vm_names_len", &vm_names.len().to_le_bytes())
@@ -959,7 +1001,7 @@ pub fn build_capdl_spec(
         .borrow_mut()
         .write_symbol(
             "vm_names",
-            &monitor_serialise_names(vm_names, MAX_VMS, VM_MAX_NAME_LENGTH),
+            &monitor_serialise_names(&vm_names, MAX_VMS, VM_MAX_NAME_LENGTH),
         )
         .unwrap();
 
