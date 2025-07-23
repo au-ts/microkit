@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
-use object::read::elf::FileHeader;
+use object::read::elf::{FileHeader, ProgramHeader};
 use object::{Object, U32Bytes};
 
 use crate::elf::ElfFile;
@@ -84,7 +84,7 @@ impl Riscv64 {
 
 /// Checks that each region in the given list does not overlap with any other region.
 /// Panics upon finding an overlapping region
-fn check_non_overlapping(regions: &Vec<(u64, &[u8])>) {
+fn check_non_overlapping(regions: &Vec<(u64, Vec<u8>)>) {
     let mut checked: Vec<(u64, u64)> = Vec::new();
     for (base, data) in regions {
         let end = base + data.len() as u64;
@@ -123,25 +123,25 @@ struct LoaderHeader64 {
     num_regions: u64,
 }
 
-pub struct Loader<'a> {
+pub struct Loader {
     image: Vec<u8>,
     header: LoaderHeader64,
     region_metadata: Vec<LoaderRegion64>,
-    regions: Vec<(u64, &'a [u8])>,
+    regions: Vec<(u64, Vec<u8>)>,
 }
 
-impl<'a> Loader<'a> {
+impl Loader {
     pub fn new(
         config: &Config,
         mut available_memory: DisjointMemoryRegion,
         kernel_boot_region: MemoryRegion,
         loader_elf_path: &Path,
-        kernel_elf: &'a ElfFile,
+        kernel_elf: &ElfFile,
         initial_task_elf: &object::read::elf::ElfFile<
             '_,
             object::elf::FileHeader64<object::Endianness>,
         >,
-    ) -> Loader<'a> {
+    ) -> Loader {
         let loader_elf = ElfFile::from_path(loader_elf_path).unwrap();
         let sz = loader_elf.word_size;
         let magic = match sz {
@@ -184,12 +184,14 @@ impl<'a> Loader<'a> {
                     panic!("Kernel does not have a consistent physical to virtual offset");
                 }
 
-                regions.push((segment.phys_addr, segment.data.as_slice()));
+                regions.push((segment.phys_addr, segment.data.clone()));
             }
         }
 
         assert!(kernel_first_paddr.is_some());
 
+        // We support initial task ELF with multiple segments, but note this was implemented by amalgamating all the segments
+        // into 1 segment, so if your segments are sparse, a lot of memory will be wasted.
         let initial_task_segments: Vec<_> = initial_task_elf
             .elf_program_headers()
             .iter()
@@ -232,18 +234,32 @@ impl<'a> Loader<'a> {
 
         // Find an available physical memory segment large enough to house the initial task (CapDL initialiser with spec)
         let initial_task_size = inittask_last_vaddr - inittask_first_vaddr;
-        let inittask_first_paddr = available_memory.allocate_from(initial_task_size, kernel_boot_region.end);
-
-        println!("allocating initial task at 0x{:x}\n", inittask_first_paddr);
-
+        let inittask_first_paddr =
+            available_memory.allocate_from(initial_task_size, kernel_boot_region.end);
         let inittask_p_v_offset = inittask_first_vaddr - inittask_first_paddr;
+        let inittask_v_entry = initial_task_elf
+            .elf_header()
+            .e_entry(object::Endianness::Little);
+
+        println!("INITIAL TASK: vaddr = [0x{:x}..0x{:x}], entry = 0x{:x}, paddr = 0x{:x}, p_v_offset = 0x{:x}\n", inittask_first_vaddr, inittask_last_vaddr, inittask_v_entry, inittask_first_paddr, inittask_p_v_offset);
 
         // Note: For now we include any zeroes. We could optimize in the future
-        let initial_task_data: Vec<u8> = Vec::with_capacity(initial_task_size as usize);
+        let initial_task_source_data = initial_task_elf.data();
+        let mut initial_task_data: Vec<u8> = vec!(0; initial_task_size as usize);
+        for segment in initial_task_segments.iter() {
+            let buf_off = (segment.p_vaddr.get(object::Endianness::Little) - inittask_first_vaddr)  as usize;
+            let memsz = segment.p_memsz.get(object::Endianness::Little) as usize;
+            let source = segment.data(object::Endianness::Little, initial_task_source_data).unwrap();
 
+            let mut i = 0;
+            let copy_len = min(source.len(), memsz);
+            while i < copy_len {
+                initial_task_data[buf_off + i] = source[i];
+                i += 1;
+            }
+        }
 
-
-        // regions.push((inittask_first_paddr, &seg_data));
+        regions.push((inittask_first_paddr, initial_task_data));
 
         // Determine the pagetable variables
         assert!(kernel_first_vaddr.is_some());
@@ -291,17 +307,8 @@ impl<'a> Loader<'a> {
         let ui_p_reg_end = inittask_last_vaddr - inittask_p_v_offset;
         assert!(ui_p_reg_end > ui_p_reg_start);
 
-        let v_entry = initial_task_elf
-            .elf_header()
-            .e_entry(object::Endianness::Little);
-
-        let mut all_regions = Vec::with_capacity(regions.len());
-        for r in regions {
-            all_regions.push(r.clone());
-        }
-
-        let mut all_regions_with_loader = all_regions.clone();
-        all_regions_with_loader.push((image_vaddr, &image));
+        let mut all_regions_with_loader = regions.clone();
+        all_regions_with_loader.push((image_vaddr, image.clone()));
         check_non_overlapping(&all_regions_with_loader);
 
         let flags = match config.hypervisor {
@@ -311,7 +318,7 @@ impl<'a> Loader<'a> {
 
         let mut region_metadata = Vec::new();
         let mut offset: u64 = 0;
-        for (addr, data) in &all_regions {
+        for (addr, data) in &regions {
             region_metadata.push(LoaderRegion64 {
                 load_addr: *addr,
                 size: data.len() as u64,
@@ -334,15 +341,15 @@ impl<'a> Loader<'a> {
             ui_p_reg_start,
             ui_p_reg_end,
             pv_offset,
-            v_entry,
-            num_regions: all_regions.len() as u64,
+            v_entry: inittask_v_entry,
+            num_regions: regions.len() as u64,
         };
 
         Loader {
             image,
             header,
             region_metadata,
-            regions: all_regions,
+            regions,
         }
     }
 
