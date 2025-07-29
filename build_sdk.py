@@ -55,6 +55,16 @@ class KernelArch(IntEnum):
         else:
             raise Exception(f"Unsupported toolchain architecture '{self}'")
 
+    def rust_toolchain(self) -> str:
+        if self == KernelArch.AARCH64:
+            return f"{self.to_str()}-sel4-minimal"
+        elif self == KernelArch.RISCV64:
+            return f"{self.to_str()}imafdcz-sel4-minimal"
+        elif self == KernelArch.X86_64:
+            return f"{self.to_str()}-sel4-minimal"
+        else:
+            raise Exception(f"Unsupported toolchain architecture '{self}'")
+
     def is_riscv(self) -> bool:
         return self == KernelArch.RISCV64
 
@@ -680,7 +690,7 @@ def build_capdl_initialiser(
     sel4_src_dir = build_dir / board.name / config.name / "sel4" / "install"
 
     cargo_cross_options = "-Z build-std=core,alloc,compiler_builtins -Z build-std-features=compiler-builtins-mem"
-    cargo_target = f"{board.arch.to_str()}-sel4-minimal"
+    cargo_target = board.arch.rust_toolchain()
 
     cmd = f"cd {rust_sel4_dir} && SEL4_PREFIX={sel4_src_dir.absolute()} cargo build {cargo_cross_options} --target {cargo_target} --release -p sel4-capdl-initializer"
     r = system(cmd)
