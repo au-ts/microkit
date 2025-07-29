@@ -102,6 +102,7 @@ pub enum Object {
     IOPorts(object::IOPorts),
     SchedContext(object::SchedContext),
     Reply,
+    ArmSmc,
 }
 
 impl Object {
@@ -121,7 +122,6 @@ impl Object {
                 .unwrap(),
             Object::CNode(cnode) => cnode.size_bits as u64 + SLOT_BITS,
             Object::Tcb(_) => ObjectType::Tcb.fixed_size_bits(sel4_config).unwrap(),
-            Object::Irq(_) => 0,
             Object::VCpu => ObjectType::Vcpu.fixed_size_bits(sel4_config).unwrap(),
             Object::Frame(frame) => frame.size_bits as u64,
             Object::PageTable(pt) => {
@@ -138,12 +138,9 @@ impl Object {
                 }
             }
             Object::AsidPool(_) => ObjectType::AsidPool.fixed_size_bits(sel4_config).unwrap(),
-            Object::ArmIrq(_) => 0,
-            Object::IrqMsi(_) => 0,
-            Object::IrqIOApic(_) => 0,
-            Object::IOPorts(_) => 0,
             Object::SchedContext(sched_context) => sched_context.size_bits as u64,
             Object::Reply => ObjectType::Reply.fixed_size_bits(sel4_config).unwrap(),
+            _ => 0,
         }
     }
 
@@ -179,6 +176,7 @@ pub enum Cap {
     IOPorts(cap::IOPorts),
     SchedContext(cap::SchedContext),
     Reply(cap::Reply),
+    ArmSmc(cap::ArmSmc),
 }
 
 impl Cap {
@@ -199,6 +197,7 @@ impl Cap {
             Cap::IOPorts(cap) => cap.object,
             Cap::SchedContext(cap) => cap.object,
             Cap::Reply(cap) => cap.object,
+            Cap::ArmSmc(cap) => cap.object,
         }
     }
 
@@ -219,6 +218,7 @@ impl Cap {
             Cap::IOPorts(cap) => cap.object = new_id,
             Cap::SchedContext(cap) => cap.object = new_id,
             Cap::Reply(cap) => cap.object = new_id,
+            Cap::ArmSmc(cap) => cap.object = new_id,
         }
     }
 }
@@ -441,6 +441,11 @@ pub mod cap {
 
     #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct Reply {
+        pub object: ObjectId,
+    }
+
+    #[derive(Serialize, Clone, Eq, PartialEq)]
+    pub struct ArmSmc {
         pub object: ObjectId,
     }
 }

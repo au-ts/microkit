@@ -6,7 +6,12 @@
 use core::ops::Range;
 
 use std::{
-    cell::RefCell, cmp::{min, Ordering}, collections::HashMap, iter::repeat, rc::Rc, u8
+    cell::RefCell,
+    cmp::{min, Ordering},
+    collections::HashMap,
+    iter::repeat,
+    rc::Rc,
+    u8,
 };
 
 use serde::Serialize;
@@ -23,7 +28,7 @@ use crate::{
     },
     elf::ElfFile,
     sdf::{self, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription, BUDGET_DEFAULT},
-    sel4::{Config, PageSize},
+    sel4::{Arch, Config, PageSize},
     util::{monitor_serialise_names, monitor_serialise_u64_vec, round_down},
     MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH, VM_MAX_NAME_LENGTH,
 };
@@ -459,6 +464,19 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 3. Create the PDs' spec
     // *********************************
+    // On ARM, check if we need to create the SMC object
+    let arm_smc_obj_id = if kernel_config.arch == Arch::Aarch64
+        && kernel_config.arm_smc.unwrap_or(false)
+        && system.protection_domains.iter().any(|pd| pd.smc)
+    {
+        Some(spec.add_root_object(NamedObject {
+            name: "arm_smc".to_owned(),
+            object: Object::ArmSmc,
+        }))
+    } else {
+        None
+    };
+
     // Keep tabs on each PD's CSpace, Notification and Endpoint objects so we can create channels between them at a later step.
     let mut pd_id_to_cspace_id: HashMap<usize, ObjectId> = HashMap::new();
     let mut pd_id_to_ntfn_id: HashMap<usize, ObjectId> = HashMap::new();
@@ -801,7 +819,15 @@ pub fn build_capdl_spec(
             }
         }
 
-        // Step 3-13 Create CSpace and add all caps that the PD code and libmicrokit need to access.
+        // Step 3-13 Create ARM SMC cap if requested.
+        if pd.smc {
+            caps_to_insert_to_pd_cspace.push((
+                PD_ARM_SMC_CAP_IDX as usize,
+                capdl_util_make_arm_smc_cap(arm_smc_obj_id.unwrap()),
+            ));
+        }
+
+        // Step 3-14 Create CSpace and add all caps that the PD code and libmicrokit need to access.
         let pd_cnode_obj_id = capdl_util_make_cnode_obj(
             &mut spec,
             &pd.name,
@@ -813,7 +839,7 @@ pub fn build_capdl_spec(
         caps_to_bind_to_tcb.push((TCB_SLOT_CSPACE as usize, pd_cnode_cap));
         pd_id_to_cspace_id.insert(pd_global_idx, pd_cnode_obj_id);
 
-        // Step 3-14 Set the TCB parameters and all the various caps that we need to bind to this TCB.
+        // Step 3-15 Set the TCB parameters and all the various caps that we need to bind to this TCB.
         if let Object::Tcb(pc_tcb) = &mut spec.get_root_object_mut(pd_tcb_obj_id).unwrap().object {
             pc_tcb.extra.sp = kernel_config.pd_stack_top();
             pc_tcb.extra.master_fault_ep = None; // Not used on MCS kernel.
@@ -826,7 +852,7 @@ pub fn build_capdl_spec(
             unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
         }
 
-        // Step 3-15 write libmicrokit symbols.
+        // Step 3-16 write libmicrokit symbols.
         let name = pd.name.as_bytes();
         let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
         elf_obj
@@ -871,7 +897,7 @@ pub fn build_capdl_spec(
             .borrow_mut()
             .write_symbol("microkit_ioports", &pd.ioport_bits().to_le_bytes())?;
 
-        // Step 3-16 bind this PD's TCB to the monitor, this accomplish two purposes:
+        // Step 3-17 bind this PD's TCB to the monitor, this accomplish two purposes:
         // 1. Allow PDs' TCBs to be named to their proper name in SDF in debug config.
         // 2. Allow passive PDs.
         capdl_util_insert_cap_into_cspace(
