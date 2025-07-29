@@ -36,9 +36,8 @@ AS := $(TOOLCHAIN)-as
 OBJCOPY := $(TOOLCHAIN)-objcopy
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
-IMAGES := server.elf client.elf hpet_timer.elf stack_overflow.elf
-# We don't turn on compiler optimisation so that the crashing code doesn't get optimised out.
-CFLAGS := -nostdlib -ffreestanding -g3 -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
+IMAGES := x86_64_ioport.elf
+CFLAGS := -nostdlib -ffreestanding -g3 -O3 -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
 LDFLAGS := -L$(BOARD_DIR)/lib -z noexecstack
 LIBS := -lmicrokit -Tmicrokit.ld
 
@@ -49,26 +48,14 @@ REPORT = $(BUILD_DIR)/report.json
 
 all qemu: $(COPIED_KERNEL) $(INITIAL_TASK)
 
-$(BUILD_DIR)/client.o: client.c Makefile
+$(BUILD_DIR)/x86_64_ioport.o: x86_64_ioport.c Makefile
 	$(CC) -c $(CFLAGS) -Wall -Wno-unused-function -Werror $< -o $@
-$(BUILD_DIR)/server.o: server.c Makefile
-	$(CC) -c $(CFLAGS) -Wall -Wno-unused-function -Werror $< -o $@
-$(BUILD_DIR)/hpet_timer.o: hpet_timer.c Makefile
-	$(CC) -c $(CFLAGS) -Wall -Wno-unused-function -Werror $< -o $@
-$(BUILD_DIR)/stack_overflow.o: stack_overflow.c Makefile
-	$(CC) -c $(CFLAGS) $< -o $@
 
-$(BUILD_DIR)/client.elf: $(BUILD_DIR)/client.o
-	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
-$(BUILD_DIR)/server.elf: $(BUILD_DIR)/server.o
-	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
-$(BUILD_DIR)/hpet_timer.elf: $(BUILD_DIR)/hpet_timer.o
-	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
-$(BUILD_DIR)/stack_overflow.elf: $(BUILD_DIR)/stack_overflow.o
+$(BUILD_DIR)/x86_64_ioport.elf: $(BUILD_DIR)/x86_64_ioport.o
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
-$(INITIAL_TASK): $(addprefix $(BUILD_DIR)/, $(IMAGES)) hello.system
-	$(MICROKIT_TOOL) hello.system --search-path $(BUILD_DIR) --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(INITIAL_TASK) -r $(REPORT)
+$(INITIAL_TASK): $(addprefix $(BUILD_DIR)/, $(IMAGES)) x86_64_ioport.system
+	$(MICROKIT_TOOL) x86_64_ioport.system --search-path $(BUILD_DIR) --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(INITIAL_TASK) -r $(REPORT)
 
 $(COPIED_KERNEL): $(KERNEL)
 	$(OBJCOPY) -O elf32-i386 $(KERNEL) $(COPIED_KERNEL)
