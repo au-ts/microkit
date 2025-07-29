@@ -904,7 +904,7 @@ static void monitor(void)
     }
 }
 
-void main(seL4_BootInfo *bi)
+void main(void)
 {
 #if CONFIG_DEBUG_BUILD
     /*
