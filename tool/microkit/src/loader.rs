@@ -5,10 +5,10 @@
 //
 
 use object::read::elf::{FileHeader, ProgramHeader};
-use object::{Object, U32Bytes};
+use object::{U32Bytes};
 
 use crate::elf::ElfFile;
-use crate::sel4::{Arch, Config, KernelPartialBootInfo};
+use crate::sel4::{Arch, Config};
 use crate::util::{kb, mask, mb, round_up, struct_to_bytes};
 use crate::{DisjointMemoryRegion, MemoryRegion};
 use std::cmp::min;

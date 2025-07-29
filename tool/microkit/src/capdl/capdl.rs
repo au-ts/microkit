@@ -22,7 +22,7 @@ use crate::{
         util::*,
     },
     elf::ElfFile,
-    sdf::{self, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription},
+    sdf::{self, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription, BUDGET_DEFAULT},
     sel4::{Config, PageSize},
     util::{monitor_serialise_names, monitor_serialise_u64_vec, round_down},
     MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH, VM_MAX_NAME_LENGTH,
@@ -381,8 +381,8 @@ pub fn build_capdl_spec(
         &mut spec,
         "monitor",
         PD_SCHEDCONTEXT_EXTRA_SIZE_BITS as usize,
-        100,
-        100,
+        BUDGET_DEFAULT,
+        BUDGET_DEFAULT,
         0,
     );
     let mon_sc_cap = capdl_util_make_sc_cap(mon_sc_obj_id);
@@ -411,8 +411,8 @@ pub fn build_capdl_spec(
         // Special case, monitor have its stack statically allocated.
         monitor_tcb.extra.sp = monitor_elf.borrow().find_symbol("_stack").unwrap().0;
         // Monitor must run at the highest priority
-        monitor_tcb.extra.prio = u8::MAX;
-        monitor_tcb.extra.max_prio = u8::MAX;
+        monitor_tcb.extra.prio = u8::MAX - 1;
+        monitor_tcb.extra.max_prio = u8::MAX - 1;
         monitor_tcb.extra.resume = true;
 
         monitor_tcb

@@ -8,7 +8,7 @@ use crate::{
         spec::{cap, object, Cap, NamedObject, Object, ObjectId},
         CapDLSpec,
     },
-    sel4::{Arch, Config, PageSize},
+    sel4::{Config, PageSize},
 };
 
 /// For naming and debugging purposes only, no functional purpose.
@@ -100,7 +100,10 @@ fn map_intermediary_level_helper(
         slots: [].to_vec(),
     };
     let next_level_object = NamedObject {
-        name: format!("{}_{}_slot_{:03}_from_obj_id_{}", next_level_name_prefix, pd_name, cur_level_slot, cur_level_obj_id),
+        name: format!(
+            "{}_{}_slot_{:03}_from_obj_id_{}",
+            next_level_name_prefix, pd_name, cur_level_slot, cur_level_obj_id
+        ),
         object: Object::PageTable(next_level_inner_obj),
     };
     let next_level_obj_id = spec.add_root_object(next_level_object);
@@ -228,7 +231,7 @@ fn map_4_levels(
 //             let frame_obj_id = frame_cap.obj();
 
 //             // Get slot indexes for the 3 levels of the page table
-//             let lv0_slot = (vaddr >> (12 + 9 + 9)) & ((1 << 9) - 1);
+//             let lv0_slot = (vaddr >> (12 + 9 + 9));
 //             let lv1_slot = (vaddr >> (12 + 9)) & ((1 << 9) - 1);
 //             let lv2_slot = (vaddr >> (12)) & ((1 << 9) - 1);
 
@@ -288,27 +291,13 @@ pub fn map_page(
     frame_size: PageSize,
     vaddr: u64,
 ) -> Result<(), String> {
-    // if sel4_config.arch == Arch::X86_64
-    //     || (sel4_config.arch == Arch::Aarch64 && !sel4_config.aarch64_vspace_s2_start_l1())
-    // {
-        map_4_levels(
-            spec,
-            sel4_config,
-            pd_name,
-            vspace_obj_id,
-            frame_cap,
-            frame_size,
-            vaddr,
-        )
-    // } else {
-    //     map_4_levels(
-    //         spec,
-    //         sel4_config,
-    //         pd_name,
-    //         vspace_obj_id,
-    //         frame_cap,
-    //         frame_size,
-    //         vaddr,
-    //     )
-    // }
+    map_4_levels(
+        spec,
+        sel4_config,
+        pd_name,
+        vspace_obj_id,
+        frame_cap,
+        frame_size,
+        vaddr,
+    )
 }
