@@ -14,6 +14,7 @@ use crate::{
         CapDLSpec,
     },
     sdf::{SysIrq, SysIrqKind},
+    sel4::{Arch, Config},
 };
 
 /// This module contains utility functions used by higher-level
@@ -254,16 +255,28 @@ pub fn capdl_util_insert_cap_into_cspace(
 }
 
 /// target_cpu is only valid for ARM.
-pub fn capdl_util_make_irq_obj(spec: &mut CapDLSpec, pd_name: &str, sys_irq: &SysIrq, target_cpu: Option<u64>) -> ObjectId {
-
+pub fn capdl_util_make_irq_obj(
+    spec: &mut CapDLSpec,
+    sel4_config: &Config,
+    pd_name: &str,
+    sys_irq: &SysIrq,
+    target_cpu: Option<u64>,
+) -> ObjectId {
     let irq_inner_obj = match sys_irq.kind {
-        SysIrqKind::Conventional { trigger, .. } => Object::ArmIrq(object::ArmIrq {
-            slots: [].to_vec(),
-            extra: ArmIrqExtraInfo {
-                trigger: trigger as u64,
-                target: target_cpu.unwrap(),
-            },
-        }),
+        SysIrqKind::Conventional { trigger, .. } => match sel4_config.arch {
+            Arch::Aarch64 => Object::ArmIrq(object::ArmIrq {
+                slots: [].to_vec(),
+                extra: ArmIrqExtraInfo {
+                    trigger: trigger as u64,
+                    target: target_cpu.unwrap(),
+                },
+            }),
+            Arch::Riscv64 => Object::Irq(object::Irq {
+                slots: [].to_vec(),
+            }),
+            Arch::X86_64 => unreachable!("internal bug: ARM and RISC-V IRQs not supported on x86."),
+        },
+
         SysIrqKind::IOAPIC {
             ioapic,
             pin,
@@ -326,14 +339,14 @@ pub fn capdl_util_bind_irq_to_ntfn(spec: &mut CapDLSpec, irq_obj_id: ObjectId, n
         Object::IrqIOApic(irq_ioapic) => {
             irq_ioapic.slots.push((0, ntfn_cap));
         }
+        Object::Irq(generic_irq) => {
+            generic_irq.slots.push((0, ntfn_cap));
+        }
         _ => unreachable!("internal bug: capdl_util_bind_irq_to_ntfn() got non irq object"),
     }
 }
 
-pub fn capdl_util_make_vcpu_obj(
-    spec: &mut CapDLSpec,
-    name: &String
-) -> ObjectId {
+pub fn capdl_util_make_vcpu_obj(spec: &mut CapDLSpec, name: &String) -> ObjectId {
     let vcpu_inner_obj = Object::VCpu;
     let vcpu_obj = NamedObject {
         name: format!("vcpu_{}", name).to_string(),
@@ -343,9 +356,13 @@ pub fn capdl_util_make_vcpu_obj(
 }
 
 pub fn capdl_util_make_vcpu_cap(vcpu_obj_id: ObjectId) -> Cap {
-    Cap::VCpu(cap::VCpu { object: vcpu_obj_id })
+    Cap::VCpu(cap::VCpu {
+        object: vcpu_obj_id,
+    })
 }
 
 pub fn capdl_util_make_arm_smc_cap(arm_smc_obj_id: ObjectId) -> Cap {
-    Cap::ArmSmc(cap::ArmSmc { object: arm_smc_obj_id })
+    Cap::ArmSmc(cap::ArmSmc {
+        object: arm_smc_obj_id,
+    })
 }

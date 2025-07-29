@@ -340,7 +340,7 @@ fn map_memory_region(
     for frame_obj_id in frames.iter() {
         // Make a cap for this frame.
         let frame_cap = capdl_util_make_frame_cap(*frame_obj_id, read, write, execute, cached);
-        // Map it into this PD address space. @billn make arch agnositc
+        // Map it into this PD address space.
         map_page(
             spec,
             sel4_config,
@@ -669,7 +669,7 @@ pub fn build_capdl_spec(
         // Step 3-10 Create spec and caps to IRQs
         for irq in pd.irqs.iter() {
             // Create IRQ object and add it to the special `irqs` vec in the spec.
-            let irq_obj_id = capdl_util_make_irq_obj(&mut spec, &pd.name, irq, Some(0)); // @billn revisit for smp
+            let irq_obj_id = capdl_util_make_irq_obj(&mut spec, kernel_config, &pd.name, irq, Some(0)); // @billn revisit for smp
             spec.add_irq(irq.irq_num(), irq_obj_id);
 
             // Create a IRQ handler cap and insert into the requested CSpace's slot.
