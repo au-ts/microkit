@@ -5,7 +5,7 @@
  SPDX-License-Identifier: BSD-2-Clause
 -->
 <system>
-    <protection_domain name="arm_smc" priority="1">
+    <protection_domain name="arm_smc" priority="1" smc="true">
         <program_image path="arm_smc.elf" />
     </protection_domain>
 </system>
