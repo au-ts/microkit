@@ -69,12 +69,13 @@
           ps.setuptools
         ]);
 
-        microkiToolToml = nixpkgs.lib.trivial.importTOML ./tool/microkit/Cargo.toml;
-        microkitToolVersion = microkiToolToml.package.rust-version;
+        # microkiToolToml = nixpkgs.lib.trivial.importTOML ./tool/microkit/Cargo.toml;
+        # microkitToolVersion = microkiToolToml.package.rust-version;
+        rust = pkgs.rust-bin.fromRustupToolchainFile ./tool/microkit/rust-toolchain.toml;
 
-        rustTool = pkgs.rust-bin.stable.${microkitToolVersion}.default.override {
-          targets = [ pkgs.pkgsStatic.hostPlatform.rust.rustcTarget ];
-        };
+        # rustTool = pkgs.rust-bin.stable.${microkitToolVersion}.default.override {
+        #   targets = [ pkgs.pkgsStatic.hostPlatform.rust.rustcTarget ];
+        # };
 
       in
       {
@@ -96,7 +97,7 @@
             expect
             pythonTool
             git
-            rustTool
+            rust
             pandoc
             (texlive.combine {
               inherit (texlive) scheme-medium titlesec enumitem sfmath roboto fontaxes isodate substr tcolorbox environ pdfcol;
@@ -106,6 +107,9 @@
             libxml2
             qemu
           ];
+
+          # Necessary for Rust bindgen
+          LIBCLANG_PATH = "${pkgs.llvmPackages_18.libclang.lib}/lib";
         };
       });
 }
