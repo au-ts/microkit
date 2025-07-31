@@ -491,7 +491,7 @@ fn main() -> Result<(), String> {
     let spec = build_capdl_spec(&kernel_config, monitor_elf, &mut pd_elf_files, &system)?;
 
     // Eagerly write out the spec so we can debug in case something crash later.
-    let spec_as_json = serde_json::to_string_pretty(&spec).unwrap();
+    let spec_as_json = serde_json::to_string(&spec).unwrap();
     fs::write(args.report, &spec_as_json).unwrap();
 
     // Reserialise the spec into a type that can be understood by rust-sel4.
