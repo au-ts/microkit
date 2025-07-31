@@ -46,6 +46,7 @@ const TCB_SLOT_VSPACE: u64 = 1;
 const TCB_SLOT_IPC_BUFFER: u64 = 4;
 const TCB_SLOT_FAULT_EP: u64 = 5;
 const TCB_SLOT_SC: u64 = 6;
+// Not used on MCS, but leaving here for clarity
 // const TCB_SLOT_TEMP_FAULT_EP: u64 = 7;
 const TCB_SLOT_BOUND_NOTIFICATION: u64 = 8;
 const TCB_SLOT_VCPU: u64 = 9;
@@ -415,7 +416,8 @@ pub fn build_capdl_spec(
     {
         // Special case, monitor have its stack statically allocated.
         monitor_tcb.extra.sp = monitor_elf.borrow().find_symbol("_stack").unwrap().0;
-        // Monitor must run at the highest priority
+        // While there is nothing stopping us from running the monitor at the highest priority alongside the
+        // CapDL initialiser, the serial output can get garbled when the monitor TCB is resumed.
         monitor_tcb.extra.prio = u8::MAX - 1;
         monitor_tcb.extra.max_prio = u8::MAX - 1;
         monitor_tcb.extra.resume = true;
