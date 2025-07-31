@@ -59,7 +59,7 @@ class KernelArch(IntEnum):
         if self == KernelArch.AARCH64:
             return f"{self.to_str()}-sel4-minimal"
         elif self == KernelArch.RISCV64:
-            return f"{self.to_str()}imafdcz-sel4-minimal"
+            return f"{self.to_str()}imac-sel4-minimal"
         elif self == KernelArch.X86_64:
             return f"{self.to_str()}-sel4-minimal"
         else:
