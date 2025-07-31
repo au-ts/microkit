@@ -8,13 +8,11 @@ use crate::{
     capdl::{
         spec::{
             cap,
-            object::{self, ArmIrqExtraInfo, SchedContextExtraInfo},
+            object::{self, SchedContextExtraInfo},
             Cap, CapTableEntry, FrameInit, NamedObject, Object, ObjectId, Rights,
         },
         CapDLSpec,
     },
-    sdf::{SysIrq, SysIrqKind},
-    sel4::{Arch, Config},
 };
 
 /// This module contains utility functions used by higher-level
@@ -251,98 +249,6 @@ pub fn capdl_util_insert_cap_into_cspace(
         cspace_inner_obj.slots.push((idx, cap));
     } else {
         unreachable!("internal bug: capdl_util_insert_cap_into_cspace() got a non CNode object.");
-    }
-}
-
-/// target_cpu is only valid for ARM.
-pub fn capdl_util_make_irq_obj(
-    spec: &mut CapDLSpec,
-    sel4_config: &Config,
-    pd_name: &str,
-    sys_irq: &SysIrq,
-    target_cpu: Option<u64>,
-) -> ObjectId {
-    let irq_inner_obj = match sys_irq.kind {
-        SysIrqKind::Conventional { trigger, .. } => match sel4_config.arch {
-            Arch::Aarch64 => Object::ArmIrq(object::ArmIrq {
-                slots: [].to_vec(),
-                extra: ArmIrqExtraInfo {
-                    trigger: trigger as u64,
-                    target: target_cpu.unwrap(),
-                },
-            }),
-            Arch::Riscv64 => Object::Irq(object::Irq {
-                slots: [].to_vec(),
-            }),
-            Arch::X86_64 => unreachable!("internal bug: ARM and RISC-V IRQs not supported on x86."),
-        },
-
-        SysIrqKind::IOAPIC {
-            ioapic,
-            pin,
-            level,
-            polarity,
-            ..
-        } => Object::IrqIOApic(object::IrqIOApic {
-            slots: [].to_vec(),
-            extra: object::IrqIOApicExtraInfo {
-                ioapic,
-                pin,
-                level,
-                polarity,
-            },
-        }),
-        SysIrqKind::MSI {
-            pci_bus,
-            pci_dev,
-            pci_func,
-            handle,
-            ..
-        } => Object::IrqMsi(object::IrqMsi {
-            slots: [].to_vec(),
-            extra: object::IrqMsiExtraInfo {
-                handle,
-                pci_bus,
-                pci_dev,
-                pci_func,
-            },
-        }),
-    };
-    let irq_obj = NamedObject {
-        name: format!("irq_{}_{}", sys_irq.irq_num(), pd_name),
-        object: irq_inner_obj,
-    };
-    spec.add_root_object(irq_obj)
-}
-
-pub fn capdl_util_make_irq_handler_cap(irq_obj_id: ObjectId, irq_kind: &SysIrqKind) -> Cap {
-    // Look up what kind of IRQ we are dealing with to create the correct cap type
-    match irq_kind {
-        SysIrqKind::Conventional { .. } => {
-            Cap::ArmIrqHandler(cap::ArmIrqHandler { object: irq_obj_id })
-        }
-        SysIrqKind::IOAPIC { .. } => {
-            Cap::IrqIOApicHandler(cap::IrqIOApicHandler { object: irq_obj_id })
-        }
-        SysIrqKind::MSI { .. } => Cap::IrqMsiHandler(cap::IrqMsiHandler { object: irq_obj_id }),
-    }
-}
-
-pub fn capdl_util_bind_irq_to_ntfn(spec: &mut CapDLSpec, irq_obj_id: ObjectId, ntfn_cap: Cap) {
-    match &mut spec.get_root_object_mut(irq_obj_id).unwrap().object {
-        Object::ArmIrq(arm_irq) => {
-            arm_irq.slots.push((0, ntfn_cap));
-        }
-        Object::IrqMsi(irq_msi) => {
-            irq_msi.slots.push((0, ntfn_cap));
-        }
-        Object::IrqIOApic(irq_ioapic) => {
-            irq_ioapic.slots.push((0, ntfn_cap));
-        }
-        Object::Irq(generic_irq) => {
-            generic_irq.slots.push((0, ntfn_cap));
-        }
-        _ => unreachable!("internal bug: capdl_util_bind_irq_to_ntfn() got non irq object"),
     }
 }
 

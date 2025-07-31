@@ -11,7 +11,7 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     capdl::SLOT_BITS,
     elf::ElfFile,
-    sel4::{Arch, Config, ObjectType},
+    sel4::{Config, ObjectType},
 };
 
 pub type ObjectId = usize;
@@ -167,6 +167,7 @@ pub enum Cap {
     ArmIrqHandler(cap::ArmIrqHandler),
     IrqMsiHandler(cap::IrqMsiHandler),
     IrqIOApicHandler(cap::IrqIOApicHandler),
+    RiscvIrqHandler(cap::RiscvIrqHandler),
     IOPorts(cap::IOPorts),
     SchedContext(cap::SchedContext),
     Reply(cap::Reply),
@@ -187,6 +188,7 @@ impl Cap {
             Cap::ArmIrqHandler(cap) => cap.object,
             Cap::IrqMsiHandler(cap) => cap.object,
             Cap::IrqIOApicHandler(cap) => cap.object,
+            Cap::RiscvIrqHandler(cap) => cap.object,
             Cap::IOPorts(cap) => cap.object,
             Cap::SchedContext(cap) => cap.object,
             Cap::Reply(cap) => cap.object,
@@ -207,6 +209,7 @@ impl Cap {
             Cap::ArmIrqHandler(cap) => cap.object = new_id,
             Cap::IrqMsiHandler(cap) => cap.object = new_id,
             Cap::IrqIOApicHandler(cap) => cap.object = new_id,
+            Cap::RiscvIrqHandler(cap) => cap.object = new_id,
             Cap::IOPorts(cap) => cap.object = new_id,
             Cap::SchedContext(cap) => cap.object = new_id,
             Cap::Reply(cap) => cap.object = new_id,

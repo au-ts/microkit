@@ -8,6 +8,7 @@ pub mod capdl;
 pub mod spec;
 mod memory;
 mod util;
+mod irq;
 pub mod reserialize_spec;
 pub mod render_elf;
 

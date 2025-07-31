@@ -18,13 +18,11 @@ use serde::Serialize;
 
 use crate::{
     capdl::{
-        memory::{create_vspace, map_page},
-        spec::{
+        irq::create_irq_handler_cap, memory::{create_vspace, map_page}, spec::{
             object::{self, TcbExtraInfo},
             AsidSlotEntry, BytesContent, CapTableEntry, Fill, FillEntry, FillEntryContent,
             FrameInit, IrqEntry, NamedObject, Object, ObjectId, TemporaryContent, UntypedCover,
-        },
-        util::*,
+        }, util::*
     },
     elf::ElfFile,
     sdf::{self, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription, BUDGET_DEFAULT},
@@ -489,6 +487,7 @@ pub fn build_capdl_spec(
 
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
+
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
         let elf_obj = pd_elf_files[pd_global_idx].clone();
 
@@ -670,18 +669,10 @@ pub fn build_capdl_spec(
 
         // Step 3-10 Create spec and caps to IRQs
         for irq in pd.irqs.iter() {
-            // Create IRQ object and add it to the special `irqs` vec in the spec.
-            let irq_obj_id = capdl_util_make_irq_obj(&mut spec, kernel_config, &pd.name, irq, Some(0)); // @billn revisit for smp
-            spec.add_irq(irq.irq_num(), irq_obj_id);
-
             // Create a IRQ handler cap and insert into the requested CSpace's slot.
-            let irq_handle_cap = capdl_util_make_irq_handler_cap(irq_obj_id, &irq.kind);
+            let irq_handle_cap = create_irq_handler_cap(&mut spec, kernel_config, &pd.name, pd_ntfn_obj_id, irq);
             let irq_cap_idx = PD_BASE_IRQ_CAP + irq.id;
             caps_to_insert_to_pd_cspace.push((irq_cap_idx as usize, irq_handle_cap));
-
-            // Now bind the IRQ into the PD's notification object with the correct badge.
-            let pd_irq_ntfn_cap = capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 1 << irq.id);
-            capdl_util_bind_irq_to_ntfn(&mut spec, irq_obj_id, pd_irq_ntfn_cap);
         }
 
         // Step 3-11 Create I/O port objects on x86 platform.
