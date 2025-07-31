@@ -342,7 +342,9 @@ SUPPORTED_BOARDS = (
             "KernelSupportPCID": False,
         },
     ),
-    # This particular configuration requires support for Intel VT-x or AMD SVM + nested if targeting QEMU.
+    # This particular configuration requires support for Intel VT-x
+    # (plus nested virtualisation on your host if targeting QEMU).
+    # AMD SVM is currently unsupported by seL4.
     BoardInfo(
         name="x86_64_generic_vtx",
         arch=KernelArch.X86_64,
