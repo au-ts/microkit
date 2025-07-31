@@ -21,6 +21,7 @@ pub type CapSlot = usize;
 pub type CapTableEntry = (CapSlot, Cap);
 
 // CapDL Spec objects
+
 #[derive(Serialize, Clone, Eq, PartialEq)]
 pub struct IrqEntry {
     pub irq: Word,
@@ -91,7 +92,6 @@ pub enum Object {
     Notification,
     CNode(object::CNode),
     Tcb(object::Tcb),
-    Irq(object::Irq),
     VCpu,
     Frame(object::Frame),
     PageTable(object::PageTable),
@@ -99,6 +99,7 @@ pub enum Object {
     ArmIrq(object::ArmIrq),
     IrqMsi(object::IrqMsi),
     IrqIOApic(object::IrqIOApic),
+    RiscvIrq(object::RiscvIrq),
     IOPorts(object::IOPorts),
     SchedContext(object::SchedContext),
     Reply,
@@ -125,16 +126,10 @@ impl Object {
             Object::VCpu => ObjectType::Vcpu.fixed_size_bits(sel4_config).unwrap(),
             Object::Frame(frame) => frame.size_bits as u64,
             Object::PageTable(pt) => {
-                let base_size = ObjectType::PageTable.fixed_size_bits(sel4_config).unwrap();
-                // Matches up with seL4/libsel4/sel4_arch_include/aarch64/sel4/sel4_arch/constants.h
-                if sel4_config.arch == Arch::Aarch64
-                    && sel4_config.hypervisor
-                    && sel4_config.arm_pa_size_bits == Some(40)
-                    && pt.is_root
-                {
-                    base_size + 1
+                if pt.is_root {
+                    ObjectType::VSpace.fixed_size_bits(sel4_config).unwrap()
                 } else {
-                    base_size
+                    ObjectType::PageTable.fixed_size_bits(sel4_config).unwrap()
                 }
             }
             Object::AsidPool(_) => ObjectType::AsidPool.fixed_size_bits(sel4_config).unwrap(),
@@ -148,11 +143,11 @@ impl Object {
         match self {
             Object::CNode(cnode) => Some(&mut cnode.slots),
             Object::Tcb(tcb) => Some(&mut tcb.slots),
-            Object::Irq(irq) => Some(&mut irq.slots),
             Object::PageTable(page_table) => Some(&mut page_table.slots),
             Object::ArmIrq(arm_irq) => Some(&mut arm_irq.slots),
             Object::IrqMsi(irq_msi) => Some(&mut irq_msi.slots),
             Object::IrqIOApic(irq_ioapic) => Some(&mut irq_ioapic.slots),
+            Object::RiscvIrq(riscv_irq) => Some(&mut riscv_irq.slots),
             _ => None,
         }
     }
@@ -165,7 +160,6 @@ pub enum Cap {
     Notification(cap::Notification),
     CNode(cap::CNode),
     Tcb(cap::Tcb),
-    IrqHandler(cap::IrqHandler),
     VCpu(cap::VCpu),
     Frame(cap::Frame),
     PageTable(cap::PageTable),
@@ -187,7 +181,6 @@ impl Cap {
             Cap::CNode(cap) => cap.object,
             Cap::Frame(cap) => cap.object,
             Cap::Tcb(cap) => cap.object,
-            Cap::IrqHandler(cap) => cap.object,
             Cap::VCpu(cap) => cap.object,
             Cap::PageTable(cap) => cap.object,
             Cap::AsidPool(cap) => cap.object,
@@ -208,7 +201,6 @@ impl Cap {
             Cap::CNode(cap) => cap.object = new_id,
             Cap::Frame(cap) => cap.object = new_id,
             Cap::Tcb(cap) => cap.object = new_id,
-            Cap::IrqHandler(cap) => cap.object = new_id,
             Cap::VCpu(cap) => cap.object = new_id,
             Cap::PageTable(cap) => cap.object = new_id,
             Cap::AsidPool(cap) => cap.object = new_id,
@@ -261,11 +253,6 @@ pub mod object {
         pub gprs: Vec<Word>,
 
         pub master_fault_ep: Option<CPtr>,
-    }
-
-    #[derive(Serialize, Clone, Eq, PartialEq)]
-    pub struct Irq {
-        pub slots: Vec<CapTableEntry>,
     }
 
     #[derive(Serialize, Clone, Eq, PartialEq)]
@@ -329,6 +316,17 @@ pub mod object {
     }
 
     #[derive(Serialize, Clone, Eq, PartialEq)]
+    pub struct RiscvIrq {
+        pub slots: Vec<CapTableEntry>,
+        pub extra: RiscvIrqExtraInfo,
+    }
+
+    #[derive(Serialize, Clone, Eq, PartialEq)]
+    pub struct RiscvIrqExtraInfo {
+        pub trigger: Word,
+    }
+
+    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct IOPorts {
         pub start_port: Word,
         pub end_port: Word,
@@ -388,11 +386,6 @@ pub mod cap {
     }
 
     #[derive(Serialize, Clone, Eq, PartialEq)]
-    pub struct IrqHandler {
-        pub object: ObjectId,
-    }
-
-    #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct VCpu {
         pub object: ObjectId,
     }
@@ -426,6 +419,11 @@ pub mod cap {
 
     #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct IrqIOApicHandler {
+        pub object: ObjectId,
+    }
+
+    #[derive(Serialize, Clone, Eq, PartialEq)]
+    pub struct RiscvIrqHandler {
         pub object: ObjectId,
     }
 
