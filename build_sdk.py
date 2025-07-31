@@ -378,12 +378,16 @@ SUPPORTED_CONFIGS = (
     ConfigInfo(
         name="release",
         debug=False,
-        kernel_options={},
+        kernel_options={
+            # @billn revisit
+            "KernelRootCNodeSizeBits": "17",
+        },
     ),
     ConfigInfo(
         name="debug",
         debug=True,
         kernel_options={
+            "KernelRootCNodeSizeBits": "17",
             "KernelDebugBuild": True,
             "KernelPrinting": True,
             "KernelVerificationBuild": False
@@ -393,6 +397,7 @@ SUPPORTED_CONFIGS = (
         name="benchmark",
         debug=False,
         kernel_options={
+            "KernelRootCNodeSizeBits": "17",
             "KernelArmExportPMUUser": True,
             "KernelDebugBuild": False,
             "KernelVerificationBuild": False,
