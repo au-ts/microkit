@@ -254,7 +254,6 @@ impl CapDLSpec {
             }),
             &format!("ipcbuf_{}", pd_name),
             None,
-            // Must be consistent with the granule bits used in spec serialisation
             PageSize::Small.fixed_size_bits(sel4_config) as usize,
         );
         let ipcbuf_frame_cap =

@@ -501,8 +501,14 @@ fn main() -> Result<(), String> {
         serde_json::from_str::<Spec<String, BytesContent, ()>>(&spec_as_json).unwrap();
 
     // Now embed the built spec into the CapDL initialiser.
+    let name_level = match args.config {
+        "debug" => ObjectNamesLevel::All,
+        // We don't copy over the object names as there is no printing in these configuration to save memory.
+        "release" | "benchmark" => ObjectNamesLevel::None,
+        _ => panic!("unknown configuration {}", args.config)
+    };
     let serialized_spec =
-        reserialize_spec::reserialize_spec(&spec_reserialised, &ObjectNamesLevel::All);
+        reserialize_spec::reserialize_spec(&spec_reserialised, &name_level);
 
     let footprint = serialized_spec.len();
     let heap_size = footprint * 2 + 16 * 4096;
