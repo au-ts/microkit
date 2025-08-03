@@ -8,7 +8,7 @@ use serde::Deserialize;
 use crate::{elf::ElfFile, DisjointMemoryRegion, MemoryRegion};
 
 pub struct KernelPartialBootInfo {
-    device_memory: DisjointMemoryRegion,
+    _device_memory: DisjointMemoryRegion,
     normal_memory: DisjointMemoryRegion,
     boot_region: MemoryRegion,
 }
@@ -62,7 +62,7 @@ fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile) -> KernelPa
     let boot_region = kernel_boot_mem(kernel_elf);
 
     KernelPartialBootInfo {
-        device_memory,
+        _device_memory: device_memory,
         normal_memory,
         boot_region,
     }
