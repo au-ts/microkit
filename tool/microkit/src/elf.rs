@@ -142,8 +142,9 @@ pub struct ElfFile {
     pub path: PathBuf,
     pub word_size: usize,
     pub entry: u64,
+    pub machine: u16,
     pub segments: Vec<ElfSegment>,
-    symbols_maybe: Option<HashMap<String, (ElfSymbol64, bool)>>,
+    symbols: HashMap<String, (ElfSymbol64, bool)>
 }
 
 impl ElfFile {
@@ -233,8 +234,8 @@ impl ElfFile {
 
         // Read all the section headers
         let mut shents = Vec::with_capacity(hdr.shnum as usize);
-        let mut symtab_shent_maybe: Option<&ElfSectionHeader64> = None;
-        let mut shstrtab_shent_maybe: Option<&ElfSectionHeader64> = None;
+        let mut symtab_shent: Option<&ElfSectionHeader64> = None;
+        let mut shstrtab_shent: Option<&ElfSectionHeader64> = None;
         for i in 0..hdr.shnum {
             let shent_start = hdr.shoff + (i as u64 * hdr.shentsize as u64);
             let shent_end = shent_start + hdr.shentsize as u64;
@@ -242,86 +243,89 @@ impl ElfFile {
 
             let shent = unsafe { bytes_to_struct::<ElfSectionHeader64>(shent_bytes) };
             match shent.type_ {
-                2 => symtab_shent_maybe = Some(shent),
-                3 => shstrtab_shent_maybe = Some(shent),
+                2 => symtab_shent = Some(shent),
+                3 => shstrtab_shent = Some(shent),
                 _ => {}
             }
             shents.push(shent);
         }
 
-        let mut symbols_maybe = None;
-        if symtab_shent_maybe.is_some() && shstrtab_shent_maybe.is_some() {
-            let symtab_shent = symtab_shent_maybe.unwrap();
+        if shstrtab_shent.is_none() {
+            return Err(format!(
+                "ELF '{}': unable to find string table section",
+                path.display()
+            ));
+        }
 
-            // Reading the symbol table
-            let symtab_start = symtab_shent.offset as usize;
-            let symtab_end = symtab_start + symtab_shent.size as usize;
-            let symtab = &bytes[symtab_start..symtab_end];
+        assert!(symtab_shent.is_some());
+        if symtab_shent.is_none() {
+            return Err(format!(
+                "ELF '{}': unable to find symbol table section",
+                path.display()
+            ));
+        }
 
-            let symtab_str_shent = shents[symtab_shent.link as usize];
-            let symtab_str_start = symtab_str_shent.offset as usize;
-            let symtab_str_end = symtab_str_start + symtab_str_shent.size as usize;
-            let symtab_str = &bytes[symtab_str_start..symtab_str_end];
+        // Reading the symbol table
+        let symtab_start = symtab_shent.unwrap().offset as usize;
+        let symtab_end = symtab_start + symtab_shent.unwrap().size as usize;
+        let symtab = &bytes[symtab_start..symtab_end];
 
-            // Read all the symbols
-            let mut symbols: HashMap<String, (ElfSymbol64, bool)> = HashMap::new();
-            let mut offset = 0;
-            let symbol_size = std::mem::size_of::<ElfSymbol64>();
-            while offset < symtab.len() {
-                let sym_bytes = &symtab[offset..offset + symbol_size];
-                let (sym_head, sym_body, sym_tail) = unsafe { sym_bytes.align_to::<ElfSymbol64>() };
-                assert!(sym_head.is_empty());
-                assert!(sym_body.len() == 1);
-                assert!(sym_tail.is_empty());
+        let symtab_str_shent = shents[symtab_shent.unwrap().link as usize];
+        let symtab_str_start = symtab_str_shent.offset as usize;
+        let symtab_str_end = symtab_str_start + symtab_str_shent.size as usize;
+        let symtab_str = &bytes[symtab_str_start..symtab_str_end];
 
-                let sym = &sym_body[0];
+        // Read all the symbols
+        let mut symbols: HashMap<String, (ElfSymbol64, bool)> = HashMap::new();
+        let mut offset = 0;
+        let symbol_size = std::mem::size_of::<ElfSymbol64>();
+        while offset < symtab.len() {
+            let sym_bytes = &symtab[offset..offset + symbol_size];
+            let (sym_head, sym_body, sym_tail) = unsafe { sym_bytes.align_to::<ElfSymbol64>() };
+            assert!(sym_head.is_empty());
+            assert!(sym_body.len() == 1);
+            assert!(sym_tail.is_empty());
 
-                let name = Self::get_string(symtab_str, sym.name as usize)?;
-                // It is possible for a valid ELF to contain multiple global symbols with the same name.
-                // Because we are making the hash map of symbols now, what we do is keep track of how many
-                // times we encounter the symbol name. Only when we go to find a particular symbol, do
-                // we complain that it occurs multiple times.
-                if let Some(symbol) = symbols.get_mut(name) {
-                    symbol.1 = true;
-                } else {
-                    // Here we are doing something that could end up being fairly expensive, we are copying
-                    // the string for each symbol name. It should be possible to turn this into a reference
-                    // although it might be awkward in order to please the borrow checker.
-                    let insert = symbols.insert(name.to_string(), (sym.clone(), false));
-                    assert!(insert.is_none());
-                }
-                offset += symbol_size;
+            let sym = &sym_body[0];
+
+            let name = Self::get_string(symtab_str, sym.name as usize)?;
+            // It is possible for a valid ELF to contain multiple global symbols with the same name.
+            // Because we are making the hash map of symbols now, what we do is keep track of how many
+            // times we encounter the symbol name. Only when we go to find a particular symbol, do
+            // we complain that it occurs multiple times.
+            if let Some(symbol) = symbols.get_mut(name) {
+                symbol.1 = true;
+            } else {
+                // Here we are doing something that could end up being fairly expensive, we are copying
+                // the string for each symbol name. It should be possible to turn this into a reference
+                // although it might be awkward in order to please the borrow checker.
+                let insert = symbols.insert(name.to_string(), (sym.clone(), false));
+                assert!(insert.is_none());
             }
-            symbols_maybe = Some(symbols);
+            offset += symbol_size;
         }
 
         Ok(ElfFile {
             path: path.to_owned(),
             word_size,
             entry,
+            machine: hdr.machine,
             segments,
-            symbols_maybe,
+            symbols,
         })
     }
 
     pub fn find_symbol(&self, variable_name: &str) -> Result<(u64, u64), String> {
-        match &self.symbols_maybe {
-            Some(symbols) => {
-                if let Some((sym, duplicate)) = symbols.get(variable_name) {
-                    if *duplicate {
-                        Err(format!(
-                            "Found multiple symbols with name '{variable_name}'"
-                        ))
-                    } else {
-                        Ok((sym.value, sym.size))
-                    }
-                } else {
-                    Err(format!("No symbol named '{variable_name}' found"))
-                }
+        if let Some((sym, duplicate)) = self.symbols.get(variable_name) {
+            if *duplicate {
+                Err(format!(
+                    "Found multiple symbols with name '{variable_name}'"
+                ))
+            } else {
+                Ok((sym.value, sym.size))
             }
-            None => {
-                panic!("find_symbol() called on an ELF without symbols table!");
-            }
+        } else {
+            Err(format!("No symbol named '{variable_name}' not found"))
         }
     }
 
@@ -388,19 +392,19 @@ impl ElfFile {
         // ELF header
         let header = ElfHeader64 {
             ident_magic: u32::from_le_bytes(*ELF_MAGIC),
-            ident_class: 2,
-            ident_data: 1,
+            ident_class: 2,   // 64-bits object
+            ident_data: 1,    // little endian
             ident_version: 1,
             ident_osabi: 0,
             ident_abiversion: 0,
             _padding: [0; 7].into(),
-            type_: 2,
-            machine: 0x3e, //@billn fix
+            type_: 2, // executable file
+            machine: self.machine,
             version: 1,
             entry: self.entry,
             // Program headers starts after main header
             phoff: ehsize as u64,
-            shoff: 0,
+            shoff: 0, // no section headers!
             flags: 0,
             ehsize: ehsize as u16,
             phentsize: phentsize as u16,
@@ -420,7 +424,7 @@ impl ElfFile {
         // first write out the headers table
         for seg in self.loadable_segments() {
             let seg_serialised = ElfProgramHeader64 {
-                type_: 1,
+                type_: 1, // loadable segment
                 flags: seg.attrs,
                 offset: data_off,
                 vaddr: seg.virt_addr,
