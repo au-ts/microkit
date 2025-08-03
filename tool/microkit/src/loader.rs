@@ -200,14 +200,7 @@ impl Loader {
         let mut initial_task_data: Vec<u8> = vec![0; initial_task_size as usize];
         for segment in initial_task_segments.iter() {
             let buf_off = segment.virt_addr - inittask_first_vaddr;
-
-            // @billn switch to using something from std
-            let mut i = 0;
-            let copy_len = segment.mem_size();
-            while i < copy_len {
-                initial_task_data[(buf_off + i) as usize] = segment.data[i as usize];
-                i += 1;
-            }
+            initial_task_data[buf_off as usize..(buf_off + segment.mem_size()) as usize].copy_from_slice(&segment.data);
         }
 
         regions.push((inittask_first_paddr, initial_task_data));

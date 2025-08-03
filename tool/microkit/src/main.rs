@@ -514,7 +514,8 @@ fn main() -> Result<(), String> {
         human_size_strict(heap_size as u64)
     );
 
-    // Patch the spec and heap into the ELF image.
+    // Patch the spec and heap into the ELF image. These symbol names must match
+    // rust-sel4/crates/sel4-capdl-initializer/src/main.rs
     let mut initialiser_elf = ElfFile::from_path(&capdl_init_elf_path).unwrap();
     let spec_vaddr = round_up(initialiser_elf.next_vaddr(), PageSize::Small as u64);
     initialiser_elf.add_segment(ElfSegmentAttributes::Read, spec_vaddr, serialized_spec);
