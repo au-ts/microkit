@@ -7,7 +7,9 @@
 use crate::util::bytes_to_struct;
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::slice::from_raw_parts;
 
 #[repr(C, packed)]
 struct ElfHeader32 {
@@ -223,7 +225,7 @@ impl ElfFile {
                 loadable: phent.type_ == 1,
                 attrs: phent.flags,
                 p_filesz: phent.filesz,
-                p_offset: phent.offset
+                p_offset: phent.offset,
             };
 
             segments.push(segment)
@@ -316,10 +318,10 @@ impl ElfFile {
                 } else {
                     Err(format!("No symbol named '{variable_name}' found"))
                 }
-            },
+            }
             None => {
                 panic!("find_symbol() called on an ELF without symbols table!");
-            },
+            }
         }
     }
 
@@ -369,5 +371,82 @@ impl ElfFile {
 
     pub fn loadable_segments(&self) -> Vec<&ElfSegment> {
         self.segments.iter().filter(|s| s.loadable).collect()
+    }
+
+    /// Re-create a minimal ELF file with all the segments such that it can be loaded
+    /// by seL4 on x86 platform as a boot module. This is the kernel code that does the
+    /// loading of what we generate here: seL4/src/arch/x86/64/kernel/elf.c
+    /// We use this function after patching the spec into the CapDL initialiser.
+    /// We don't guarantee that this ELF can be loaded by other kinds of ELF loader.
+    pub fn reserialise(&self, out: &std::path::Path) {
+        let phnum = self.loadable_segments().len();
+        let phentsize = size_of::<ElfProgramHeader64>();
+        let ehsize = size_of::<ElfHeader64>();
+
+        let mut f = std::fs::File::create(out).unwrap();
+
+        // ELF header
+        let header = ElfHeader64 {
+            ident_magic: u32::from_le_bytes(*ELF_MAGIC),
+            ident_class: 2,
+            ident_data: 1,
+            ident_version: 1,
+            ident_osabi: 0,
+            ident_abiversion: 0,
+            _padding: [0; 7].into(),
+            type_: 2,
+            machine: 0x3e, //@billn fix
+            version: 1,
+            entry: self.entry,
+            // Program headers starts after main header
+            phoff: ehsize as u64,
+            shoff: 0,
+            flags: 0,
+            ehsize: ehsize as u16,
+            phentsize: phentsize as u16,
+            phnum: phnum as u16,
+            shentsize: 0,
+            shnum: 0,
+            shstrndx: 0,
+        };
+        f.write_all(unsafe {
+            from_raw_parts((&header as *const ElfHeader64) as *const u8, ehsize)
+        })
+        .unwrap();
+
+        // keep a running file offset where segment data will be written
+        let mut data_off = (ehsize as u64) + (phnum as u64) * (phentsize as u64);
+
+        // first write out the headers table
+        for seg in self.loadable_segments() {
+            let seg_serialised = ElfProgramHeader64 {
+                type_: 1,
+                flags: seg.attrs,
+                offset: data_off,
+                vaddr: seg.virt_addr,
+                paddr: seg.phys_addr,
+                // Include padding to reduce complexity
+                filesz: seg.mem_size(),
+                memsz: seg.mem_size(),
+                align: 0,
+            };
+
+            f.write_all(unsafe {
+                from_raw_parts(
+                    (&seg_serialised as *const ElfProgramHeader64) as *const u8,
+                    phentsize,
+                )
+            })
+            .unwrap();
+
+            data_off += seg.mem_size();
+        }
+
+        // then the data for each segment will follow
+        for seg in self.loadable_segments() {
+            f.write_all(&seg.data).unwrap();
+        }
+
+        f.flush().unwrap();
     }
 }
