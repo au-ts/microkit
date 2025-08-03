@@ -128,7 +128,7 @@ impl ElfSegment {
 }
 
 #[derive(Eq, PartialEq)]
-enum ElfSegmentAttributes {
+pub enum ElfSegmentAttributes {
     /// Corresponds to PF_X
     Execute = 0x1,
     /// Corresponds to PF_W
@@ -144,7 +144,7 @@ pub struct ElfFile {
     pub entry: u64,
     pub machine: u16,
     pub segments: Vec<ElfSegment>,
-    symbols: HashMap<String, (ElfSymbol64, bool)>
+    symbols: HashMap<String, (ElfSymbol64, bool)>,
 }
 
 impl ElfFile {
@@ -373,6 +373,44 @@ impl ElfFile {
         }
     }
 
+    pub fn lowest_vaddr(&self) -> u64 {
+        let existing_vaddrs: Vec<u64> = self
+            .loadable_segments()
+            .iter()
+            .map(|segm| segm.virt_addr)
+            .collect();
+        return *existing_vaddrs.iter().min().unwrap();
+    }
+
+    pub fn highest_vaddr(&self) -> u64 {
+        let existing_vaddrs: Vec<u64> = self
+            .loadable_segments()
+            .iter()
+            .map(|segm| segm.virt_addr + segm.mem_size())
+            .collect();
+        return *existing_vaddrs.iter().max().unwrap();
+    }
+
+    /// Returns the next available unaligned virtual address for inserting a new segment.
+    pub fn next_vaddr(&self) -> u64 {
+        return self.highest_vaddr() + 1;
+    }
+
+    /// Segment will be added as loadable, though they won't have a valid p_offset
+    /// as these are all in-memory operations.
+    pub fn add_segment(&mut self, attrs: ElfSegmentAttributes, vaddr: u64, data: Vec<u8>) {
+        let elf_segment = ElfSegment {
+            p_filesz: data.len() as u64,
+            p_offset: u64::max_value(),
+            data,
+            phys_addr: vaddr,
+            virt_addr: vaddr,
+            loadable: true,
+            attrs: attrs as u32,
+        };
+        self.segments.push(elf_segment);
+    }
+
     pub fn loadable_segments(&self) -> Vec<&ElfSegment> {
         self.segments.iter().filter(|s| s.loadable).collect()
     }
@@ -392,8 +430,8 @@ impl ElfFile {
         // ELF header
         let header = ElfHeader64 {
             ident_magic: u32::from_le_bytes(*ELF_MAGIC),
-            ident_class: 2,   // 64-bits object
-            ident_data: 1,    // little endian
+            ident_class: 2, // 64-bits object
+            ident_data: 1,  // little endian
             ident_version: 1,
             ident_osabi: 0,
             ident_abiversion: 0,

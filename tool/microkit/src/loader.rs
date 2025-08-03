@@ -3,15 +3,10 @@
 //
 // SPDX-License-Identifier: BSD-2-Clause
 //
-
-use object::read::elf::{FileHeader, ProgramHeader};
-use object::{U32Bytes};
-
 use crate::elf::ElfFile;
-use crate::sel4::{Arch, Config};
-use crate::util::{kb, mask, mb, round_up, struct_to_bytes};
+use crate::sel4::{Arch, Config, PageSize};
+use crate::util::{mask, mb, round_up, struct_to_bytes};
 use crate::{DisjointMemoryRegion, MemoryRegion};
-use std::cmp::min;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -137,10 +132,7 @@ impl Loader {
         kernel_boot_region: MemoryRegion,
         loader_elf_path: &Path,
         kernel_elf: &ElfFile,
-        initial_task_elf: &object::read::elf::ElfFile<
-            '_,
-            object::elf::FileHeader64<object::Endianness>,
-        >,
+        initial_task_elf: &ElfFile,
     ) -> Loader {
         let loader_elf = ElfFile::from_path(loader_elf_path).unwrap();
         let sz = loader_elf.word_size;
@@ -190,71 +182,30 @@ impl Loader {
 
         assert!(kernel_first_paddr.is_some());
 
-        // We support initial task ELF with multiple segments, but note this was implemented by amalgamating all the segments
+        // We support initial task ELF with multiple segments. This is implemented by amalgamating all the segments
         // into 1 segment, so if your segments are sparse, a lot of memory will be wasted.
-        let initial_task_segments: Vec<_> = initial_task_elf
-            .elf_program_headers()
-            .iter()
-            .filter(|s| s.p_type == U32Bytes::new(object::Endianness::Little, 1))
-            .collect();
-
-        let init_task_lowest_segment = initial_task_segments
-            .iter()
-            .min_by(|s_a, s_b| {
-                let seg_a_vaddr = s_a.p_vaddr.get(object::Endianness::Little);
-                let seg_b_vaddr = s_b.p_vaddr.get(object::Endianness::Little);
-                return seg_a_vaddr.cmp(&seg_b_vaddr);
-            })
-            .unwrap();
-
-        let init_task_highest_segment = initial_task_segments
-            .iter()
-            .max_by(|s_a, s_b| {
-                let seg_a_vaddr = s_a.p_vaddr.get(object::Endianness::Little)
-                    + s_a.p_memsz.get(object::Endianness::Little);
-                let seg_b_vaddr = s_b.p_vaddr.get(object::Endianness::Little)
-                    + s_b.p_memsz.get(object::Endianness::Little);
-                return seg_a_vaddr.cmp(&seg_b_vaddr);
-            })
-            .unwrap();
-
-        let inittask_first_vaddr = init_task_lowest_segment
-            .p_vaddr
-            .get(object::Endianness::Little);
-
-        let inittask_last_vaddr = round_up(
-            init_task_highest_segment
-                .p_vaddr
-                .get(object::Endianness::Little)
-                + init_task_highest_segment
-                    .p_memsz
-                    .get(object::Endianness::Little),
-            kb(4),
-        );
+        let initial_task_segments = initial_task_elf.loadable_segments();
+        let inittask_first_vaddr = initial_task_elf.lowest_vaddr();
+        let inittask_last_vaddr =
+            round_up(initial_task_elf.highest_vaddr(), PageSize::Small as u64);
 
         // Find an available physical memory segment large enough to house the initial task (CapDL initialiser with spec)
+        // that is after the kernel window.
         let initial_task_size = inittask_last_vaddr - inittask_first_vaddr;
         let inittask_first_paddr =
             available_memory.allocate_from(initial_task_size, kernel_boot_region.end);
         let inittask_p_v_offset = inittask_first_vaddr - inittask_first_paddr;
-        let inittask_v_entry = initial_task_elf
-            .elf_header()
-            .e_entry(object::Endianness::Little);
+        let inittask_v_entry = initial_task_elf.entry;
 
-        println!("INITIAL TASK: vaddr = [0x{:x}..0x{:x}], entry = 0x{:x}, paddr = 0x{:x}, p_v_offset = 0x{:x}\n", inittask_first_vaddr, inittask_last_vaddr, inittask_v_entry, inittask_first_paddr, inittask_p_v_offset);
-
-        let initial_task_source_data = initial_task_elf.data();
-        let mut initial_task_data: Vec<u8> = vec!(0; initial_task_size as usize);
+        let mut initial_task_data: Vec<u8> = vec![0; initial_task_size as usize];
         for segment in initial_task_segments.iter() {
-            let buf_off = (segment.p_vaddr.get(object::Endianness::Little) - inittask_first_vaddr)  as usize;
-            let memsz = segment.p_memsz.get(object::Endianness::Little) as usize;
-            let source = segment.data(object::Endianness::Little, initial_task_source_data).unwrap();
+            let buf_off = segment.virt_addr - inittask_first_vaddr;
 
-            // Doing this manually for now as the source may be smaller than the destination.
+            // @billn switch to using something from std
             let mut i = 0;
-            let copy_len = min(source.len(), memsz);
+            let copy_len = segment.mem_size();
             while i < copy_len {
-                initial_task_data[buf_off + i] = source[i];
+                initial_task_data[(buf_off + i) as usize] = segment.data[i as usize];
                 i += 1;
             }
         }

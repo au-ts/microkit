@@ -8,17 +8,19 @@
 #![allow(clippy::assertions_on_constants)]
 
 use microkit_tool::capdl::spec::BytesContent;
-use microkit_tool::capdl::{build_capdl_spec, render_elf, reserialize_spec};
-use microkit_tool::elf::ElfFile;
+use microkit_tool::capdl::{build_capdl_spec, reserialize_spec};
+use microkit_tool::elf::{ElfFile, ElfSegmentAttributes};
 use microkit_tool::loader::Loader;
 use microkit_tool::sdf::parse;
 use microkit_tool::sel4::{
     emulate_kernel_boot_partial, Arch, Config, PageSize, PlatformConfig, RiscvVirtualMemory,
 };
-use microkit_tool::util::{human_size_strict, json_str, json_str_as_bool, json_str_as_u64};
+use microkit_tool::util::{
+    human_size_strict, json_str, json_str_as_bool, json_str_as_u64, round_up,
+};
 use sel4_capdl_initializer_types::{ObjectNamesLevel, Spec};
 use std::cell::RefCell;
-use std::fs::{self};
+use std::fs::{self, metadata};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -498,45 +500,76 @@ fn main() -> Result<(), String> {
     let spec_reserialised =
         serde_json::from_str::<Spec<String, BytesContent, ()>>(&spec_as_json).unwrap();
 
-    // Frame size bits for embedding into the CapDL spec from ELFs.
-    // MUST match up with the frame size when creating ELF specs.
-    let granule_size_bits = PageSize::Small.fixed_size_bits(&kernel_config) as usize;
-
     // Now embed the built spec into the CapDL initialiser.
-    // A re-implementation of dep/rust-sel4/crates/sel4-capdl-initializer/add-spec/src/main.rs
-    // so we don't have to call out to it as a subprocess.
     let serialized_spec =
         reserialize_spec::reserialize_spec(&spec_reserialised, &ObjectNamesLevel::All);
 
     let footprint = serialized_spec.len();
     let heap_size = footprint * 2 + 16 * 4096;
 
-    let render_elf_args = render_elf::RenderElfArgs {
-        data: &serialized_spec,
-        granule_size_bits: granule_size_bits,
-        heap_size,
-    };
-
     println!(
-        "BUILT: number of root objects = {}, spec footprint = {}, initialiser heap size = {}",
+        "CAPDL SPEC: number of root objects = {}, spec footprint = {}, initialiser heap size = {}",
         spec.objects.len(),
         human_size_strict(footprint as u64),
         human_size_strict(heap_size as u64)
     );
 
-    // Patch the CapDL initialiser ELF with the spec.
-    let initializer_elf_buf = fs::read(capdl_init_elf_path).unwrap();
-    let rendered_initializer_elf_buf = match object::File::parse(&*initializer_elf_buf).unwrap() {
-        object::File::Elf32(initializer_elf) => render_elf_args.call_with(&initializer_elf),
-        object::File::Elf64(initializer_elf) => render_elf_args.call_with(&initializer_elf),
-        _ => {
-            panic!()
-        }
-    };
+    // Patch the spec and heap into the ELF image.
+    let mut initialiser_elf = ElfFile::from_path(&capdl_init_elf_path).unwrap();
+    let spec_vaddr = round_up(initialiser_elf.next_vaddr(), PageSize::Small as u64);
+    initialiser_elf.add_segment(ElfSegmentAttributes::Read, spec_vaddr, serialized_spec);
+    initialiser_elf
+        .write_symbol(
+            "sel4_capdl_initializer_serialized_spec_start",
+            &spec_vaddr.to_le_bytes(),
+        )
+        .unwrap();
+    initialiser_elf
+        .write_symbol(
+            "sel4_capdl_initializer_serialized_spec_size",
+            &footprint.to_le_bytes(),
+        )
+        .unwrap();
 
-    // For x86 we write out the initialiser ELF as is, but on ARM and RISC-V we build the loader image.
+    let heap_vaddr = round_up(initialiser_elf.next_vaddr(), PageSize::Small as u64);
+    initialiser_elf.add_segment(ElfSegmentAttributes::Read, heap_vaddr, vec![0; heap_size]);
+    initialiser_elf
+        .write_symbol(
+            "sel4_capdl_initializer_heap_start",
+            &heap_vaddr.to_le_bytes(),
+        )
+        .unwrap();
+    initialiser_elf
+        .write_symbol(
+            "sel4_capdl_initializer_heap_size",
+            &(heap_vaddr + heap_size as u64).to_le_bytes(),
+        )
+        .unwrap();
+
+    initialiser_elf
+        .write_symbol(
+            "sel4_capdl_initializer_image_start",
+            &initialiser_elf.lowest_vaddr().to_le_bytes(),
+        )
+        .unwrap();
+    initialiser_elf
+        .write_symbol(
+            "sel4_capdl_initializer_image_end",
+            &initialiser_elf.highest_vaddr().to_le_bytes(),
+        )
+        .unwrap();
+
+    println!(
+        "INITIAL TASK: size = {}, vaddr = [0x{:x}..0x{:x}], entry = 0x{:x}",
+        human_size_strict(initialiser_elf.highest_vaddr() - initialiser_elf.lowest_vaddr()),
+        initialiser_elf.lowest_vaddr(),
+        initialiser_elf.highest_vaddr(),
+        initialiser_elf.entry
+    );
+
+    // For x86 we write out the initialiser ELF as is, but on ARM and RISC-V we build the bootloader image.
     if kernel_config.arch == Arch::X86_64 {
-        fs::write(args.output, rendered_initializer_elf_buf).unwrap();
+        initialiser_elf.reserialise(Path::new(args.output));
     } else {
         // Determine what are the available physical memory segments after the kernel boots by partially emulating the boot process.
         // This is so that we can place the initial task (CapDL initialiser) after the kernel's window.
@@ -545,27 +578,21 @@ fn main() -> Result<(), String> {
             emulate_kernel_boot_partial(&kernel_config, &kernel_elf);
 
         // Then create the loader image.
-        // @billn fix this stupid roundabout serialisation and deserialisation, and 2 different ELF type
-        // would involve either expanding elf.rs to support adding segment and re-rendering ELF,
-        // or use rust-sel4's Builder throughout everything (e.g. elf.rs would just be an adapter around rust-sel4's elf stuff)
-        let initial_task_elf: object::read::elf::ElfFile<
-            '_,
-            object::elf::FileHeader64<object::Endianness>,
-        > = match object::File::parse(&*rendered_initializer_elf_buf).unwrap() {
-            object::File::Elf64(initializer_elf) => initializer_elf,
-            _ => {
-                panic!()
-            }
-        };
         let loader = Loader::new(
             &kernel_config,
             available_memory,
             kernel_boot_region,
             Path::new(&loader_elf_path),
             &kernel_elf,
-            &initial_task_elf,
+            &initialiser_elf,
         );
+
         loader.write_image(Path::new(args.output));
+
+        println!(
+            "LOADER: image size = {}",
+            human_size_strict(metadata(args.output).unwrap().len())
+        );
     }
 
     Ok(())
