@@ -533,7 +533,11 @@ fn main() -> Result<(), String> {
         .unwrap();
 
     let heap_vaddr = round_up(initialiser_elf.next_vaddr(), PageSize::Small as u64);
-    initialiser_elf.add_segment(ElfSegmentAttributes::Read, heap_vaddr, vec![0; heap_size]);
+    initialiser_elf.add_segment(
+        ElfSegmentAttributes::Read | ElfSegmentAttributes::Write,
+        heap_vaddr,
+        vec![0; heap_size],
+    );
     initialiser_elf
         .write_symbol(
             "sel4_capdl_initializer_heap_start",

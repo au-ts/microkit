@@ -5,6 +5,7 @@
 //
 
 use crate::util::bytes_to_struct;
+use bitflags::bitflags;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
@@ -106,7 +107,7 @@ pub struct ElfSegment {
     pub phys_addr: u64,
     pub virt_addr: u64,
     pub loadable: bool,
-    attrs: u32,
+    attrs: ElfSegmentAttributes,
 }
 
 impl ElfSegment {
@@ -115,26 +116,29 @@ impl ElfSegment {
     }
 
     pub fn is_writable(&self) -> bool {
-        (self.attrs & ElfSegmentAttributes::Write as u32) != 0
+        self.attrs.contains(ElfSegmentAttributes::Write)
     }
 
     pub fn is_readable(&self) -> bool {
-        (self.attrs & ElfSegmentAttributes::Read as u32) != 0
+        self.attrs.contains(ElfSegmentAttributes::Read)
     }
 
     pub fn is_executable(&self) -> bool {
-        (self.attrs & ElfSegmentAttributes::Execute as u32) != 0
+        self.attrs.contains(ElfSegmentAttributes::Execute)
     }
 }
 
-#[derive(Eq, PartialEq)]
-pub enum ElfSegmentAttributes {
-    /// Corresponds to PF_X
-    Execute = 0x1,
-    /// Corresponds to PF_W
-    Write = 0x2,
-    /// Corresponds to PF_R
-    Read = 0x4,
+bitflags! {
+    /// ELF program-header flags (`p_flags`)
+    #[derive(Eq, PartialEq, Clone)]
+    pub struct ElfSegmentAttributes: u32 {
+        /// Corresponds to PF_X
+        const Execute = 0x1;
+        /// Corresponds to PF_W
+        const Write   = 0x2;
+        /// Corresponds to PF_R
+        const Read    = 0x4;
+    }
 }
 
 #[derive(Eq, PartialEq, Clone)]
@@ -224,7 +228,7 @@ impl ElfFile {
                 phys_addr: phent.paddr,
                 virt_addr: phent.vaddr,
                 loadable: phent.type_ == 1,
-                attrs: phent.flags,
+                attrs: ElfSegmentAttributes::from_bits(phent.flags).unwrap(),
                 p_filesz: phent.filesz,
                 p_offset: phent.offset,
             };
@@ -406,7 +410,7 @@ impl ElfFile {
             phys_addr: vaddr,
             virt_addr: vaddr,
             loadable: true,
-            attrs: attrs as u32,
+            attrs,
         };
         self.segments.push(elf_segment);
     }
@@ -463,7 +467,7 @@ impl ElfFile {
         for seg in self.loadable_segments() {
             let seg_serialised = ElfProgramHeader64 {
                 type_: 1, // loadable segment
-                flags: seg.attrs,
+                flags: seg.attrs.bits(),
                 offset: data_off,
                 vaddr: seg.virt_addr,
                 paddr: seg.phys_addr,
