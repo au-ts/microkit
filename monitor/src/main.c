@@ -53,8 +53,6 @@
 extern seL4_IPCBuffer __sel4_ipc_buffer_obj;
 seL4_IPCBuffer *__sel4_ipc_buffer = &__sel4_ipc_buffer_obj;
 
-char _stack[4096];
-
 char pd_names[MAX_PDS][MAX_NAME_LEN];
 seL4_Word pd_names_len;
 char vm_names[MAX_VMS][MAX_NAME_LEN] __attribute__((unused));
