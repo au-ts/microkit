@@ -38,7 +38,7 @@ const PD_MAX_PRIORITY: u8 = 254;
 pub const BUDGET_DEFAULT: u64 = 1000;
 
 /// Default to a stack size of a single page
-const PD_DEFAULT_STACK_SIZE: u64 = 0x1000;
+pub const PD_DEFAULT_STACK_SIZE: u64 = 0x1000;
 const PD_MIN_STACK_SIZE: u64 = 0x1000;
 const PD_MAX_STACK_SIZE: u64 = 1024 * 1024 * 16;
 

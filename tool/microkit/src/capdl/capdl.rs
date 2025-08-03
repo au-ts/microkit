@@ -25,7 +25,7 @@ use crate::{
         }, util::*
     },
     elf::ElfFile,
-    sdf::{self, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription, BUDGET_DEFAULT},
+    sdf::{self, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription, BUDGET_DEFAULT, PD_DEFAULT_STACK_SIZE},
     sel4::{Arch, Config, PageSize},
     util::{monitor_serialise_names, monitor_serialise_u64_vec, round_down},
     MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH, VM_MAX_NAME_LENGTH,
@@ -52,7 +52,6 @@ const TCB_SLOT_VCPU: u64 = 9;
 // Where caps must be in the Monitor's CSpace
 const MON_FAULT_EP_CAP_IDX: u64 = 1;
 const MON_REPLY_CAP_IDX: u64 = 2;
-
 const MON_BASE_PD_TCB_CAP: u64 = 10;
 const MON_BASE_VM_TCB_CAP: u64 = MON_BASE_PD_TCB_CAP + 64;
 const MON_BASE_SCHED_CONTEXT_CAP: u64 = MON_BASE_VM_TCB_CAP + 64;
@@ -405,6 +404,30 @@ pub fn build_capdl_spec(
     let mon_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS;
     let mon_cnode_cap = capdl_util_make_cnode_cap(mon_cnode_obj_id, 0, mon_guard_size);
 
+    // Create monitor stack frame
+    let mon_stack_frame_obj_id = capdl_util_make_frame_obj(
+        &mut spec,
+        FrameInit::Fill(Fill {
+            entries: [].to_vec(),
+        }),
+        &format!("monitor_stack"),
+        None,
+        PageSize::Small.fixed_size_bits(kernel_config) as usize,
+    );
+    let mon_stack_frame_cap =
+        capdl_util_make_frame_cap(mon_stack_frame_obj_id, true, true, false, true);
+    let mon_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec, monitor_tcb_obj_id);
+    map_page(
+        &mut spec,
+        kernel_config,
+        "monitor",
+        mon_vspace_obj_id,
+        mon_stack_frame_cap,
+        PageSize::Small,
+        kernel_config.pd_stack_bottom(PD_DEFAULT_STACK_SIZE),
+    )
+    .unwrap();
+
     // At this point, all of the required objects for the monitor have been created and it caps inserted into
     // the correct slot in the CSpace. We need to bind those objects into the TCB for the monitor to use them.
     // In addition, `add_elf_to_spec()` doesn't fill most the details in the TCB.
@@ -413,7 +436,7 @@ pub fn build_capdl_spec(
         &mut spec.get_root_object_mut(monitor_tcb_obj_id).unwrap().object
     {
         // Special case, monitor have its stack statically allocated.
-        monitor_tcb.extra.sp = monitor_elf.borrow().find_symbol("_stack").unwrap().0;
+        monitor_tcb.extra.sp = kernel_config.pd_stack_top();
         // While there is nothing stopping us from running the monitor at the highest priority alongside the
         // CapDL initialiser, the serial output can get garbled when the monitor TCB is resumed.
         monitor_tcb.extra.prio = u8::MAX - 1;
