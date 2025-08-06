@@ -14,14 +14,13 @@ use std::ops::Range;
 
 use sel4_capdl_initializer_types::*;
 
-use crate::capdl::spec::BytesContent;
+use crate::{capdl::spec::ElfContent, elf::ElfFile};
 
 // Given a `Spec` data structure from sel4_capdl_initializer_types, "flatten" it into a vector of bytes
 // for encapsulating it into the CapDL initialiser ELF.
-// Note that `BytesContent` comes from our spec.rs rather than sel4_capdl_initializer_types's because
-// it is not as easy to deserialise a JSON sequence into a `&'a [u8]` than a `Vec<u8>`
-pub fn reserialize_spec<'a>(
-    input_spec: &Spec<'static, String, BytesContent, ()>,
+pub fn reserialise_spec<'a>(
+    elfs: &Vec<ElfFile>,
+    input_spec: &Spec<'static, String, ElfContent, ()>,
     object_names_level: &ObjectNamesLevel,
 ) -> Vec<u8> {
     // A data structure to manage allocation of buffers in the flattened spec.
@@ -40,7 +39,15 @@ pub fn reserialize_spec<'a>(
         // The final step is to take the frame data and compress it using miniz_oxide::deflate::compress_to_vec()
         // to save memory then append it to `sources`.
         .traverse_data(|data| IndirectDeflatedBytesContent {
-            deflated_bytes_range: sources.append(&DeflatedBytesContent::pack(&data.bytes)),
+            deflated_bytes_range: sources.append(&DeflatedBytesContent::pack(
+                &elfs
+                    .get(data.elf_id)
+                    .unwrap()
+                    .segments
+                    .get(data.elf_seg_idx)
+                    .unwrap()
+                    .data[data.elf_seg_data_range.clone()],
+            )),
         });
 
     let mut blob = postcard::to_allocvec(&final_spec).unwrap();

@@ -6,11 +6,9 @@
 use core::ops::Range;
 
 use std::{
-    cell::RefCell,
     cmp::{min, Ordering},
     collections::HashMap,
     iter::repeat,
-    rc::Rc,
     u8,
 };
 
@@ -22,8 +20,8 @@ use crate::{
         memory::{create_vspace, map_page},
         spec::{
             object::{self, TcbExtraInfo},
-            AsidSlotEntry, BytesContent, CapTableEntry, Fill, FillEntry, FillEntryContent,
-            FrameInit, IrqEntry, NamedObject, Object, ObjectId, TemporaryContent, UntypedCover,
+            AsidSlotEntry, CapTableEntry, ElfContent, Fill, FillEntry, FillEntryContent, FrameInit,
+            IrqEntry, NamedObject, Object, ObjectId, UntypedCover,
         },
         util::*,
     },
@@ -149,7 +147,8 @@ impl CapDLSpec {
         &mut self,
         sel4_config: &Config,
         pd_name: &str,
-        elf: Rc<RefCell<ElfFile>>,
+        elf_id: usize,
+        elf: &ElfFile,
     ) -> Result<ObjectId, String> {
         // We assumes that ELFs and PDs have a one-to-one relationship. So for each ELF we create a VSpace.
         let vspace_obj_id = create_vspace(self, sel4_config, pd_name);
@@ -157,7 +156,7 @@ impl CapDLSpec {
 
         // For each loadable segment in the ELF, map it into the address space of this PD.
         let mut frame_sequence = 0; // For object naming purpose only.
-        for (seg_idx, segment) in elf.borrow().loadable_segments().iter().enumerate() {
+        for (seg_idx, segment) in elf.loadable_segments().iter().enumerate() {
             if segment.data.len() == 0 {
                 continue;
             }
@@ -196,9 +195,9 @@ impl CapDLSpec {
                                 start: dest_offset as usize,
                                 end: (dest_offset + len_to_cpy) as usize,
                             },
-                            content: FillEntryContent::Temp(TemporaryContent {
-                                elf_source: elf.clone(),
-                                elf_segment_id: seg_idx,
+                            content: FillEntryContent::Data(ElfContent {
+                                elf_id,
+                                elf_seg_idx: seg_idx,
                                 elf_seg_data_range: (section_offset as usize
                                     ..((section_offset + len_to_cpy) as usize)),
                             }),
@@ -268,7 +267,6 @@ impl CapDLSpec {
         // this frame to the TCB as well.
         let ipcbuf_frame_cap_for_tcb = ipcbuf_frame_cap.clone();
         let ipcbuf_vaddr = elf
-            .borrow()
             .find_symbol(SYMBOL_IPC_BUFFER)
             .unwrap_or_else(|_| panic!("Could not find {}", SYMBOL_IPC_BUFFER))
             .0;
@@ -291,7 +289,7 @@ impl CapDLSpec {
         };
 
         let tcb_name = format!("tcb_{}", pd_name);
-        let entry_point = elf.borrow().entry;
+        let entry_point = elf.entry;
 
         let tcb_extra_info = object::TcbExtraInfo {
             ipc_buffer_addr: ipcbuf_vaddr,
@@ -361,8 +359,7 @@ fn map_memory_region(
 /// Build a CapDL Spec according to the System Description File.
 pub fn build_capdl_spec(
     kernel_config: &Config,
-    monitor_elf: Rc<RefCell<ElfFile>>,
-    pd_elf_files: &mut Vec<Rc<RefCell<ElfFile>>>,
+    pd_elf_files: &mut Vec<ElfFile>,
     system: &SystemDescription,
 ) -> Result<CapDLSpec, String> {
     let mut spec = CapDLSpec::new();
@@ -370,11 +367,13 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 1. Create the monitor's spec.
     // *********************************
-
     // Parse ELF, create VSpace, map in all ELF loadable frames and IPC buffer, and create TCB.
-    let monitor_tcb_obj_id = spec
-        .add_elf_to_spec(kernel_config, MONITOR_PD_NAME, monitor_elf.clone())
-        .unwrap();
+    let mon_elf_id = pd_elf_files.len() - 1;
+    let monitor_tcb_obj_id = {
+        let monitor_elf = pd_elf_files.get(mon_elf_id).unwrap();
+        spec.add_elf_to_spec(kernel_config, MONITOR_PD_NAME, mon_elf_id, monitor_elf)
+            .unwrap()
+    };
 
     // Create monitor fault endpoint object + cap
     let mon_fault_ep_obj_id = capdl_util_make_endpoint_obj(&mut spec, MONITOR_PD_NAME, true);
@@ -521,7 +520,12 @@ pub fn build_capdl_spec(
 
         // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
         let pd_tcb_obj_id = spec
-            .add_elf_to_spec(kernel_config, &pd.name, pd_elf_files[pd_global_idx].clone())
+            .add_elf_to_spec(
+                kernel_config,
+                &pd.name,
+                pd_global_idx,
+                &pd_elf_files[pd_global_idx],
+            )
             .unwrap();
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec, pd_tcb_obj_id);
 
@@ -561,7 +565,7 @@ pub fn build_capdl_spec(
         let mut symbols_to_write: Vec<(&String, u64)> = Vec::new();
         for setvar in pd.setvars.iter() {
             // Check that the symbol exists in the ELF
-            match elf_obj.borrow().find_symbol(&setvar.symbol) {
+            match elf_obj.find_symbol(&setvar.symbol) {
                 Ok(sym_info) => {
                     // Sanity check that the symbol is of word size so we dont overwrite anything.
                     if sym_info.1 != (kernel_config.word_size / 8) {
@@ -571,7 +575,9 @@ pub fn build_capdl_spec(
                         ));
                     }
                     let data = match &setvar.kind {
-                        sdf::SysSetVarKind::Size { mr } => mr_name_to_frames.get(mr).unwrap().0.size,
+                        sdf::SysSetVarKind::Size { mr } => {
+                            mr_name_to_frames.get(mr).unwrap().0.size
+                        }
                         sdf::SysSetVarKind::Vaddr { address } => *address,
                         sdf::SysSetVarKind::Paddr { region } => {
                             mr_name_to_frames.get(region).unwrap().0.phys_addr.unwrap()
@@ -582,10 +588,9 @@ pub fn build_capdl_spec(
                 Err(err) => return Err(err),
             }
         }
-        let elf_obj = pd_elf_files[pd_global_idx].clone();
+        let elf_obj = pd_elf_files.get_mut(pd_global_idx).unwrap();
         for (sym_name, value) in symbols_to_write.iter() {
             elf_obj
-                .borrow_mut()
                 .write_symbol(*sym_name, &value.to_le_bytes())
                 .unwrap();
         }
@@ -875,11 +880,9 @@ pub fn build_capdl_spec(
         let name = pd.name.as_bytes();
         let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
         elf_obj
-            .borrow_mut()
             .write_symbol("microkit_name", &name[..name_length])
             .unwrap();
         elf_obj
-            .borrow_mut()
             .write_symbol("microkit_passive", &[pd.passive as u8])
             .unwrap();
 
@@ -903,18 +906,10 @@ pub fn build_capdl_spec(
                 }
             }
         }
-        elf_obj
-            .borrow_mut()
-            .write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
-        elf_obj
-            .borrow_mut()
-            .write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
-        elf_obj
-            .borrow_mut()
-            .write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
-        elf_obj
-            .borrow_mut()
-            .write_symbol("microkit_ioports", &pd.ioport_bits().to_le_bytes())?;
+        elf_obj.write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
+        elf_obj.write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
+        elf_obj.write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
+        elf_obj.write_symbol("microkit_ioports", &pd.ioport_bits().to_le_bytes())?;
 
         // Step 3-17 bind this PD's TCB to the monitor, this accomplish two purposes:
         // 1. Allow PDs' TCBs to be named to their proper name in SDF in debug config.
@@ -1007,20 +1002,19 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 5. Write ELF symbols in the monitor.
     // *********************************
+    let monitor_elf = pd_elf_files.get_mut(mon_elf_id).unwrap();
     let pd_names: Vec<String> = system
         .protection_domains
         .iter()
         .map(|pd| pd.name.clone())
         .collect();
     monitor_elf
-        .borrow_mut()
         .write_symbol(
             "pd_names_len",
             &system.protection_domains.len().to_le_bytes(),
         )
         .unwrap();
     monitor_elf
-        .borrow_mut()
         .write_symbol(
             "pd_names",
             &monitor_serialise_names(&pd_names, MAX_PDS, PD_MAX_NAME_LENGTH),
@@ -1039,11 +1033,9 @@ pub fn build_capdl_spec(
         .collect();
 
     monitor_elf
-        .borrow_mut()
         .write_symbol("vm_names_len", &vm_names.len().to_le_bytes())
         .unwrap();
     monitor_elf
-        .borrow_mut()
         .write_symbol(
             "vm_names",
             &monitor_serialise_names(&vm_names, MAX_VMS, VM_MAX_NAME_LENGTH),
@@ -1051,7 +1043,6 @@ pub fn build_capdl_spec(
         .unwrap();
 
     monitor_elf
-        .borrow_mut()
         .write_symbol(
             "pd_stack_bottom_addrs",
             &monitor_serialise_u64_vec(&pd_stack_bottoms),
@@ -1059,33 +1050,7 @@ pub fn build_capdl_spec(
         .unwrap();
 
     // *********************************
-    // Step 6. Fill in the data for all ELF loadable frames.
-    // *********************************
-    // Previously, spec.add_elf_to_spec() already created all the frame objects for us and book-keeped where
-    // the data for each frame should come from. We now fetch it from the ELF objects *after* all symbols have been
-    // set.
-    for obj in spec.objects.iter_mut() {
-        if let Object::Frame(frame_obj) = &mut obj.object {
-            let FrameInit::Fill(frame_fill) = &mut frame_obj.init;
-            for entry in frame_fill.entries.iter_mut() {
-                let mut temp_fill_content_maybe: Option<TemporaryContent> = None;
-                if let FillEntryContent::Temp(temp_fill) = &entry.content {
-                    temp_fill_content_maybe = Some(temp_fill.clone());
-                }
-                if temp_fill_content_maybe.is_some() {
-                    let temp_fill = temp_fill_content_maybe.unwrap();
-                    let elf_segments = temp_fill.elf_source.borrow();
-                    let elf_segment = elf_segments.segments.get(temp_fill.elf_segment_id).unwrap();
-                    entry.content = FillEntryContent::Data(BytesContent {
-                        bytes: elf_segment.data[temp_fill.elf_seg_data_range].to_vec(),
-                    });
-                }
-            }
-        }
-    }
-
-    // *********************************
-    // Step 7. Sort the root objects
+    // Step 6. Sort the root objects
     // *********************************
     // The CapDL initialiser expects objects with paddr to come first, then sorted by size so that the
     // allocation algorithm at run-time can run more efficiently.

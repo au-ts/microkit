@@ -6,11 +6,9 @@
 use core::ops::Range;
 use sel4_capdl_initializer_types::Word;
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     capdl::SLOT_BITS,
-    elf::ElfFile,
     sel4::{Config, ObjectType},
 };
 
@@ -60,30 +58,14 @@ pub struct FillEntry {
 
 #[derive(Serialize, Clone, Eq, PartialEq)]
 pub enum FillEntryContent {
-    Data(BytesContent),
-    Temp(TemporaryContent),
+    Data(ElfContent),
 }
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
-pub struct BytesContent {
-    pub bytes: Vec<u8>,
-}
-
-// This is not valid CapDL, it is only used internally as a placeholder
-// for ELF frame objects until we write out the data
-#[derive(Clone, Eq, PartialEq)]
-pub struct TemporaryContent {
-    pub elf_source: Rc<RefCell<ElfFile>>,
-    pub elf_segment_id: usize,
+pub struct ElfContent {
+    pub elf_id: usize,
+    pub elf_seg_idx: usize,
     pub elf_seg_data_range: Range<usize>,
-}
-impl Serialize for TemporaryContent {
-    fn serialize<S>(&self, _: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        unreachable!("All TemporaryContent should have already been converted to BytesContent at spec serialisation time!")
-    }
 }
 
 #[derive(Serialize, Clone, Eq, PartialEq)]

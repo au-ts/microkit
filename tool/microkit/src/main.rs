@@ -7,8 +7,8 @@
 // we want our asserts, even if the compiler figures out they hold true already during compile-time
 #![allow(clippy::assertions_on_constants)]
 
-use microkit_tool::capdl::spec::BytesContent;
-use microkit_tool::capdl::{build_capdl_spec, reserialize_spec};
+use microkit_tool::capdl::spec::ElfContent;
+use microkit_tool::capdl::{build_capdl_spec, reserialise_spec};
 use microkit_tool::elf::{ElfFile, ElfSegmentAttributes};
 use microkit_tool::loader::Loader;
 use microkit_tool::sdf::parse;
@@ -19,10 +19,8 @@ use microkit_tool::util::{
     human_size_strict, json_str, json_str_as_bool, json_str_as_u64, round_up,
 };
 use sel4_capdl_initializer_types::{ObjectNamesLevel, Spec};
-use std::cell::RefCell;
 use std::fs::{self, metadata};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 fn get_full_path(path: &Path, search_paths: &Vec<PathBuf>) -> Option<PathBuf> {
     for search_path in search_paths {
@@ -464,8 +462,7 @@ fn main() -> Result<(), String> {
         }
     };
 
-    let monitor_elf: Rc<RefCell<ElfFile>> =
-        Rc::new(ElfFile::from_path(&monitor_elf_path).unwrap().into());
+    let monitor_elf = ElfFile::from_path(&monitor_elf_path).unwrap();
 
     let mut search_paths = vec![std::env::current_dir().unwrap()];
     for path in args.search_paths {
@@ -478,9 +475,7 @@ fn main() -> Result<(), String> {
         for pd in &system.protection_domains {
             match get_full_path(&pd.program_image, &search_paths) {
                 Some(path) => {
-                    let elf: Rc<RefCell<ElfFile>> =
-                        Rc::new(ElfFile::from_path(&path).unwrap().into());
-                    pd_elf_files.push(elf);
+                    pd_elf_files.push(ElfFile::from_path(&path).unwrap());
                 }
                 None => {
                     return Err(format!(
@@ -490,9 +485,11 @@ fn main() -> Result<(), String> {
                 }
             }
         }
+        pd_elf_files.push(monitor_elf);
 
         // We have parsed the XML and all ELF files, create the CapDL spec of the system described in the XML.
-        let spec = build_capdl_spec(&kernel_config, monitor_elf, &mut pd_elf_files, &system).unwrap();
+        let spec =
+            build_capdl_spec(&kernel_config,&mut pd_elf_files, &system).unwrap();
 
         // Reserialise the spec into a type that can be understood by rust-sel4.
         let spec_reserialised = {
@@ -500,7 +497,7 @@ fn main() -> Result<(), String> {
             let spec_as_json = serde_json::to_string_pretty(&spec).unwrap();
             fs::write(args.report, &spec_as_json).unwrap();
 
-            serde_json::from_str::<Spec<String, BytesContent, ()>>(&spec_as_json).unwrap()
+            serde_json::from_str::<Spec<String, ElfContent, ()>>(&spec_as_json).unwrap()
         };
 
         // Now embed the built spec into the CapDL initialiser.
@@ -510,7 +507,10 @@ fn main() -> Result<(), String> {
             "release" | "benchmark" => ObjectNamesLevel::None,
             _ => panic!("unknown configuration {}", args.config),
         };
-        (spec.objects.len(), reserialize_spec::reserialize_spec(&spec_reserialised, &name_level))
+        (
+            spec.objects.len(),
+            reserialise_spec::reserialise_spec(&pd_elf_files, &spec_reserialised, &name_level),
+        )
     };
 
     let footprint = capdl_spec_as_binary.len();

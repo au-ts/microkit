@@ -9,7 +9,7 @@ pub mod spec;
 mod memory;
 mod util;
 mod irq;
-pub mod reserialize_spec;
+pub mod reserialise_spec;
 
 pub use self::capdl::*;
-pub use self::reserialize_spec::*;
+pub use self::reserialise_spec::*;
