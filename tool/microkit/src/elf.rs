@@ -383,7 +383,7 @@ impl ElfFile {
             .iter()
             .map(|segm| segm.virt_addr)
             .collect();
-        return *existing_vaddrs.iter().min().unwrap();
+        *existing_vaddrs.iter().min().unwrap()
     }
 
     pub fn highest_vaddr(&self) -> u64 {
@@ -392,12 +392,12 @@ impl ElfFile {
             .iter()
             .map(|segm| segm.virt_addr + segm.mem_size())
             .collect();
-        return *existing_vaddrs.iter().max().unwrap();
+        *existing_vaddrs.iter().max().unwrap()
     }
 
     /// Returns the next available unaligned virtual address for inserting a new segment.
     pub fn next_vaddr(&self) -> u64 {
-        return self.highest_vaddr() + 1;
+        self.highest_vaddr() + 1
     }
 
     /// Segment will be added as loadable, though they won't have a valid p_offset
@@ -439,7 +439,7 @@ impl ElfFile {
             ident_version: 1,
             ident_osabi: 0,
             ident_abiversion: 0,
-            _padding: [0; 7].into(),
+            _padding: [0; 7],
             type_: 2, // executable file
             machine: self.machine,
             version: 1,

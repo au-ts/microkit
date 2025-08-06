@@ -648,8 +648,8 @@ impl ProtectionDomain {
                         let irq = SysIrq {
                             id: id as u64,
                             kind: SysIrqKind::Conventional {
-                                irq: irq,
-                                trigger: trigger,
+                                irq,
+                                trigger,
                             },
                         };
                         irqs.push(irq);
@@ -685,11 +685,11 @@ impl ProtectionDomain {
                         let irq = SysIrq {
                             id: id as u64,
                             kind: SysIrqKind::IOAPIC {
-                                ioapic: ioapic,
-                                pin: pin,
-                                level: level,
-                                polarity: polarity,
-                                vector: vector,
+                                ioapic,
+                                pin,
+                                level,
+                                polarity,
+                                vector,
                             },
                         };
                         irqs.push(irq);
@@ -698,7 +698,7 @@ impl ProtectionDomain {
                         check_attributes(xml_sdf, &child, &["id", "pcidev", "handle", "vector"])?;
 
                         let pciparts: Vec<u64> = pcidev_str
-                            .split(|c: char| c == ':' || c == '.')
+                            .split([':', '.'])
                             .map(str::trim)
                             .map(|x| {
                                 u64::from_str_radix(x, 16).expect(
@@ -725,8 +725,8 @@ impl ProtectionDomain {
                                 pci_bus: pciparts[0],
                                 pci_dev: pciparts[1],
                                 pci_func: pciparts[2],
-                                handle: handle,
-                                vector: vector,
+                                handle,
+                                vector,
                             },
                         };
                         irqs.push(irq);
@@ -1435,9 +1435,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             ));
         }
         if pd.name == MONITOR_PD_NAME {
-            return Err(format!(
-                "Error: the PD name 'monitor' is reserved for the Microkit Monitor.",
-            ));
+            return Err("Error: the PD name 'monitor' is reserved for the Microkit Monitor.".to_string());
         }
     }
 

@@ -30,7 +30,7 @@ pub fn capdl_util_make_frame_obj(
     size_bits: usize,
 ) -> ObjectId {
     let frame_inner_obj = Object::Frame(object::Frame {
-        size_bits: size_bits,
+        size_bits,
         paddr,
         init: frame_init,
     });
@@ -139,7 +139,7 @@ pub fn capdl_util_make_ntfn_obj(spec: &mut CapDLSpec, pd_name: &str) -> ObjectId
 pub fn capdl_util_make_ntfn_cap(ntfn_obj_id: ObjectId, read: bool, write: bool, badge: u64) -> Cap {
     Cap::Notification(cap::Notification {
         object: ntfn_obj_id,
-        badge: badge,
+        badge,
         rights: Rights {
             read,
             write,

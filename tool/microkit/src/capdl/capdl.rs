@@ -8,7 +8,6 @@ use core::ops::Range;
 use std::{
     cmp::{min, Ordering},
     collections::HashMap,
-    iter::repeat,
     u8,
 };
 
@@ -157,7 +156,7 @@ impl CapDLSpec {
         // For each loadable segment in the ELF, map it into the address space of this PD.
         let mut frame_sequence = 0; // For object naming purpose only.
         for (seg_idx, segment) in elf.loadable_segments().iter().enumerate() {
-            if segment.data.len() == 0 {
+            if segment.data.is_empty() {
                 continue;
             }
 
@@ -414,7 +413,7 @@ pub fn build_capdl_spec(
         FrameInit::Fill(Fill {
             entries: [].to_vec(),
         }),
-        &format!("monitor_stack"),
+        &format!("{}_stack", MONITOR_PD_NAME),
         None,
         PageSize::Small.fixed_size_bits(kernel_config) as usize,
     );
@@ -465,12 +464,7 @@ pub fn build_capdl_spec(
         let frame_size_bits = mr.page_size.fixed_size_bits(kernel_config);
 
         for frame_sequence in 0..mr.page_count {
-            let paddr = match mr.phys_addr {
-                Some(base_paddr) => {
-                    Some((base_paddr + (frame_sequence * mr.page_size_bytes())) as usize)
-                }
-                None => None,
-            };
+            let paddr = mr.phys_addr.map(|base_paddr| (base_paddr + (frame_sequence * mr.page_size_bytes())) as usize);
             frame_ids.push(capdl_util_make_frame_obj(
                 &mut spec,
                 FrameInit::Fill(Fill {
@@ -591,7 +585,7 @@ pub fn build_capdl_spec(
         let elf_obj = pd_elf_files.get_mut(pd_global_idx).unwrap();
         for (sym_name, value) in symbols_to_write.iter() {
             elf_obj
-                .write_symbol(*sym_name, &value.to_le_bytes())
+                .write_symbol(sym_name, &value.to_le_bytes())
                 .unwrap();
         }
 
@@ -781,7 +775,7 @@ pub fn build_capdl_spec(
                 // Create scheduling context
                 let vm_vcpu_sc_obj_id = capdl_util_make_sc_obj(
                     &mut spec,
-                    &&format!("{}_{}", virtual_machine.name, vcpu.id),
+                    &format!("{}_{}", virtual_machine.name, vcpu.id),
                     PD_SCHEDCONTEXT_EXTRA_SIZE_BITS as usize,
                     virtual_machine.period,
                     virtual_machine.budget,
@@ -1028,7 +1022,7 @@ pub fn build_capdl_spec(
         .flat_map(|pd_with_vm| {
             let vm = pd_with_vm.virtual_machine.as_ref().unwrap();
             let num_vcpus = vm.vcpus.len();
-            repeat(vm.name.clone()).take(num_vcpus)
+            std::iter::repeat_n(vm.name.clone(), num_vcpus)
         })
         .collect();
 
