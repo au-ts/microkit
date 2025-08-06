@@ -494,7 +494,7 @@ fn main() -> Result<(), String> {
         // Reserialise the spec into a type that can be understood by rust-sel4.
         let spec_reserialised = {
             // Eagerly write out the spec so we can debug in case something crash later.
-            let spec_as_json = serde_json::to_string_pretty(&spec).unwrap();
+            let spec_as_json = serde_json::to_string(&spec).unwrap();
             fs::write(args.report, &spec_as_json).unwrap();
 
             serde_json::from_str::<Spec<String, ElfContent, ()>>(&spec_as_json).unwrap()
