@@ -472,50 +472,53 @@ fn main() -> Result<(), String> {
         search_paths.push(PathBuf::from(path));
     }
 
-    // Get the elf files for each pd:
-    let mut pd_elf_files = Vec::with_capacity(system.protection_domains.len());
-    for pd in &system.protection_domains {
-        match get_full_path(&pd.program_image, &search_paths) {
-            Some(path) => {
-                let elf: Rc<RefCell<ElfFile>> = Rc::new(ElfFile::from_path(&path).unwrap().into());
-                pd_elf_files.push(elf);
-            }
-            None => {
-                return Err(format!(
-                    "unable to find program image: '{}'",
-                    pd.program_image.display()
-                ))
+    let (num_objects, capdl_spec_as_binary) = {
+        // Get the elf files for each pd:
+        let mut pd_elf_files = Vec::with_capacity(system.protection_domains.len());
+        for pd in &system.protection_domains {
+            match get_full_path(&pd.program_image, &search_paths) {
+                Some(path) => {
+                    let elf: Rc<RefCell<ElfFile>> =
+                        Rc::new(ElfFile::from_path(&path).unwrap().into());
+                    pd_elf_files.push(elf);
+                }
+                None => {
+                    return Err(format!(
+                        "unable to find program image: '{}'",
+                        pd.program_image.display()
+                    ))
+                }
             }
         }
-    }
 
-    // We have parsed the XML and all ELF files, create the CapDL spec of the system described in the XML.
-    let spec = build_capdl_spec(&kernel_config, monitor_elf, &mut pd_elf_files, &system)?;
+        // We have parsed the XML and all ELF files, create the CapDL spec of the system described in the XML.
+        let spec = build_capdl_spec(&kernel_config, monitor_elf, &mut pd_elf_files, &system).unwrap();
 
-    // Eagerly write out the spec so we can debug in case something crash later.
-    let spec_as_json = serde_json::to_string(&spec).unwrap();
-    fs::write(args.report, &spec_as_json).unwrap();
+        // Reserialise the spec into a type that can be understood by rust-sel4.
+        let spec_reserialised = {
+            // Eagerly write out the spec so we can debug in case something crash later.
+            let spec_as_json = serde_json::to_string_pretty(&spec).unwrap();
+            fs::write(args.report, &spec_as_json).unwrap();
 
-    // Reserialise the spec into a type that can be understood by rust-sel4.
-    let spec_reserialised =
-        serde_json::from_str::<Spec<String, BytesContent, ()>>(&spec_as_json).unwrap();
+            serde_json::from_str::<Spec<String, BytesContent, ()>>(&spec_as_json).unwrap()
+        };
 
-    // Now embed the built spec into the CapDL initialiser.
-    let name_level = match args.config {
-        "debug" => ObjectNamesLevel::All,
-        // We don't copy over the object names as there is no printing in these configuration to save memory.
-        "release" | "benchmark" => ObjectNamesLevel::None,
-        _ => panic!("unknown configuration {}", args.config)
+        // Now embed the built spec into the CapDL initialiser.
+        let name_level = match args.config {
+            "debug" => ObjectNamesLevel::All,
+            // We don't copy over the object names as there is no printing in these configuration to save memory.
+            "release" | "benchmark" => ObjectNamesLevel::None,
+            _ => panic!("unknown configuration {}", args.config),
+        };
+        (spec.objects.len(), reserialize_spec::reserialize_spec(&spec_reserialised, &name_level))
     };
-    let serialized_spec =
-        reserialize_spec::reserialize_spec(&spec_reserialised, &name_level);
 
-    let footprint = serialized_spec.len();
+    let footprint = capdl_spec_as_binary.len();
     let heap_size = footprint * 2 + 16 * 4096;
 
     println!(
         "CAPDL SPEC: number of root objects = {}, spec footprint = {}, initialiser heap size = {}",
-        spec.objects.len(),
+        num_objects,
         human_size_strict(footprint as u64),
         human_size_strict(heap_size as u64)
     );
@@ -524,7 +527,7 @@ fn main() -> Result<(), String> {
     // rust-sel4/crates/sel4-capdl-initializer/src/main.rs
     let mut initialiser_elf = ElfFile::from_path(&capdl_init_elf_path).unwrap();
     let spec_vaddr = round_up(initialiser_elf.next_vaddr(), PageSize::Small as u64);
-    initialiser_elf.add_segment(ElfSegmentAttributes::Read, spec_vaddr, serialized_spec);
+    initialiser_elf.add_segment(ElfSegmentAttributes::Read, spec_vaddr, capdl_spec_as_binary);
     initialiser_elf
         .write_symbol(
             "sel4_capdl_initializer_serialized_spec_start",
