@@ -145,7 +145,7 @@ impl CapDLSpec {
     /// Returns the object ID of the TCB
     /// NOTE that all ELF frames will just be reference to the original ELF object rather than the actual data.
     /// So that symbols can be patched before the frames' data are filled in.
-    pub fn add_elf_to_spec(
+    fn add_elf_to_spec(
         &mut self,
         sel4_config: &Config,
         pd_name: &str,
@@ -458,13 +458,11 @@ pub fn build_capdl_spec(
     }
 
     // *********************************
-    // Step 2. Create the memory regions' spec. Result is a hashmap keyed on MR name, value is Vec of frame object IDs
+    // Step 2. Create the memory regions' spec. Result is a hashmap keyed on MR name, value is (parsed XML obj, Vec of frame object IDs)
     // *********************************
-    let mut mr_to_frame_obj_ids: HashMap<&String, Vec<ObjectId>> = HashMap::new();
-    let mut mr_to_xml_obj: HashMap<&String, &SysMemoryRegion> = HashMap::new();
+    let mut mr_name_to_frames: HashMap<String, (&SysMemoryRegion, Vec<ObjectId>)> = HashMap::new();
     for mr in system.memory_regions.iter() {
-        mr_to_frame_obj_ids.insert(&mr.name, [].to_vec());
-        mr_to_xml_obj.insert(&mr.name, mr);
+        let mut frame_ids = Vec::new();
         let frame_size_bits = mr.page_size.fixed_size_bits(kernel_config);
 
         for frame_sequence in 0..mr.page_count {
@@ -474,19 +472,18 @@ pub fn build_capdl_spec(
                 }
                 None => None,
             };
-            mr_to_frame_obj_ids
-                .get_mut(&mr.name)
-                .unwrap()
-                .push(capdl_util_make_frame_obj(
-                    &mut spec,
-                    FrameInit::Fill(Fill {
-                        entries: [].to_vec(),
-                    }),
-                    &format!("mr_{}_{:09}", mr.name, frame_sequence),
-                    paddr,
-                    frame_size_bits as usize,
-                ));
+            frame_ids.push(capdl_util_make_frame_obj(
+                &mut spec,
+                FrameInit::Fill(Fill {
+                    entries: [].to_vec(),
+                }),
+                &format!("mr_{}_{:09}", mr.name, frame_sequence),
+                paddr,
+                frame_size_bits as usize,
+            ));
         }
+
+        mr_name_to_frames.insert(mr.name.clone(), (mr, frame_ids));
     }
 
     // *********************************
@@ -546,8 +543,8 @@ pub fn build_capdl_spec(
         // Step 3-2: Map in all Memory Regions, keep tabs on what MR is mapped where so we can setvar later
         let mut mr_to_vaddr: HashMap<&String, u64> = HashMap::new();
         for map in pd.maps.iter() {
-            let page_size = mr_to_xml_obj.get(&map.mr).unwrap().page_size;
-            let frames = mr_to_frame_obj_ids.get(&map.mr).unwrap();
+            let (mr_description, frames) = mr_name_to_frames.get(&map.mr).unwrap();
+            let page_size = mr_description.page_size;
             map_memory_region(
                 &mut spec,
                 kernel_config,
@@ -574,10 +571,10 @@ pub fn build_capdl_spec(
                         ));
                     }
                     let data = match &setvar.kind {
-                        sdf::SysSetVarKind::Size { mr } => mr_to_xml_obj.get(&mr).unwrap().size,
+                        sdf::SysSetVarKind::Size { mr } => mr_name_to_frames.get(mr).unwrap().0.size,
                         sdf::SysSetVarKind::Vaddr { address } => *address,
                         sdf::SysSetVarKind::Paddr { region } => {
-                            mr_to_xml_obj.get(&region).unwrap().phys_addr.unwrap()
+                            mr_name_to_frames.get(region).unwrap().0.phys_addr.unwrap()
                         }
                     };
                     symbols_to_write.push((&setvar.symbol, data));
@@ -722,8 +719,8 @@ pub fn build_capdl_spec(
             let vm_vspace_obj_id = create_vspace(&mut spec, kernel_config, &virtual_machine.name);
             let vm_vspace_cap = capdl_util_make_page_table_cap(vm_vspace_obj_id);
             for map in virtual_machine.maps.iter() {
-                let page_size = mr_to_xml_obj.get(&map.mr).unwrap().page_size;
-                let frames = mr_to_frame_obj_ids.get(&map.mr).unwrap();
+                let (mr_description, frames) = mr_name_to_frames.get(&map.mr).unwrap();
+                let page_size = mr_description.page_size;
                 map_memory_region(
                     &mut spec,
                     kernel_config,
