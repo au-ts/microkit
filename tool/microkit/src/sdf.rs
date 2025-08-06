@@ -38,6 +38,7 @@ const PD_MAX_PRIORITY: u8 = 254;
 pub const BUDGET_DEFAULT: u64 = 1000;
 
 /// Default to a stack size of a single page
+pub const MONITOR_PD_NAME: &str = "monitor";
 pub const PD_DEFAULT_STACK_SIZE: u64 = 0x1000;
 const PD_MIN_STACK_SIZE: u64 = 0x1000;
 const PD_MAX_STACK_SIZE: u64 = 1024 * 1024 * 16;
@@ -229,7 +230,7 @@ pub struct ProtectionDomain {
     /// protection domain exists
     pub parent: Option<usize>,
     /// Location in the parsed SDF file
-    text_pos: roxmltree::TextPos,
+    text_pos: Option<roxmltree::TextPos>,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -836,7 +837,7 @@ impl ProtectionDomain {
             virtual_machine,
             has_children,
             parent: None,
-            text_pos: xml_sdf.doc.text_pos_at(node.range().start),
+            text_pos: Some(xml_sdf.doc.text_pos_at(node.range().start)),
         })
     }
 }
@@ -1287,7 +1288,7 @@ fn pd_tree_to_list(
                 "Error: duplicate id: {} in protection domain: '{}' @ {}",
                 child_id,
                 pd.name,
-                loc_string(xml_sdf, child_pd.text_pos)
+                loc_string(xml_sdf, child_pd.text_pos.unwrap())
             ));
         }
         // Also check that the child ID does not clash with any vCPU IDs, if the PD has a virtual machine
@@ -1295,7 +1296,7 @@ fn pd_tree_to_list(
             for vcpu in &vm.vcpus {
                 if child_id == vcpu.id {
                     return Err(format!("Error: duplicate id: {} clashes with virtual machine vcpu id in protection domain: '{}' @ {}",
-                                        child_id, pd.name, loc_string(xml_sdf, child_pd.text_pos)));
+                                        child_id, pd.name, loc_string(xml_sdf, child_pd.text_pos.unwrap())));
                 }
             }
         }
@@ -1433,6 +1434,11 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
                 pd.name
             ));
         }
+        if pd.name == MONITOR_PD_NAME {
+            return Err(format!(
+                "Error: the PD name 'monitor' is reserved for the Microkit Monitor.",
+            ));
+        }
     }
 
     for mr in &mrs {
@@ -1464,7 +1470,11 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             if all_irqs.contains(&sysirq.irq_num()) {
                 return Err(format!(
                     "Error: duplicate irq number/vector: {} in protection domain: '{}' @ {}:{}:{}",
-                    sysirq.irq_num(), pd.name, filename, pd.text_pos.row, pd.text_pos.col
+                    sysirq.irq_num(),
+                    pd.name,
+                    filename,
+                    pd.text_pos.unwrap().row,
+                    pd.text_pos.unwrap().col
                 ));
             }
             all_irqs.push(sysirq.irq_num());
@@ -1479,7 +1489,11 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             if ch_ids[pd_idx].contains(&sysirq.id) {
                 return Err(format!(
                     "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
-                    sysirq.id, pd.name, filename, pd.text_pos.row, pd.text_pos.col
+                    sysirq.id,
+                    pd.name,
+                    filename,
+                    pd.text_pos.unwrap().row,
+                    pd.text_pos.unwrap().col
                 ));
             }
             ch_ids[pd_idx].push(sysirq.id);
@@ -1491,7 +1505,11 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             let pd = &pds[ch.end_a.pd];
             return Err(format!(
                 "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
-                ch.end_a.id, pd.name, filename, pd.text_pos.row, pd.text_pos.col
+                ch.end_a.id,
+                pd.name,
+                filename,
+                pd.text_pos.unwrap().row,
+                pd.text_pos.unwrap().col
             ));
         }
 
@@ -1499,7 +1517,11 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             let pd = &pds[ch.end_b.pd];
             return Err(format!(
                 "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
-                ch.end_b.id, pd.name, filename, pd.text_pos.row, pd.text_pos.col
+                ch.end_b.id,
+                pd.name,
+                filename,
+                pd.text_pos.unwrap().row,
+                pd.text_pos.unwrap().col
             ));
         }
 
@@ -1530,7 +1552,11 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             if seen_ioport_ids.contains(&ioport.id) {
                 return Err(format!(
                     "Error: duplicate I/O port id: {} in protection domain: '{}' @ {}:{}:{}",
-                    ioport.id, pd.name, filename, pd.text_pos.row, pd.text_pos.col
+                    ioport.id,
+                    pd.name,
+                    filename,
+                    pd.text_pos.unwrap().row,
+                    pd.text_pos.unwrap().col
                 ));
             } else {
                 seen_ioport_ids.push(ioport.id);

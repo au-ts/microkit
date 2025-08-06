@@ -18,14 +18,20 @@ use serde::Serialize;
 
 use crate::{
     capdl::{
-        irq::create_irq_handler_cap, memory::{create_vspace, map_page}, spec::{
+        irq::create_irq_handler_cap,
+        memory::{create_vspace, map_page},
+        spec::{
             object::{self, TcbExtraInfo},
             AsidSlotEntry, BytesContent, CapTableEntry, Fill, FillEntry, FillEntryContent,
             FrameInit, IrqEntry, NamedObject, Object, ObjectId, TemporaryContent, UntypedCover,
-        }, util::*
+        },
+        util::*,
     },
     elf::ElfFile,
-    sdf::{self, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription, BUDGET_DEFAULT, PD_DEFAULT_STACK_SIZE},
+    sdf::{
+        self, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription, BUDGET_DEFAULT,
+        MONITOR_PD_NAME, PD_DEFAULT_STACK_SIZE,
+    },
     sel4::{Arch, Config, PageSize},
     util::{monitor_serialise_names, monitor_serialise_u64_vec, round_down},
     MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH, VM_MAX_NAME_LENGTH,
@@ -367,21 +373,21 @@ pub fn build_capdl_spec(
 
     // Parse ELF, create VSpace, map in all ELF loadable frames and IPC buffer, and create TCB.
     let monitor_tcb_obj_id = spec
-        .add_elf_to_spec(kernel_config, "monitor", monitor_elf.clone())
+        .add_elf_to_spec(kernel_config, MONITOR_PD_NAME, monitor_elf.clone())
         .unwrap();
 
     // Create monitor fault endpoint object + cap
-    let mon_fault_ep_obj_id = capdl_util_make_endpoint_obj(&mut spec, "monitor", true);
+    let mon_fault_ep_obj_id = capdl_util_make_endpoint_obj(&mut spec, MONITOR_PD_NAME, true);
     let mon_fault_ep_cap = capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, 0);
 
     // Create monitor reply object object + cap
-    let mon_reply_obj_id = capdl_util_make_reply_obj(&mut spec, "monitor");
+    let mon_reply_obj_id = capdl_util_make_reply_obj(&mut spec, MONITOR_PD_NAME);
     let mon_reply_cap = capdl_util_make_reply_cap(mon_reply_obj_id);
 
     // Create monitor scheduling context object + cap
     let mon_sc_obj_id = capdl_util_make_sc_obj(
         &mut spec,
-        "monitor",
+        MONITOR_PD_NAME,
         PD_SCHEDCONTEXT_EXTRA_SIZE_BITS as usize,
         BUDGET_DEFAULT,
         BUDGET_DEFAULT,
@@ -392,7 +398,7 @@ pub fn build_capdl_spec(
     // Create monitor CSpace and pre-insert the fault EP and reply caps into the correct slots in CSpace.
     let mon_cnode_obj_id = capdl_util_make_cnode_obj(
         &mut spec,
-        "monitor",
+        MONITOR_PD_NAME,
         PD_CAP_BITS as usize,
         [
             (MON_FAULT_EP_CAP_IDX as usize, mon_fault_ep_cap),
@@ -419,7 +425,7 @@ pub fn build_capdl_spec(
     map_page(
         &mut spec,
         kernel_config,
-        "monitor",
+        MONITOR_PD_NAME,
         mon_vspace_obj_id,
         mon_stack_frame_cap,
         PageSize::Small,
@@ -692,7 +698,8 @@ pub fn build_capdl_spec(
         // Step 3-10 Create spec and caps to IRQs
         for irq in pd.irqs.iter() {
             // Create a IRQ handler cap and insert into the requested CSpace's slot.
-            let irq_handle_cap = create_irq_handler_cap(&mut spec, kernel_config, &pd.name, pd_ntfn_obj_id, irq);
+            let irq_handle_cap =
+                create_irq_handler_cap(&mut spec, kernel_config, &pd.name, pd_ntfn_obj_id, irq);
             let irq_cap_idx = PD_BASE_IRQ_CAP + irq.id;
             caps_to_insert_to_pd_cspace.push((irq_cap_idx as usize, irq_handle_cap));
         }
