@@ -93,7 +93,7 @@ class BoardInfo:
     name: str
     arch: KernelArch
     gcc_cpu: Optional[str]
-    loader_link_address: int
+    loader_link_address: int | None
     kernel_options: KERNEL_OPTIONS
 
 
@@ -332,7 +332,7 @@ SUPPORTED_BOARDS = (
         name="x86_64_generic",
         arch=KernelArch.X86_64,
         gcc_cpu="generic",
-        loader_link_address=0x10000000,
+        loader_link_address=None,
         kernel_options = {
             "KernelIsMCS": True,
             "KernelPlatform": "pc99",
@@ -349,7 +349,7 @@ SUPPORTED_BOARDS = (
         name="x86_64_generic_vtx",
         arch=KernelArch.X86_64,
         gcc_cpu="generic",
-        loader_link_address=0x10000000,
+        loader_link_address=None,
         kernel_options = {
             "KernelIsMCS": True,
             "KernelPlatform": "pc99",
@@ -364,7 +364,7 @@ SUPPORTED_BOARDS = (
         name="x86_64_skylake",
         arch=KernelArch.X86_64,
         gcc_cpu="skylake",
-        loader_link_address=0x10000000,
+        loader_link_address=None,
         kernel_options = {
             "KernelIsMCS": True,
             "KernelPlatform": "pc99",
