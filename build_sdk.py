@@ -828,7 +828,6 @@ def main() -> None:
                 sel4_gen_config = build_sel4(sel4_dir, root_dir, build_dir, board, config)
             loader_printing = 1 if config.name == "debug" else 0
             loader_defines = [
-                ("LINK_ADDRESS", hex(board.loader_link_address)),
                 ("PRINTING", loader_printing)
             ]
             # There are some architecture dependent configuration options that the loader
@@ -845,6 +844,7 @@ def main() -> None:
                 loader_defines.append(("PHYSICAL_ADDRESS_BITS", arm_pa_size_bits))
 
             if not board.arch.is_x86():
+                loader_defines.append(("LINK_ADDRESS", hex(board.loader_link_address)))
                 build_elf_component("loader", root_dir, build_dir, board, config, loader_defines)
             build_elf_component("monitor", root_dir, build_dir, board, config, [])
             build_lib_component("libmicrokit", root_dir, build_dir, board, config)
