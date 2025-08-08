@@ -62,7 +62,7 @@ $(COPIED_KERNEL): $(KERNEL)
 
 qemu:
 	qemu-system-x86_64                      \
-			-cpu Nehalem,+fsgsbase,+pdpe1gb,+pcid,+invpcid,+xsave,+xsaves,+xsaveopt \
+			-cpu qemu64,+fsgsbase,+pdpe1gb,+pcid,+invpcid,+xsave,+xsaves,+xsaveopt \
 			-m "4G"                         \
 			-display none                   \
 			-serial mon:stdio               \
