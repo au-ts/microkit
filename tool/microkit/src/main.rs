@@ -403,7 +403,7 @@ fn main() -> Result<(), String> {
     };
 
     let x86_xsave_size = match arch {
-        Arch::X86_64 => Some(json_str_as_u64(&kernel_config_json, "XSAVE_SIZE").unwrap() as usize),
+        Arch::X86_64 => Some(json_str_as_u64(&kernel_config_json, "XSAVE_SIZE")? as usize),
         _ => None,
     };
 
@@ -462,7 +462,7 @@ fn main() -> Result<(), String> {
         }
     };
 
-    let monitor_elf = ElfFile::from_path(&monitor_elf_path).unwrap();
+    let monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
 
     let mut search_paths = vec![std::env::current_dir().unwrap()];
     for path in args.search_paths {
@@ -475,7 +475,7 @@ fn main() -> Result<(), String> {
         for pd in &system.protection_domains {
             match get_full_path(&pd.program_image, &search_paths) {
                 Some(path) => {
-                    pd_elf_files.push(ElfFile::from_path(&path).unwrap());
+                    pd_elf_files.push(ElfFile::from_path(&path)?);
                 }
                 None => {
                     return Err(format!(
@@ -488,8 +488,7 @@ fn main() -> Result<(), String> {
         pd_elf_files.push(monitor_elf);
 
         // We have parsed the XML and all ELF files, create the CapDL spec of the system described in the XML.
-        let spec =
-            build_capdl_spec(&kernel_config,&mut pd_elf_files, &system).unwrap();
+        let spec = build_capdl_spec(&kernel_config, &mut pd_elf_files, &system)?;
 
         // Reserialise the spec into a type that can be understood by rust-sel4.
         let spec_reserialised = {
@@ -497,6 +496,11 @@ fn main() -> Result<(), String> {
             let spec_as_json = serde_json::to_string(&spec).unwrap();
             fs::write(args.report, &spec_as_json).unwrap();
 
+            // The full type definition is `Spec<'a, N, D, M>` where:
+            // N = object name type
+            // D = frame fill data type
+            // M = embedded frame data type
+            // Only N and D is useful for Microkit.
             serde_json::from_str::<Spec<String, ElfContent, ()>>(&spec_as_json).unwrap()
         };
 
@@ -525,21 +529,17 @@ fn main() -> Result<(), String> {
 
     // Patch the spec and heap into the ELF image. These symbol names must match
     // rust-sel4/crates/sel4-capdl-initializer/src/main.rs
-    let mut initialiser_elf = ElfFile::from_path(&capdl_init_elf_path).unwrap();
+    let mut initialiser_elf = ElfFile::from_path(&capdl_init_elf_path)?;
     let spec_vaddr = round_up(initialiser_elf.next_vaddr(), PageSize::Small as u64);
     initialiser_elf.add_segment(ElfSegmentAttributes::Read, spec_vaddr, capdl_spec_as_binary);
-    initialiser_elf
-        .write_symbol(
-            "sel4_capdl_initializer_serialized_spec_start",
-            &spec_vaddr.to_le_bytes(),
-        )
-        .unwrap();
-    initialiser_elf
-        .write_symbol(
-            "sel4_capdl_initializer_serialized_spec_size",
-            &footprint.to_le_bytes(),
-        )
-        .unwrap();
+    initialiser_elf.write_symbol(
+        "sel4_capdl_initializer_serialized_spec_start",
+        &spec_vaddr.to_le_bytes(),
+    )?;
+    initialiser_elf.write_symbol(
+        "sel4_capdl_initializer_serialized_spec_size",
+        &footprint.to_le_bytes(),
+    )?;
 
     let heap_vaddr = round_up(initialiser_elf.next_vaddr(), PageSize::Small as u64);
     initialiser_elf.add_segment(
@@ -547,31 +547,23 @@ fn main() -> Result<(), String> {
         heap_vaddr,
         vec![0; heap_size],
     );
-    initialiser_elf
-        .write_symbol(
-            "sel4_capdl_initializer_heap_start",
-            &heap_vaddr.to_le_bytes(),
-        )
-        .unwrap();
-    initialiser_elf
-        .write_symbol(
-            "sel4_capdl_initializer_heap_size",
-            &(heap_vaddr + heap_size as u64).to_le_bytes(),
-        )
-        .unwrap();
+    initialiser_elf.write_symbol(
+        "sel4_capdl_initializer_heap_start",
+        &heap_vaddr.to_le_bytes(),
+    )?;
+    initialiser_elf.write_symbol(
+        "sel4_capdl_initializer_heap_size",
+        &(heap_vaddr + heap_size as u64).to_le_bytes(),
+    )?;
 
-    initialiser_elf
-        .write_symbol(
-            "sel4_capdl_initializer_image_start",
-            &initialiser_elf.lowest_vaddr().to_le_bytes(),
-        )
-        .unwrap();
-    initialiser_elf
-        .write_symbol(
-            "sel4_capdl_initializer_image_end",
-            &initialiser_elf.highest_vaddr().to_le_bytes(),
-        )
-        .unwrap();
+    initialiser_elf.write_symbol(
+        "sel4_capdl_initializer_image_start",
+        &initialiser_elf.lowest_vaddr().to_le_bytes(),
+    )?;
+    initialiser_elf.write_symbol(
+        "sel4_capdl_initializer_image_end",
+        &initialiser_elf.highest_vaddr().to_le_bytes(),
+    )?;
 
     println!(
         "INITIAL TASK: size = {}, vaddr = [0x{:x}..0x{:x}], entry = 0x{:x}",
@@ -583,7 +575,7 @@ fn main() -> Result<(), String> {
 
     // For x86 we write out the initialiser ELF as is, but on ARM and RISC-V we build the bootloader image.
     if kernel_config.arch == Arch::X86_64 {
-        initialiser_elf.reserialise(Path::new(args.output));
+        initialiser_elf.reserialise(Path::new(args.output))?;
     } else {
         // Determine what are the available physical memory segments after the kernel boots by partially emulating the boot process.
         // This is so that we can place the initial task (CapDL initialiser) after the kernel's window.

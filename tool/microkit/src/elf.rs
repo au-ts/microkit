@@ -7,7 +7,7 @@
 use crate::util::bytes_to_struct;
 use bitflags::bitflags;
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::slice::from_raw_parts;
@@ -204,6 +204,10 @@ impl ElfFile {
         let entry = hdr.entry;
 
         // Read all the segments
+        if hdr.phnum == 0 {
+            return Err(format!("ELF '{}': have no program headers", path.display()));
+        }
+
         let mut segments = Vec::with_capacity(hdr.phnum as usize);
         for i in 0..hdr.phnum {
             let phent_start = hdr.phoff + (i * hdr.phentsize) as u64;
@@ -223,12 +227,18 @@ impl ElfFile {
             segment_data[..phent.filesz as usize]
                 .copy_from_slice(&bytes[segment_start..segment_end]);
 
+            let flags = phent.flags;
             let segment = ElfSegment {
                 data: segment_data,
                 phys_addr: phent.paddr,
                 virt_addr: phent.vaddr,
                 loadable: phent.type_ == 1,
-                attrs: ElfSegmentAttributes::from_bits(phent.flags).unwrap(),
+                attrs: ElfSegmentAttributes::from_bits(flags).ok_or(format!(
+                    "ELF '{}': phent #{} have invalid flags {:x}",
+                    path.display(),
+                    i,
+                    flags
+                ))?,
                 p_filesz: phent.filesz,
                 p_offset: phent.offset,
             };
@@ -378,6 +388,7 @@ impl ElfFile {
     }
 
     pub fn lowest_vaddr(&self) -> u64 {
+        // This unwrap is safe as we have ensured that there will always be at least 1 segment when parsing the ELF.
         let existing_vaddrs: Vec<u64> = self
             .loadable_segments()
             .iter()
@@ -387,6 +398,7 @@ impl ElfFile {
     }
 
     pub fn highest_vaddr(&self) -> u64 {
+        // This unwrap is safe as we have ensured that there will always be at least 1 segment when parsing the ELF.
         let existing_vaddrs: Vec<u64> = self
             .loadable_segments()
             .iter()
@@ -424,12 +436,22 @@ impl ElfFile {
     /// loading of what we generate here: seL4/src/arch/x86/64/kernel/elf.c
     /// We use this function after patching the spec into the CapDL initialiser.
     /// We don't guarantee that this ELF can be loaded by other kinds of ELF loader.
-    pub fn reserialise(&self, out: &std::path::Path) {
+    pub fn reserialise(&self, out: &std::path::Path) -> Result<(), String> {
         let phnum = self.loadable_segments().len();
         let phentsize = size_of::<ElfProgramHeader64>();
         let ehsize = size_of::<ElfHeader64>();
 
-        let mut f = std::fs::File::create(out).unwrap();
+        let mut elf_file = match File::create(out) {
+            Ok(file) => file,
+            Err(e) => {
+                return Err(format!(
+                    "ELF: cannot reserialise '{}' to '{}': {}",
+                    self.path.display(),
+                    out.display(),
+                    e
+                ))
+            }
+        };
 
         // ELF header
         let header = ElfHeader64 {
@@ -455,16 +477,20 @@ impl ElfFile {
             shnum: 0,
             shstrndx: 0,
         };
-        f.write_all(unsafe {
-            from_raw_parts((&header as *const ElfHeader64) as *const u8, ehsize)
-        })
-        .unwrap();
+        elf_file
+            .write_all(unsafe {
+                from_raw_parts((&header as *const ElfHeader64) as *const u8, ehsize)
+            })
+            .expect(&format!(
+                "Failed to write ELF header for '{}'",
+                out.display()
+            ));
 
         // keep a running file offset where segment data will be written
         let mut data_off = (ehsize as u64) + (phnum as u64) * (phentsize as u64);
 
         // first write out the headers table
-        for seg in self.loadable_segments() {
+        for (i, seg) in self.loadable_segments().iter().enumerate() {
             let seg_serialised = ElfProgramHeader64 {
                 type_: 1, // loadable segment
                 flags: seg.attrs.bits(),
@@ -477,22 +503,33 @@ impl ElfFile {
                 align: 0,
             };
 
-            f.write_all(unsafe {
-                from_raw_parts(
-                    (&seg_serialised as *const ElfProgramHeader64) as *const u8,
-                    phentsize,
-                )
-            })
-            .unwrap();
+            elf_file
+                .write_all(unsafe {
+                    from_raw_parts(
+                        (&seg_serialised as *const ElfProgramHeader64) as *const u8,
+                        phentsize,
+                    )
+                })
+                .expect(&format!(
+                    "Failed to write ELF segment header #{} for '{}'",
+                    i,
+                    out.display()
+                ));
 
             data_off += seg.mem_size();
         }
 
         // then the data for each segment will follow
-        for seg in self.loadable_segments() {
-            f.write_all(&seg.data).unwrap();
+        for (i, seg) in self.loadable_segments().iter().enumerate() {
+            elf_file.write_all(&seg.data).expect(&format!(
+                "Failed to write ELF segment data #{} for '{}'",
+                i,
+                out.display()
+            ));
         }
 
-        f.flush().unwrap();
+        elf_file.flush().unwrap();
+
+        Ok(())
     }
 }
