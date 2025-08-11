@@ -67,7 +67,16 @@ fn get_pt_level_index(sel4_config: &Config, level: usize, vaddr: u64) -> u64 {
 }
 
 fn get_pt_level_coverage(sel4_config: &Config, level: usize, vaddr: u64) -> Range<u64> {
-    Range::from(3..vaddr)
+    let levels = sel4_config.num_page_table_levels() as u64;
+    let page_bits = 12;
+    let bits_from_higher_lvls: u64 = (levels - (level as u64)) * 9;
+
+    let coverage_bits = page_bits + bits_from_higher_lvls;
+
+    let low = (vaddr >> coverage_bits) << coverage_bits;
+    let high = vaddr | ((1 << coverage_bits) - 1);
+
+    Range::from(low..high)
 }
 
 fn get_pt_level_to_insert(sel4_config: &Config, page_size: PageSize) -> usize {
