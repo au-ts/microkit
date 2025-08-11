@@ -37,6 +37,38 @@ fn get_pt_level_name(sel4_config: &Config, level: u64) -> &str {
     }
 }
 
+fn get_pt_level_index(sel4_config: &Config, level: usize, vaddr: u64) -> u64 {
+    assert!(level < sel4_config.num_page_table_levels());
+
+    if level == 0 && sel4_config.arch == Arch::Aarch64 && sel4_config.aarch64_vspace_s2_start_l1() {
+        // Special case for first level on AArch64 platforms with hyp and 40 bits PA.
+        // It have 10 bits index for VSpace.
+        // match up with seL4_VSpaceBits in seL4/libsel4/sel4_arch_include/aarch64/sel4/sel4_arch/constants.h
+        return (vaddr >> (12 + 9 + 9 + 9)) & ((1 << 10) - 1);
+    }
+
+    match sel4_config.num_page_table_levels() {
+        3 => {
+            match level {
+                0 => (vaddr >> (12 + 9 + 9)) & ((1 << 9) - 1),
+                1 => (vaddr >> (12 + 9)) & ((1 << 9) - 1),
+                2 => (vaddr >> (12)) & ((1 << 9) - 1),
+                _ => unreachable!("should never reach here as we've validated the level number.")
+            }
+        },
+        4 => {
+            match level {
+                0 => (vaddr >> (12 + 9 + 9 + 9)) & ((1 << 9) - 1),
+                1 => (vaddr >> (12 + 9 + 9)) & ((1 << 9) - 1),
+                2 => (vaddr >> (12 + 9)) & ((1 << 9) - 1),
+                3 => (vaddr >> (12)) & ((1 << 9) - 1),
+                _ => unreachable!("should never reach here as we've validated the level number.")
+            }
+        },
+        _ => unreachable!("should never reach here as we assume either a 3 or 4 levels page table.")
+    }
+}
+
 fn insert_cap_into_page_table_level(
     spec: &mut CapDLSpec,
     cur_level_obj_id: ObjectId,
@@ -156,10 +188,10 @@ fn map_4_levels(
             let frame_obj_id = frame_cap.obj();
 
             // Get slot indexes for the 4 levels of the page table
-            let lv0_slot = (vaddr >> (12 + 9 + 9 + 9)) & ((1 << 9) - 1);
-            let lv1_slot = (vaddr >> (12 + 9 + 9)) & ((1 << 9) - 1);
-            let lv2_slot = (vaddr >> (12 + 9)) & ((1 << 9) - 1);
-            let lv3_slot = (vaddr >> (12)) & ((1 << 9) - 1);
+            let lv0_slot = get_pt_level_index(sel4_config, 0, vaddr);
+            let lv1_slot = get_pt_level_index(sel4_config, 1, vaddr);
+            let lv2_slot = get_pt_level_index(sel4_config, 2, vaddr);
+            let lv3_slot = get_pt_level_index(sel4_config, 3, vaddr);
 
             match map_intermediary_level_helper(
                 spec,
@@ -236,9 +268,9 @@ fn map_3_levels(
             let frame_obj_id = frame_cap.obj();
 
             // Get slot indexes for the 3 levels of the page table
-            let lv0_slot = (vaddr >> (12 + 9 + 9)) & ((1 << 9) - 1);
-            let lv1_slot = (vaddr >> (12 + 9)) & ((1 << 9) - 1);
-            let lv2_slot = (vaddr >> (12)) & ((1 << 9) - 1);
+            let lv0_slot = get_pt_level_index(sel4_config, 0, vaddr);
+            let lv1_slot = get_pt_level_index(sel4_config, 1, vaddr);
+            let lv2_slot = get_pt_level_index(sel4_config, 2, vaddr);
 
             match map_intermediary_level_helper(
                 spec,

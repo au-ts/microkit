@@ -191,6 +191,14 @@ impl Config {
             _ => panic!("internal error"),
         }
     }
+
+    pub fn num_page_table_levels(&self) -> usize {
+        match self.arch {
+            Arch::Aarch64 => 4,
+            Arch::Riscv64 => self.riscv_pt_levels.unwrap().levels(),
+            Arch::X86_64 => 4,
+        }
+    }
 }
 
 #[derive(PartialEq, Eq)]
