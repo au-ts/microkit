@@ -10,9 +10,10 @@ use crate::{
     },
     sel4::{Arch, Config, PageSize},
 };
+use std::ops::Range;
 
 /// For naming and debugging purposes only, no functional purpose.
-fn get_pt_level_name(sel4_config: &Config, level: u64) -> &str {
+fn get_pt_level_name(sel4_config: &Config, level: usize) -> &str {
     match sel4_config.arch {
         crate::sel4::Arch::Aarch64 => match level {
             0 => "pgd",
@@ -38,41 +39,48 @@ fn get_pt_level_name(sel4_config: &Config, level: u64) -> &str {
 }
 
 fn get_pt_level_index(sel4_config: &Config, level: usize, vaddr: u64) -> u64 {
-    assert!(level < sel4_config.num_page_table_levels());
+    let levels = sel4_config.num_page_table_levels();
 
-    if level == 0 && sel4_config.arch == Arch::Aarch64 && sel4_config.aarch64_vspace_s2_start_l1() {
-        // Special case for first level on AArch64 platforms with hyp and 40 bits PA.
-        // It have 10 bits index for VSpace.
-        // match up with seL4_VSpaceBits in seL4/libsel4/sel4_arch_include/aarch64/sel4/sel4_arch/constants.h
-        return (vaddr >> (12 + 9 + 9 + 9)) & ((1 << 10) - 1);
-    }
+    assert!(level < levels);
 
-    match sel4_config.num_page_table_levels() {
-        3 => {
-            match level {
-                0 => (vaddr >> (12 + 9 + 9)) & ((1 << 9) - 1),
-                1 => (vaddr >> (12 + 9)) & ((1 << 9) - 1),
-                2 => (vaddr >> (12)) & ((1 << 9) - 1),
-                _ => unreachable!("should never reach here as we've validated the level number.")
-            }
-        },
-        4 => {
-            match level {
-                0 => (vaddr >> (12 + 9 + 9 + 9)) & ((1 << 9) - 1),
-                1 => (vaddr >> (12 + 9 + 9)) & ((1 << 9) - 1),
-                2 => (vaddr >> (12 + 9)) & ((1 << 9) - 1),
-                3 => (vaddr >> (12)) & ((1 << 9) - 1),
-                _ => unreachable!("should never reach here as we've validated the level number.")
-            }
-        },
-        _ => unreachable!("should never reach here as we assume either a 3 or 4 levels page table.")
+    let index_bits = |level: usize| -> u64 {
+        if level == 0
+            && sel4_config.arch == Arch::Aarch64
+            && sel4_config.aarch64_vspace_s2_start_l1()
+        {
+            // Special case for first level on AArch64 platforms with hyp and 40 bits PA.
+            // It have 10 bits index for VSpace.
+            // match up with seL4_VSpaceBits in seL4/libsel4/sel4_arch_include/aarch64/sel4/sel4_arch/constants.h
+            10
+        } else {
+            9
+        }
+    };
+
+    let page_bits = 12;
+    let bits_from_higher_lvls: u64 = ((level + 1)..levels).map(index_bits).sum();
+    let shift = page_bits + bits_from_higher_lvls;
+    let width = index_bits(level);
+    let mask = (1u64 << width) - 1;
+
+    (vaddr >> shift) & mask
+}
+
+fn get_pt_level_coverage(sel4_config: &Config, level: usize, vaddr: u64) -> Range<u64> {
+    Range::from(3..vaddr)
+}
+
+fn get_pt_level_to_insert(sel4_config: &Config, page_size: PageSize) -> usize {
+    match page_size {
+        PageSize::Small => sel4_config.num_page_table_levels() - 1,
+        PageSize::Large => sel4_config.num_page_table_levels() - 2,
     }
 }
 
 fn insert_cap_into_page_table_level(
     spec: &mut CapDLSpec,
     cur_level_obj_id: ObjectId,
-    cur_level: u8,
+    cur_level: usize,
     cur_level_slot: u64,
     cap: Cap,
 ) -> Result<(), String> {
@@ -103,11 +111,13 @@ fn insert_cap_into_page_table_level(
 
 fn map_intermediary_level_helper(
     spec: &mut CapDLSpec,
+    sel4_config: &Config,
     pd_name: &str,
     next_level_name_prefix: &str,
     cur_level_obj_id: ObjectId,
-    cur_level: u8,
+    cur_level: usize,
     cur_level_slot: u64,
+    vaddr: u64,
 ) -> Result<ObjectId, String> {
     let page_table_level_obj_wrapper = spec.get_root_object(cur_level_obj_id).unwrap();
     if let Object::PageTable(page_table_object) = &page_table_level_obj_wrapper.object {
@@ -133,13 +143,14 @@ fn map_intermediary_level_helper(
     // Next level object not already created, create it.
     let next_level_inner_obj = object::PageTable {
         is_root: false, // because the VSpace has already been created separately
-        level: Some(cur_level + 1),
+        level: Some(cur_level as u8 + 1),
         slots: [].to_vec(),
     };
+    let next_level_coverage = get_pt_level_coverage(sel4_config, cur_level + 1, vaddr);
     let next_level_object = NamedObject {
         name: format!(
-            "{}_{}_slot_{:03}_from_obj_id_{}",
-            next_level_name_prefix, pd_name, cur_level_slot, cur_level_obj_id
+            "{}_{}_covers_0x{:x}..0x{:x}",
+            next_level_name_prefix, pd_name, next_level_coverage.start, next_level_coverage.end
         ),
         object: Object::PageTable(next_level_inner_obj),
     };
@@ -172,150 +183,56 @@ pub fn create_vspace(spec: &mut CapDLSpec, sel4_config: &Config, pd_name: &str) 
     })
 }
 
-fn map_4_levels(
+fn map_recursive(
     spec: &mut CapDLSpec,
     sel4_config: &Config,
     pd_name: &str,
-    vspace_obj_id: ObjectId,
+    pt_obj_id: ObjectId,
+    cur_level: usize,
     frame_cap: Cap,
     frame_size: PageSize,
     vaddr: u64,
 ) -> Result<(), String> {
-    match &frame_cap {
-        Cap::Frame(_) => {
-            assert_eq!(vaddr % frame_size as u64, 0);
-
-            let frame_obj_id = frame_cap.obj();
-
-            // Get slot indexes for the 4 levels of the page table
-            let lv0_slot = get_pt_level_index(sel4_config, 0, vaddr);
-            let lv1_slot = get_pt_level_index(sel4_config, 1, vaddr);
-            let lv2_slot = get_pt_level_index(sel4_config, 2, vaddr);
-            let lv3_slot = get_pt_level_index(sel4_config, 3, vaddr);
-
-            match map_intermediary_level_helper(
-                spec,
-                pd_name,
-                get_pt_level_name(sel4_config, 1),
-                vspace_obj_id,
-                0,
-                lv0_slot,
-            ) {
-                Ok(lvl1_obj_id) => {
-                    match map_intermediary_level_helper(
-                        spec,
-                        pd_name,
-                        get_pt_level_name(sel4_config, 2),
-                        lvl1_obj_id,
-                        1,
-                        lv1_slot,
-                    ) {
-                        Ok(lvl2_obj_id) => {
-                            match frame_size {
-                                PageSize::Small => {
-                                    match map_intermediary_level_helper(
-                                        spec, pd_name, get_pt_level_name(sel4_config, 3), lvl2_obj_id, 2, lv2_slot,
-                                    ) {
-                                        Ok(lvl3_obj_id) => {
-                                            match insert_cap_into_page_table_level(
-                                                spec, lvl3_obj_id, 3, lv3_slot, frame_cap,
-                                            ) {
-                                                Ok(_) => Ok(()),
-                                                Err(lvl3_small_err_reason) => Err(format!("map_page() failed to map small frame {} at vaddr 0x{:x} on page table level 3 to pd {} because: {}", frame_obj_id, vaddr, pd_name, lvl3_small_err_reason)),
-                                            }
-                                        }
-                                        Err(lvl2_err_reason) => Err(format!("map_page() failed to map frame {} at vaddr 0x{:x} on page table level 2 to pd {} because: {}", frame_obj_id, vaddr, pd_name, lvl2_err_reason)),
-                                    }
-                                },
-                                PageSize::Large => {
-                                    match insert_cap_into_page_table_level(
-                                        spec, lvl2_obj_id, 2, lv2_slot, frame_cap,
-                                    ) {
-                                        Ok(_) => Ok(()),
-                                        Err(lvl2_large_err_reason) => Err(format!("map_page() failed to map large frame {} at vaddr 0x{:x} on page table level 2 to pd {} because: {}", frame_obj_id, vaddr, pd_name, lvl2_large_err_reason)),
-                                    }
-                                },
-                            }
-                        }
-                        Err(lvl1_err_reason) => Err(format!("map_page() failed to map frame {} at vaddr 0x{:x} on page table level 1 to pd {} because: {}", frame_obj_id, vaddr, pd_name, lvl1_err_reason)),
-                    }
-                }
-                Err(lvl0_err_reason) => Err(format!("map_page() failed to map frame {} at vaddr 0x{:x} on page table level 0 to pd {} because: {}", frame_obj_id, vaddr, pd_name, lvl0_err_reason)),
-            }
-        }
-        _ => {
-            Err(format!(
-            "map_page() received a non-Frame object: {:?}, for mapping at vaddr 0x{:x}, to pd {}",
-            frame_cap.obj(), vaddr, pd_name
-        ))
-        }
+    if cur_level >= sel4_config.num_page_table_levels() {
+        unreachable!("internal bug: we should have never recursed further!");
     }
-}
 
-fn map_3_levels(
-    spec: &mut CapDLSpec,
-    sel4_config: &Config,
-    pd_name: &str,
-    vspace_obj_id: ObjectId,
-    frame_cap: Cap,
-    frame_size: PageSize,
-    vaddr: u64,
-) -> Result<(), String> {
-    match &frame_cap {
-        Cap::Frame(_) => {
-            assert_eq!(vaddr % frame_size as u64, 0);
+    let this_level_index = get_pt_level_index(sel4_config, cur_level, vaddr);
 
-            let frame_obj_id = frame_cap.obj();
-
-            // Get slot indexes for the 3 levels of the page table
-            let lv0_slot = get_pt_level_index(sel4_config, 0, vaddr);
-            let lv1_slot = get_pt_level_index(sel4_config, 1, vaddr);
-            let lv2_slot = get_pt_level_index(sel4_config, 2, vaddr);
-
-            match map_intermediary_level_helper(
+    if cur_level == get_pt_level_to_insert(sel4_config, frame_size) {
+        // Base case: we got to the target level to insert the frame cap.
+        return insert_cap_into_page_table_level(
+            spec,
+            pt_obj_id,
+            cur_level,
+            this_level_index,
+            frame_cap,
+        );
+    } else {
+        // Recursive case: we have not gotten to the correct level, create the next level and recurse down.
+        let next_level_name_prefix = get_pt_level_name(sel4_config, cur_level + 1);
+        return match map_intermediary_level_helper(
+            spec,
+            sel4_config,
+            pd_name,
+            next_level_name_prefix,
+            pt_obj_id,
+            cur_level,
+            this_level_index,
+            vaddr,
+        ) {
+            Ok(next_level_pt_obj_id) => map_recursive(
                 spec,
+                sel4_config,
                 pd_name,
-                get_pt_level_name(sel4_config, 1),
-                vspace_obj_id,
-                0,
-                lv0_slot,
-            ) {
-                Ok(lvl1_obj_id) => {
-                    match frame_size {
-                        PageSize::Small => {
-                            match map_intermediary_level_helper(
-                                spec, pd_name, get_pt_level_name(sel4_config, 2), lvl1_obj_id, 1, lv1_slot,
-                            ) {
-                                Ok(lvl2_obj_id) => {
-                                    match insert_cap_into_page_table_level(
-                                        spec, lvl2_obj_id, 2, lv2_slot, frame_cap,
-                                    ) {
-                                        Ok(_) => Ok(()),
-                                        Err(lvl2_small_err_reason) => Err(format!("map_page() failed to map small frame {} at vaddr 0x{:x} on page table level 2 to pd {} because: {}", frame_obj_id, vaddr, pd_name, lvl2_small_err_reason)),
-                                    }
-                                }
-                                Err(lvl2_err_reason) => Err(format!("map_page() failed to map frame {} at vaddr 0x{:x} on page table level 1 to pd {} because: {}", frame_obj_id, vaddr, pd_name, lvl2_err_reason)),
-                            }
-                        },
-                        PageSize::Large => {
-                            match insert_cap_into_page_table_level(
-                                spec, lvl1_obj_id, 1, lv1_slot, frame_cap,
-                            ) {
-                                Ok(_) => Ok(()),
-                                Err(lvl1_large_err_reason) => Err(format!("map_page() failed to map large frame {} at vaddr 0x{:x} on page table level 1 to pd {} because: {}", frame_obj_id, vaddr, pd_name, lvl1_large_err_reason)),
-                            }
-                        },
-                    }
-                }
-                Err(lvl0_err_reason) => Err(format!("map_page() failed to map frame {} at vaddr 0x{:x} on page table level 0 to pd {} because: {}", frame_obj_id, vaddr, pd_name, lvl0_err_reason)),
-            }
-        }
-        _ => {
-            Err(format!(
-            "map_page() received a non-Frame object: {:?}, for mapping at vaddr 0x{:x}, to pd {}",
-            frame_cap.obj(), vaddr, pd_name
-        ))
-        }
+                next_level_pt_obj_id,
+                cur_level + 1,
+                frame_cap,
+                frame_size,
+                vaddr,
+            ),
+            Err(err_reason) => Err(err_reason),
+        };
     }
 }
 
@@ -328,25 +245,14 @@ pub fn map_page(
     frame_size: PageSize,
     vaddr: u64,
 ) -> Result<(), String> {
-    if sel4_config.arch == Arch::Riscv64 {
-        map_3_levels(
-            spec,
-            sel4_config,
-            pd_name,
-            vspace_obj_id,
-            frame_cap,
-            frame_size,
-            vaddr,
-        )
-    } else {
-        map_4_levels(
-            spec,
-            sel4_config,
-            pd_name,
-            vspace_obj_id,
-            frame_cap,
-            frame_size,
-            vaddr,
-        )
-    }
+    map_recursive(
+        spec,
+        sel4_config,
+        pd_name,
+        vspace_obj_id,
+        0,
+        frame_cap,
+        frame_size,
+        vaddr,
+    )
 }
