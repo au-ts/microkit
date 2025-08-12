@@ -84,6 +84,7 @@ const PD_CAP_BITS: u64 = PD_CAP_SIZE.ilog2() as u64;
 const PD_SCHEDCONTEXT_EXTRA_SIZE_BITS: u64 = 8;
 
 pub const SLOT_BITS: u64 = 5;
+pub const SLOT_SIZE: u64 = 1 << SLOT_BITS;
 
 #[derive(Serialize, Clone, Eq, PartialEq)]
 pub struct CapDLSpec {

@@ -20,6 +20,7 @@ use microkit_tool::util::{
 };
 use sel4_capdl_initializer_types::{ObjectNamesLevel, Spec};
 use std::fs::{self, metadata};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 fn get_full_path(path: &Path, search_paths: &Vec<PathBuf>) -> Option<PathBuf> {
@@ -522,13 +523,6 @@ fn main() -> Result<(), String> {
     let footprint = capdl_spec_as_binary.len();
     let heap_size = footprint * 2 + 16 * 4096;
 
-    println!(
-        "CAPDL SPEC: number of root objects = {}, spec footprint = {}, initialiser heap size = {}",
-        num_objects,
-        human_size_strict(footprint as u64),
-        human_size_strict(heap_size as u64)
-    );
-
     // Patch the spec and heap into the ELF image. These symbol names must match
     // rust-sel4/crates/sel4-capdl-initializer/src/main.rs
     let mut initialiser_elf = ElfFile::from_path(&capdl_init_elf_path)?;
@@ -568,10 +562,20 @@ fn main() -> Result<(), String> {
     )?;
 
     println!(
+        "CAPDL SPEC: number of root objects = {}, spec footprint = {}, initialiser heap size = {}",
+        num_objects,
+        human_size_strict(footprint as u64),
+        human_size_strict(heap_size as u64)
+    );
+    let initialiser_highest_vaddr =
+        round_up(initialiser_elf.highest_vaddr(), PageSize::Small as u64);
+    let initialiser_vaddr_range =
+        Range::from(initialiser_elf.lowest_vaddr()..initialiser_highest_vaddr);
+    println!(
         "INITIAL TASK: size = {}, vaddr = [0x{:x}..0x{:x}], entry = 0x{:x}",
-        human_size_strict(initialiser_elf.highest_vaddr() - initialiser_elf.lowest_vaddr()),
-        initialiser_elf.lowest_vaddr(),
-        initialiser_elf.highest_vaddr(),
+        human_size_strict(initialiser_vaddr_range.end - initialiser_vaddr_range.start),
+        initialiser_vaddr_range.start,
+        initialiser_vaddr_range.end,
         initialiser_elf.entry
     );
 
@@ -579,20 +583,40 @@ fn main() -> Result<(), String> {
     if kernel_config.arch == Arch::X86_64 {
         initialiser_elf.reserialise(Path::new(args.output))?;
     } else {
-        // Determine what are the available physical memory segments after the kernel boots by partially emulating the boot process.
-        // This is so that we can place the initial task (CapDL initialiser) after the kernel's window.
+        // Now that we have the entire spec and CapDL initialiser ELF with embedded spec,
+        // we can determine how much memory will be available statically when the kernel
+        // drops to userspace on ARM and RISC-V. This allow us to sanity check that:
+        // 1. There are enough memory to allocate all the objects required in the spec.
+        // 2. All frames with a physical attached reside in legal memory (device or normal).
+        // 3. Objects can be allocated from the free untyped list. For example, we detect
+        //    situations where you might have a large page with size bit 21 but
+        //    only have untyped with size bit <21.
+        // 4. Finally, ensure that the initial task payload (CapDL initialiser) is placed
+        //    after the kernel window in physical memory.
+
+        // We achieve this by emulating the kernel's boot process in the tool:
+
+        // Determine how much memory the CapDL initialiser needs.
+        let initial_task_size = initialiser_vaddr_range.end - initialiser_vaddr_range.start;
+
+        // Parse the kernel's ELF to determine the kernel's window.
         let kernel_elf = ElfFile::from_path(&kernel_elf_path).unwrap();
-        let (available_memory, kernel_boot_region) =
+
+        // Now determine how much memory we have after the kernel boots.
+        let (mut available_memory, kernel_boot_region) =
             emulate_kernel_boot_partial(&kernel_config, &kernel_elf);
+
+        let initial_task_phys_base =
+            available_memory.allocate_from(initial_task_size, kernel_boot_region.end);
 
         // Then create the loader image.
         let loader = Loader::new(
             &kernel_config,
-            available_memory,
-            kernel_boot_region,
             Path::new(&loader_elf_path),
             &kernel_elf,
             &initialiser_elf,
+            initial_task_phys_base,
+            initialiser_vaddr_range,
         );
 
         loader.write_image(Path::new(args.output));

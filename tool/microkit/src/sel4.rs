@@ -88,6 +88,24 @@ pub struct PlatformConfig {
     pub memory: Vec<PlatformConfigRegion>,
 }
 
+/// Represents an allocated kernel object.
+///
+/// Kernel objects can have multiple caps (and caps can have multiple addresses).
+/// The cap referred to here is the original cap that is allocated when the
+/// kernel object is first allocate.
+/// The cap_slot refers to the specific slot in which this cap resides.
+/// The cap_address refers to a cap address that addresses this cap.
+/// The cap_address is is intended to be valid within the context of the
+/// initial task.
+#[derive(Copy, Clone)]
+pub struct Object {
+    /// Type of kernel object
+    pub object_type: ObjectType,
+    pub cap_addr: u64,
+    /// Physical memory address of the kernel object
+    pub phys_addr: u64,
+}
+
 pub struct Config {
     pub arch: Arch,
     pub word_size: u64,
@@ -295,6 +313,26 @@ impl ObjectType {
     pub fn fixed_size(self, config: &Config) -> Option<u64> {
         self.fixed_size_bits(config).map(|bits| 1 << bits)
     }
+
+    pub fn to_str(self) -> &'static str {
+        match self {
+            ObjectType::Untyped => "SEL4_UNTYPED_OBJECT",
+            ObjectType::Tcb => "SEL4_TCB_OBJECT",
+            ObjectType::Endpoint => "SEL4_ENDPOINT_OBJECT",
+            ObjectType::Notification => "SEL4_NOTIFICATION_OBJECT",
+            ObjectType::CNode => "SEL4_CNODE_OBJECT",
+            ObjectType::SchedContext => "SEL4_SCHEDCONTEXT_OBJECT",
+            ObjectType::Reply => "SEL4_REPLY_OBJECT",
+            ObjectType::HugePage => "SEL4_HUGE_PAGE_OBJECT",
+            ObjectType::VSpace => "SEL4_VSPACE_OBJECT",
+            ObjectType::SmallPage => "SEL4_SMALL_PAGE_OBJECT",
+            ObjectType::LargePage => "SEL4_LARGE_PAGE_OBJECT",
+            ObjectType::PageTable => "SEL4_PAGE_TABLE_OBJECT",
+            ObjectType::Vcpu => "SEL4_ASID_POOL_OBJECT",
+            ObjectType::AsidPool => todo!(),
+        }
+    }
+
 }
 
 #[repr(u64)]

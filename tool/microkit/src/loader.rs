@@ -4,11 +4,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 use crate::elf::ElfFile;
-use crate::sel4::{Arch, Config, PageSize};
+use crate::sel4::{Arch, Config};
 use crate::util::{mask, mb, round_up, struct_to_bytes};
-use crate::{DisjointMemoryRegion, MemoryRegion};
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::ops::Range;
 use std::path::Path;
 
 const PAGE_TABLE_SIZE: usize = 4096;
@@ -128,11 +128,11 @@ pub struct Loader {
 impl Loader {
     pub fn new(
         config: &Config,
-        mut available_memory: DisjointMemoryRegion,
-        kernel_boot_region: MemoryRegion,
         loader_elf_path: &Path,
         kernel_elf: &ElfFile,
         initial_task_elf: &ElfFile,
+        initial_task_phy_base: u64,
+        initial_task_vaddr_range: Range<u64>
     ) -> Loader {
         let loader_elf = ElfFile::from_path(loader_elf_path).unwrap();
         let sz = loader_elf.word_size;
@@ -185,25 +185,20 @@ impl Loader {
         // We support initial task ELF with multiple segments. This is implemented by amalgamating all the segments
         // into 1 segment, so if your segments are sparse, a lot of memory will be wasted.
         let initial_task_segments = initial_task_elf.loadable_segments();
-        let inittask_first_vaddr = initial_task_elf.lowest_vaddr();
-        let inittask_last_vaddr =
-            round_up(initial_task_elf.highest_vaddr(), PageSize::Small as u64);
 
         // Find an available physical memory segment large enough to house the initial task (CapDL initialiser with spec)
         // that is after the kernel window.
-        let initial_task_size = inittask_last_vaddr - inittask_first_vaddr;
-        let inittask_first_paddr =
-            available_memory.allocate_from(initial_task_size, kernel_boot_region.end);
-        let inittask_p_v_offset = inittask_first_vaddr - inittask_first_paddr;
+        let initial_task_size = initial_task_vaddr_range.end - initial_task_vaddr_range.start;
+        let inittask_p_v_offset = initial_task_vaddr_range.start - initial_task_phy_base;
         let inittask_v_entry = initial_task_elf.entry;
 
         let mut initial_task_data: Vec<u8> = vec![0; initial_task_size as usize];
         for segment in initial_task_segments.iter() {
-            let buf_off = segment.virt_addr - inittask_first_vaddr;
+            let buf_off = segment.virt_addr - initial_task_vaddr_range.start;
             initial_task_data[buf_off as usize..(buf_off + segment.mem_size()) as usize].copy_from_slice(&segment.data);
         }
 
-        regions.push((inittask_first_paddr, initial_task_data));
+        regions.push((initial_task_phy_base, initial_task_data));
 
         // Determine the pagetable variables
         assert!(kernel_first_vaddr.is_some());
@@ -245,10 +240,10 @@ impl Loader {
 
         let kernel_entry = kernel_elf.entry;
 
-        let pv_offset = inittask_first_paddr.wrapping_sub(inittask_first_vaddr);
+        let pv_offset = initial_task_phy_base.wrapping_sub(initial_task_vaddr_range.start);
 
-        let ui_p_reg_start = inittask_first_paddr;
-        let ui_p_reg_end = inittask_last_vaddr - inittask_p_v_offset;
+        let ui_p_reg_start = initial_task_phy_base;
+        let ui_p_reg_end = initial_task_vaddr_range.end - inittask_p_v_offset;
         assert!(ui_p_reg_end > ui_p_reg_start);
 
         let mut all_regions_with_loader = regions.clone();
