@@ -9,7 +9,7 @@ use crate::{
         spec::{
             cap,
             object::{self, SchedContextExtraInfo},
-            Cap, CapTableEntry, FrameInit, NamedObject, Object, ObjectId, Rights,
+            Cap, CapTableEntry, FrameInit, NamedObject, CapDLObject, ObjectId, Rights,
         },
         CapDLSpec,
     },
@@ -29,7 +29,7 @@ pub fn capdl_util_make_frame_obj(
     paddr: Option<usize>,
     size_bits: usize,
 ) -> ObjectId {
-    let frame_inner_obj = Object::Frame(object::Frame {
+    let frame_inner_obj = CapDLObject::Frame(object::Frame {
         size_bits,
         paddr,
         init: frame_init,
@@ -75,7 +75,7 @@ pub fn capdl_util_make_page_table_cap(pt_obj_id: ObjectId) -> Cap {
 pub fn capdl_util_get_vspace_id_from_tcb_id(spec: &CapDLSpec, tcb_obj_id: ObjectId) -> ObjectId {
     let tcb = match spec.get_root_object(tcb_obj_id) {
         Some(named_object) => {
-            if let Object::Tcb(tcb) = &named_object.object {
+            if let CapDLObject::Tcb(tcb) = &named_object.object {
                 Some(tcb)
             } else {
                 unreachable!("internal bug: get_vspace_id_from_tcb_id() got a non TCB object ID.");
@@ -104,7 +104,7 @@ pub fn capdl_util_make_endpoint_obj(
 ) -> ObjectId {
     let fault_ep_obj = NamedObject {
         name: format!("ep_{}{}", if is_fault { "fault_" } else { "" }, pd_name).to_string(),
-        object: Object::Endpoint,
+        object: CapDLObject::Endpoint,
     };
     spec.add_root_object(fault_ep_obj)
 }
@@ -131,7 +131,7 @@ pub fn capdl_util_make_endpoint_cap(
 pub fn capdl_util_make_ntfn_obj(spec: &mut CapDLSpec, pd_name: &str) -> ObjectId {
     let ntfn_obj = NamedObject {
         name: format!("ntfn_{}", pd_name),
-        object: Object::Notification,
+        object: CapDLObject::Notification,
     };
     spec.add_root_object(ntfn_obj)
 }
@@ -153,7 +153,7 @@ pub fn capdl_util_make_ntfn_cap(ntfn_obj_id: ObjectId, read: bool, write: bool, 
 pub fn capdl_util_make_reply_obj(spec: &mut CapDLSpec, pd_name: &str) -> ObjectId {
     let reply_obj = NamedObject {
         name: format!("reply_{}", pd_name).to_string(),
-        object: Object::Reply,
+        object: CapDLObject::Reply,
     };
     spec.add_root_object(reply_obj)
 }
@@ -172,7 +172,7 @@ pub fn capdl_util_make_sc_obj(
     budget: u64,
     badge: u64,
 ) -> ObjectId {
-    let sc_inner_obj = Object::SchedContext(object::SchedContext {
+    let sc_inner_obj = CapDLObject::SchedContext(object::SchedContext {
         size_bits,
         extra: SchedContextExtraInfo {
             period,
@@ -197,7 +197,7 @@ pub fn capdl_util_make_cnode_obj(
     size_bits: usize,
     slots: Vec<CapTableEntry>,
 ) -> ObjectId {
-    let cnode_inner_obj = Object::CNode(object::CNode { size_bits, slots });
+    let cnode_inner_obj = CapDLObject::CNode(object::CNode { size_bits, slots });
     let cnode_obj = NamedObject {
         name: format!("cnode_{}", pd_name).to_string(),
         object: cnode_inner_obj,
@@ -221,7 +221,7 @@ pub fn capdl_util_make_ioport_obj(
     start_addr: u64,
     size: u64,
 ) -> ObjectId {
-    let ioport_inner_obj = Object::IOPorts(object::IOPorts {
+    let ioport_inner_obj = CapDLObject::IOPorts(object::IOPorts {
         start_port: start_addr,
         end_port: start_addr + size - 1,
     });
@@ -245,7 +245,7 @@ pub fn capdl_util_insert_cap_into_cspace(
     cap: Cap,
 ) {
     let cspace_obj = spec.get_root_object_mut(cspace_obj_id).unwrap();
-    if let Object::CNode(cspace_inner_obj) = &mut cspace_obj.object {
+    if let CapDLObject::CNode(cspace_inner_obj) = &mut cspace_obj.object {
         cspace_inner_obj.slots.push((idx, cap));
     } else {
         unreachable!("internal bug: capdl_util_insert_cap_into_cspace() got a non CNode object.");
@@ -253,7 +253,7 @@ pub fn capdl_util_insert_cap_into_cspace(
 }
 
 pub fn capdl_util_make_vcpu_obj(spec: &mut CapDLSpec, name: &String) -> ObjectId {
-    let vcpu_inner_obj = Object::VCpu;
+    let vcpu_inner_obj = CapDLObject::VCpu;
     let vcpu_obj = NamedObject {
         name: format!("vcpu_{}", name).to_string(),
         object: vcpu_inner_obj,

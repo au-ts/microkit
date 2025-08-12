@@ -37,7 +37,7 @@ pub struct UntypedCover {
 #[derive(Serialize, Clone, Eq, PartialEq)]
 pub struct NamedObject {
     pub name: String,
-    pub object: Object,
+    pub object: CapDLObject,
 }
 
 #[derive(Serialize, Clone, Eq, PartialEq)]
@@ -69,7 +69,7 @@ pub struct ElfContent {
 }
 
 #[derive(Serialize, Clone, Eq, PartialEq)]
-pub enum Object {
+pub enum CapDLObject {
     Endpoint,
     Notification,
     CNode(object::CNode),
@@ -88,10 +88,10 @@ pub enum Object {
     ArmSmc,
 }
 
-impl Object {
+impl CapDLObject {
     pub fn paddr(&self) -> Option<usize> {
         match self {
-            Object::Frame(obj) => obj.paddr,
+            CapDLObject::Frame(obj) => obj.paddr,
             _ => None,
         }
     }
@@ -99,37 +99,37 @@ impl Object {
     /// CNode and SchedContext are quirky as they have variable size.
     pub fn physical_size_bits(&self, sel4_config: &Config) -> u64 {
         match self {
-            Object::Endpoint => ObjectType::Endpoint.fixed_size_bits(sel4_config).unwrap(),
-            Object::Notification => ObjectType::Notification
+            CapDLObject::Endpoint => ObjectType::Endpoint.fixed_size_bits(sel4_config).unwrap(),
+            CapDLObject::Notification => ObjectType::Notification
                 .fixed_size_bits(sel4_config)
                 .unwrap(),
-            Object::CNode(cnode) => cnode.size_bits as u64 + SLOT_BITS,
-            Object::Tcb(_) => ObjectType::Tcb.fixed_size_bits(sel4_config).unwrap(),
-            Object::VCpu => ObjectType::Vcpu.fixed_size_bits(sel4_config).unwrap(),
-            Object::Frame(frame) => frame.size_bits as u64,
-            Object::PageTable(pt) => {
+            CapDLObject::CNode(cnode) => cnode.size_bits as u64 + SLOT_BITS,
+            CapDLObject::Tcb(_) => ObjectType::Tcb.fixed_size_bits(sel4_config).unwrap(),
+            CapDLObject::VCpu => ObjectType::Vcpu.fixed_size_bits(sel4_config).unwrap(),
+            CapDLObject::Frame(frame) => frame.size_bits as u64,
+            CapDLObject::PageTable(pt) => {
                 if pt.is_root {
                     ObjectType::VSpace.fixed_size_bits(sel4_config).unwrap()
                 } else {
                     ObjectType::PageTable.fixed_size_bits(sel4_config).unwrap()
                 }
             }
-            Object::AsidPool(_) => ObjectType::AsidPool.fixed_size_bits(sel4_config).unwrap(),
-            Object::SchedContext(sched_context) => sched_context.size_bits as u64,
-            Object::Reply => ObjectType::Reply.fixed_size_bits(sel4_config).unwrap(),
+            CapDLObject::AsidPool(_) => ObjectType::AsidPool.fixed_size_bits(sel4_config).unwrap(),
+            CapDLObject::SchedContext(sched_context) => sched_context.size_bits as u64,
+            CapDLObject::Reply => ObjectType::Reply.fixed_size_bits(sel4_config).unwrap(),
             _ => 0,
         }
     }
 
     pub fn get_cap_entries_mut(&mut self) -> Option<&mut Vec<CapTableEntry>> {
         match self {
-            Object::CNode(cnode) => Some(&mut cnode.slots),
-            Object::Tcb(tcb) => Some(&mut tcb.slots),
-            Object::PageTable(page_table) => Some(&mut page_table.slots),
-            Object::ArmIrq(arm_irq) => Some(&mut arm_irq.slots),
-            Object::IrqMsi(irq_msi) => Some(&mut irq_msi.slots),
-            Object::IrqIOApic(irq_ioapic) => Some(&mut irq_ioapic.slots),
-            Object::RiscvIrq(riscv_irq) => Some(&mut riscv_irq.slots),
+            CapDLObject::CNode(cnode) => Some(&mut cnode.slots),
+            CapDLObject::Tcb(tcb) => Some(&mut tcb.slots),
+            CapDLObject::PageTable(page_table) => Some(&mut page_table.slots),
+            CapDLObject::ArmIrq(arm_irq) => Some(&mut arm_irq.slots),
+            CapDLObject::IrqMsi(irq_msi) => Some(&mut irq_msi.slots),
+            CapDLObject::IrqIOApic(irq_ioapic) => Some(&mut irq_ioapic.slots),
+            CapDLObject::RiscvIrq(riscv_irq) => Some(&mut riscv_irq.slots),
             _ => None,
         }
     }

@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
-use std::{cmp::min, collections::HashMap};
+use std::{cmp::min};
 
 use crate::{
     capdl::SLOT_SIZE,
@@ -13,15 +13,13 @@ use crate::{
     FindFixedError, ObjectAllocator, UntypedObject,
 };
 
-struct InitSystem<'a> {
+pub struct InitSystem<'a> {
     config: &'a Config,
     cnode_cap: u64,
-    cnode_mask: u64,
     cap_slot: u64,
     last_fixed_address: u64,
-    normal_untyped: &'a mut ObjectAllocator,
-    device_untyped: &'a mut ObjectAllocator,
-    cap_address_names: &'a mut HashMap<u64, String>,
+    normal_untyped: ObjectAllocator,
+    device_untyped: ObjectAllocator,
     objects: Vec<Object>,
 }
 
@@ -29,21 +27,17 @@ impl<'a> InitSystem<'a> {
     pub fn new(
         config: &'a Config,
         cnode_cap: u64,
-        cnode_mask: u64,
         first_available_cap_slot: u64,
-        normal_untyped: &'a mut ObjectAllocator,
-        device_untyped: &'a mut ObjectAllocator,
-        cap_address_names: &'a mut HashMap<u64, String>,
+        normal_untyped: ObjectAllocator,
+        device_untyped: ObjectAllocator,
     ) -> InitSystem<'a> {
         InitSystem {
             config,
             cnode_cap,
-            cnode_mask,
             cap_slot: first_available_cap_slot,
             last_fixed_address: 0,
             normal_untyped,
             device_untyped,
-            cap_address_names,
             objects: Vec::new(),
         }
     }
@@ -141,14 +135,15 @@ impl<'a> InitSystem<'a> {
         // ));
 
         self.last_fixed_address = phys_address + alloc_size;
-        let cap_addr = self.cnode_mask | object_cap;
+        // let cap_addr = self.cnode_mask | object_cap;
+        let cap_addr = object_cap;
         let kernel_object = Object {
             object_type,
             cap_addr,
             phys_addr: phys_address,
         };
         self.objects.push(kernel_object);
-        self.cap_address_names.insert(cap_addr, name);
+        // self.cap_address_names.insert(cap_addr, name);
 
         kernel_object
     }
@@ -226,14 +221,15 @@ impl<'a> InitSystem<'a> {
         let mut phys_addr = allocation.phys_addr;
         for (idx, name) in names.into_iter().enumerate() {
             let cap_slot = base_cap_slot + idx as u64;
-            let cap_addr = self.cnode_mask | cap_slot;
+            // let cap_addr = self.cnode_mask | cap_slot;
+            let cap_addr = cap_slot;
             let kernel_object = Object {
                 object_type,
                 cap_addr,
                 phys_addr,
             };
             kernel_objects.push(kernel_object);
-            self.cap_address_names.insert(cap_addr, name);
+            // self.cap_address_names.insert(cap_addr, name);
 
             phys_addr += alloc_size;
 

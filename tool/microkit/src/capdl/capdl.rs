@@ -20,7 +20,7 @@ use crate::{
         spec::{
             object::{self, TcbExtraInfo},
             AsidSlotEntry, CapTableEntry, ElfContent, Fill, FillEntry, FillEntryContent, FrameInit,
-            IrqEntry, NamedObject, Object, ObjectId, UntypedCover,
+            IrqEntry, NamedObject, CapDLObject, ObjectId, UntypedCover,
         },
         util::*,
     },
@@ -315,7 +315,7 @@ impl CapDLSpec {
 
         let tcb_obj = NamedObject {
             name: tcb_name,
-            object: Object::Tcb(tcb_inner_obj),
+            object: CapDLObject::Tcb(tcb_inner_obj),
         };
 
         Ok(self.add_root_object(tcb_obj))
@@ -436,7 +436,7 @@ pub fn build_capdl_spec(
     // the correct slot in the CSpace. We need to bind those objects into the TCB for the monitor to use them.
     // In addition, `add_elf_to_spec()` doesn't fill most the details in the TCB.
     // Now fill them in: stack ptr, priority, ipc buf vaddr, etc.
-    if let Object::Tcb(monitor_tcb) =
+    if let CapDLObject::Tcb(monitor_tcb) =
         &mut spec.get_root_object_mut(monitor_tcb_obj_id).unwrap().object
     {
         // Special case, monitor have its stack statically allocated.
@@ -490,7 +490,7 @@ pub fn build_capdl_spec(
     {
         Some(spec.add_root_object(NamedObject {
             name: "arm_smc".to_owned(),
-            object: Object::ArmSmc,
+            object: CapDLObject::ArmSmc,
         }))
     } else {
         None
@@ -814,7 +814,7 @@ pub fn build_capdl_spec(
                 };
                 let vm_vcpu_tcb_obj_id = spec.add_root_object(NamedObject {
                     name: format!("tcb_{}_{}", virtual_machine.name, vcpu.id),
-                    object: Object::Tcb(vm_vcpu_tcb_inner_obj),
+                    object: CapDLObject::Tcb(vm_vcpu_tcb_inner_obj),
                 });
 
                 // Allow parent PD to access this vCPU object and associated TCB
@@ -859,7 +859,7 @@ pub fn build_capdl_spec(
         pd_id_to_cspace_id.insert(pd_global_idx, pd_cnode_obj_id);
 
         // Step 3-15 Set the TCB parameters and all the various caps that we need to bind to this TCB.
-        if let Object::Tcb(pc_tcb) = &mut spec.get_root_object_mut(pd_tcb_obj_id).unwrap().object {
+        if let CapDLObject::Tcb(pc_tcb) = &mut spec.get_root_object_mut(pd_tcb_obj_id).unwrap().object {
             pc_tcb.extra.sp = kernel_config.pd_stack_top();
             pc_tcb.extra.master_fault_ep = None; // Not used on MCS kernel.
             pc_tcb.extra.prio = pd.priority;

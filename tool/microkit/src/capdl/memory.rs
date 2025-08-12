@@ -5,7 +5,7 @@
 //
 use crate::{
     capdl::{
-        spec::{cap, object, Cap, NamedObject, Object, ObjectId},
+        spec::{cap, object, Cap, NamedObject, CapDLObject, ObjectId},
         CapDLSpec,
     },
     sel4::{Arch, Config, PageSize},
@@ -94,7 +94,7 @@ fn insert_cap_into_page_table_level(
     cap: Cap,
 ) -> Result<(), String> {
     let page_table_level_obj_wrapper = spec.get_root_object_mut(cur_level_obj_id).unwrap();
-    if let Object::PageTable(page_table_object) = &mut page_table_level_obj_wrapper.object {
+    if let CapDLObject::PageTable(page_table_object) = &mut page_table_level_obj_wrapper.object {
         // Sanity check that this slot is free
         match page_table_object
             .slots
@@ -129,7 +129,7 @@ fn map_intermediary_level_helper(
     vaddr: u64,
 ) -> Result<ObjectId, String> {
     let page_table_level_obj_wrapper = spec.get_root_object(cur_level_obj_id).unwrap();
-    if let Object::PageTable(page_table_object) = &page_table_level_obj_wrapper.object {
+    if let CapDLObject::PageTable(page_table_object) = &page_table_level_obj_wrapper.object {
         match page_table_object
             .slots
             .iter()
@@ -161,7 +161,7 @@ fn map_intermediary_level_helper(
             "{}_{}_covers_0x{:x}..0x{:x}",
             next_level_name_prefix, pd_name, next_level_coverage.start, next_level_coverage.end
         ),
-        object: Object::PageTable(next_level_inner_obj),
+        object: CapDLObject::PageTable(next_level_inner_obj),
     };
     let next_level_obj_id = spec.add_root_object(next_level_object);
     let next_level_cap = Cap::PageTable(cap::PageTable {
@@ -184,7 +184,7 @@ fn map_intermediary_level_helper(
 pub fn create_vspace(spec: &mut CapDLSpec, sel4_config: &Config, pd_name: &str) -> ObjectId {
     spec.add_root_object(NamedObject {
         name: format!("{}_{}", get_pt_level_name(sel4_config, 0), pd_name),
-        object: Object::PageTable(object::PageTable {
+        object: CapDLObject::PageTable(object::PageTable {
             is_root: true,
             level: Some(0),
             slots: [].to_vec(),

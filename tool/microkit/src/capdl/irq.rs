@@ -39,14 +39,14 @@ fn create_irq_obj(
 ) -> ObjectId {
     let irq_inner_obj = match irq_desc.kind {
         SysIrqKind::Conventional { trigger, .. } => match sel4_config.arch {
-            Arch::Aarch64 => Object::ArmIrq(object::ArmIrq {
+            Arch::Aarch64 => CapDLObject::ArmIrq(object::ArmIrq {
                 slots: [].to_vec(),
                 extra: object::ArmIrqExtraInfo {
                     trigger: trigger as u64,
                     target: 0, // @billn revisit for SMP
                 },
             }),
-            Arch::Riscv64 => Object::RiscvIrq(object::RiscvIrq {
+            Arch::Riscv64 => CapDLObject::RiscvIrq(object::RiscvIrq {
                 slots: [].to_vec(),
                 extra: object::RiscvIrqExtraInfo {
                     trigger: trigger as u64,
@@ -60,7 +60,7 @@ fn create_irq_obj(
             level,
             polarity,
             ..
-        } => Object::IrqIOApic(object::IrqIOApic {
+        } => CapDLObject::IrqIOApic(object::IrqIOApic {
             slots: [].to_vec(),
             extra: object::IrqIOApicExtraInfo {
                 ioapic,
@@ -75,7 +75,7 @@ fn create_irq_obj(
             pci_func,
             handle,
             ..
-        } => Object::IrqMsi(object::IrqMsi {
+        } => CapDLObject::IrqMsi(object::IrqMsi {
             slots: [].to_vec(),
             extra: object::IrqMsiExtraInfo {
                 handle,
@@ -94,16 +94,16 @@ fn create_irq_obj(
 
 fn bind_irq_to_ntfn(spec: &mut CapDLSpec, irq_obj_id: ObjectId, ntfn_cap: Cap) {
     match &mut spec.get_root_object_mut(irq_obj_id).unwrap().object {
-        Object::ArmIrq(arm_irq) => {
+        CapDLObject::ArmIrq(arm_irq) => {
             arm_irq.slots.push((0, ntfn_cap));
         }
-        Object::IrqMsi(irq_msi) => {
+        CapDLObject::IrqMsi(irq_msi) => {
             irq_msi.slots.push((0, ntfn_cap));
         }
-        Object::IrqIOApic(irq_ioapic) => {
+        CapDLObject::IrqIOApic(irq_ioapic) => {
             irq_ioapic.slots.push((0, ntfn_cap));
         }
-        Object::RiscvIrq(riscv_irq) => {
+        CapDLObject::RiscvIrq(riscv_irq) => {
             riscv_irq.slots.push((0, ntfn_cap));
         }
         _ => unreachable!("internal bug: bind_irq_to_ntfn() got non irq object"),
