@@ -491,6 +491,8 @@ fn main() -> Result<(), String> {
         let spec = build_capdl_spec(&kernel_config, &mut pd_elf_files, &system)?;
 
         // Reserialise the spec into a type that can be understood by rust-sel4.
+        // @billn improve? Instead of this serialise our spec type -> deserialise into their spec type -> serialise business, why dont we just serialise
+        // our Spec type and let the run time initialiser deal with the type conversion?
         let spec_reserialised = {
             // Eagerly write out the spec so we can debug in case something crash later.
             let spec_as_json = serde_json::to_string(&spec).unwrap();
