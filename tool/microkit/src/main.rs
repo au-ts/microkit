@@ -8,16 +8,19 @@
 #![allow(clippy::assertions_on_constants)]
 
 use microkit_tool::capdl::spec::ElfContent;
+use microkit_tool::capdl::untyped::InitSystem;
 use microkit_tool::capdl::{build_capdl_spec, reserialise_spec};
 use microkit_tool::elf::{ElfFile, ElfSegmentAttributes};
 use microkit_tool::loader::Loader;
 use microkit_tool::sdf::parse;
 use microkit_tool::sel4::{
-    emulate_kernel_boot_partial, Arch, Config, PageSize, PlatformConfig, RiscvVirtualMemory,
+    emulate_kernel_boot, emulate_kernel_boot_partial, Arch, Config, ObjectType, PageSize,
+    PlatformConfig, RiscvVirtualMemory,
 };
 use microkit_tool::util::{
     human_size_strict, json_str, json_str_as_bool, json_str_as_u64, round_up,
 };
+use microkit_tool::{MemoryRegion, ObjectAllocator};
 use sel4_capdl_initializer_types::{ObjectNamesLevel, Spec};
 use std::fs::{self, metadata};
 use std::ops::Range;
@@ -470,55 +473,53 @@ fn main() -> Result<(), String> {
         search_paths.push(PathBuf::from(path));
     }
 
-    let (num_objects, capdl_spec_as_binary) = {
-        // Get the elf files for each pd:
-        let mut pd_elf_files = Vec::with_capacity(system.protection_domains.len());
-        for pd in &system.protection_domains {
-            match get_full_path(&pd.program_image, &search_paths) {
-                Some(path) => {
-                    pd_elf_files.push(ElfFile::from_path(&path)?);
-                }
-                None => {
-                    return Err(format!(
-                        "unable to find program image: '{}'",
-                        pd.program_image.display()
-                    ))
-                }
+    // Get the elf files for each pd:
+    let mut pd_elf_files = Vec::with_capacity(system.protection_domains.len());
+    for pd in &system.protection_domains {
+        match get_full_path(&pd.program_image, &search_paths) {
+            Some(path) => {
+                pd_elf_files.push(ElfFile::from_path(&path)?);
+            }
+            None => {
+                return Err(format!(
+                    "unable to find program image: '{}'",
+                    pd.program_image.display()
+                ))
             }
         }
-        pd_elf_files.push(monitor_elf);
+    }
+    pd_elf_files.push(monitor_elf);
 
-        // We have parsed the XML and all ELF files, create the CapDL spec of the system described in the XML.
-        let spec = build_capdl_spec(&kernel_config, &mut pd_elf_files, &system)?;
+    // We have parsed the XML and all ELF files, create the CapDL spec of the system described in the XML.
+    let spec = build_capdl_spec(&kernel_config, &mut pd_elf_files, &system)?;
 
-        // Reserialise the spec into a type that can be understood by rust-sel4.
-        // @billn improve? Instead of this serialise our spec type -> deserialise into their spec type -> serialise business, why dont we just serialise
-        // our Spec type and let the run time initialiser deal with the type conversion?
-        let spec_reserialised = {
-            // Eagerly write out the spec so we can debug in case something crash later.
-            let spec_as_json = serde_json::to_string(&spec).unwrap();
-            fs::write(args.report, &spec_as_json).unwrap();
+    // Reserialise the spec into a type that can be understood by rust-sel4.
+    // @billn improve? Instead of this serialise our spec type -> deserialise into their spec type -> serialise business, why dont we just serialise
+    // our Spec type and let the run time initialiser deal with the type conversion?
+    let spec_reserialised = {
+        // Eagerly write out the spec so we can debug in case something crash later.
+        let spec_as_json = serde_json::to_string(&spec).unwrap();
+        fs::write(args.report, &spec_as_json).unwrap();
 
-            // The full type definition is `Spec<'a, N, D, M>` where:
-            // N = object name type
-            // D = frame fill data type
-            // M = embedded frame data type
-            // Only N and D is useful for Microkit.
-            serde_json::from_str::<Spec<String, ElfContent, ()>>(&spec_as_json).unwrap()
-        };
-
-        // Now embed the built spec into the CapDL initialiser.
-        let name_level = match args.config {
-            "debug" => ObjectNamesLevel::All,
-            // We don't copy over the object names as there is no printing in these configuration to save memory.
-            "release" | "benchmark" => ObjectNamesLevel::None,
-            _ => panic!("unknown configuration {}", args.config),
-        };
-        (
-            spec.objects.len(),
-            reserialise_spec::reserialise_spec(&pd_elf_files, &spec_reserialised, &name_level),
-        )
+        // The full type definition is `Spec<'a, N, D, M>` where:
+        // N = object name type
+        // D = frame fill data type
+        // M = embedded frame data type
+        // Only N and D is useful for Microkit.
+        serde_json::from_str::<Spec<String, ElfContent, ()>>(&spec_as_json).unwrap()
     };
+
+    // Now embed the built spec into the CapDL initialiser.
+    let name_level = match args.config {
+        "debug" => ObjectNamesLevel::All,
+        // We don't copy over the object names as there is no printing in these configuration to save memory.
+        "release" | "benchmark" => ObjectNamesLevel::None,
+        _ => panic!("unknown configuration {}", args.config),
+    };
+
+    let num_objects = spec.objects.len();
+    let capdl_spec_as_binary =
+        reserialise_spec::reserialise_spec(&pd_elf_files, &spec_reserialised, &name_level);
 
     let footprint = capdl_spec_as_binary.len();
     let heap_size = footprint * 2 + 16 * 4096;
@@ -567,10 +568,10 @@ fn main() -> Result<(), String> {
         human_size_strict(footprint as u64),
         human_size_strict(heap_size as u64)
     );
-    let initialiser_highest_vaddr =
+    let initialiser_highest_vaddr_rounded =
         round_up(initialiser_elf.highest_vaddr(), PageSize::Small as u64);
     let initialiser_vaddr_range =
-        Range::from(initialiser_elf.lowest_vaddr()..initialiser_highest_vaddr);
+        Range::from(initialiser_elf.lowest_vaddr()..initialiser_highest_vaddr_rounded);
     println!(
         "INITIAL TASK: size = {}, vaddr = [0x{:x}..0x{:x}], entry = 0x{:x}",
         human_size_strict(initialiser_vaddr_range.end - initialiser_vaddr_range.start),
@@ -606,10 +607,99 @@ fn main() -> Result<(), String> {
         let (mut available_memory, kernel_boot_region) =
             emulate_kernel_boot_partial(&kernel_config, &kernel_elf);
 
+        // The kernel relies on the initial task region being allocated above the kernel
+        // boot/ELF region, so we have the end of the kernel boot region as the lower
+        // bound for allocating the reserved region.
         let initial_task_phys_base =
             available_memory.allocate_from(initial_task_size, kernel_boot_region.end);
 
-        // Then create the loader image.
+        let initial_task_phys_region = MemoryRegion::new(
+            initial_task_phys_base,
+            initial_task_phys_base + initial_task_size,
+        );
+        let initial_task_virt_region = MemoryRegion::new(
+            initialiser_elf.lowest_vaddr(),
+            initialiser_highest_vaddr_rounded,
+        );
+
+        // With the initial task region determined the kernel boot can be emulated. This provides
+        // the boot info information which is needed for the next steps
+        let kernel_boot_info = emulate_kernel_boot(
+            &kernel_config,
+            &kernel_elf,
+            initial_task_phys_region,
+            initial_task_virt_region,
+        );
+
+        // The kernel boot info allows us to create an allocator for kernel objects
+        let kao = ObjectAllocator::new(
+            kernel_boot_info
+                .untyped_objects
+                .iter()
+                .filter(|ut| !ut.is_device)
+                .collect::<Vec<_>>(),
+        );
+        let kad = ObjectAllocator::new(
+            kernel_boot_info
+                .untyped_objects
+                .iter()
+                .filter(|ut| ut.is_device)
+                .collect::<Vec<_>>(),
+        );
+
+        // Create the objects allocator that knows everything about the untypeds that
+        // the initial task (CapDL initialiser) will get at run time.
+        let mut init_system = InitSystem::new(
+            &kernel_config,
+            2, // INIT_CNODE_CAP_ADDRESS
+            kernel_boot_info.first_available_cap,
+            kao,
+            kad,
+        );
+
+        // Perform a dry run allocations of all objects in the CapDL spec.
+        // @billn revisit
+        // for named_obj in spec.objects.iter() {
+        //     let obj = &named_obj.object;
+        //     match obj.paddr() {
+        //         Some(paddr) => {
+        //             let _ = init_system.allocate_fixed_object(
+        //                 paddr as u64,
+        //                 obj.get_type(&kernel_config).unwrap(),
+        //                 named_obj.name.clone(),
+        //             );
+        //         }
+        //         None => {
+        //             if obj.get_type(&kernel_config).is_some() {
+        //                 if obj.get_type(&kernel_config).is_some() {
+        //                     let t = obj.get_type(&kernel_config).unwrap();
+        //                     if t == ObjectType::SchedContext {
+        //                         let _ = init_system.allocate_objects(
+        //                             obj.get_type(&kernel_config).unwrap(),
+        //                             vec![named_obj.name.clone()],
+        //                             Some(256),
+        //                         );
+        //                         continue;
+        //                     } else if t == ObjectType::CNode {
+        //                         let _ = init_system.allocate_objects(
+        //                             obj.get_type(&kernel_config).unwrap(),
+        //                             vec![named_obj.name.clone()],
+        //                             Some(512),
+        //                         );
+        //                         continue;
+        //                     }
+        //                 }
+        //                 let _ = init_system.allocate_objects(
+        //                     obj.get_type(&kernel_config).unwrap(),
+        //                     vec![named_obj.name.clone()],
+        //                     None,
+        //                 );
+        //             }
+        //         }
+        //     }
+        // }
+
+        // Everything checks out, now build the bootloader!
         let loader = Loader::new(
             &kernel_config,
             Path::new(&loader_elf_path),

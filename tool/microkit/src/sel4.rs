@@ -1,3 +1,5 @@
+use std::cmp::max;
+
 //
 // Copyright 2025, UNSW
 //
@@ -5,12 +7,22 @@
 //
 use serde::Deserialize;
 
-use crate::{elf::ElfFile, DisjointMemoryRegion, MemoryRegion};
+use crate::{elf::ElfFile, util, DisjointMemoryRegion, MemoryRegion, UntypedObject};
 
 pub struct KernelPartialBootInfo {
-    _device_memory: DisjointMemoryRegion,
+    device_memory: DisjointMemoryRegion,
     normal_memory: DisjointMemoryRegion,
     boot_region: MemoryRegion,
+}
+
+#[derive(Clone, Debug)]
+pub struct BootInfo {
+    pub fixed_cap_count: u64,
+    pub sched_control_cap: u64,
+    pub paging_cap_count: u64,
+    pub page_cap_count: u64,
+    pub untyped_objects: Vec<UntypedObject>,
+    pub first_available_cap: u64,
 }
 
 fn kernel_self_mem(kernel_elf: &ElfFile) -> MemoryRegion {
@@ -62,7 +74,7 @@ fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile) -> KernelPa
     let boot_region = kernel_boot_mem(kernel_elf);
 
     KernelPartialBootInfo {
-        _device_memory: device_memory,
+        device_memory,
         normal_memory,
         boot_region,
     }
@@ -74,6 +86,162 @@ pub fn emulate_kernel_boot_partial(
 ) -> (DisjointMemoryRegion, MemoryRegion) {
     let partial_info = kernel_partial_boot(kernel_config, kernel_elf);
     (partial_info.normal_memory, partial_info.boot_region)
+}
+
+fn get_n_paging(region: MemoryRegion, bits: u64) -> u64 {
+    let start = util::round_down(region.base, 1 << bits);
+    let end = util::round_up(region.end, 1 << bits);
+
+    (end - start) / (1 << bits)
+}
+
+fn get_arch_n_paging(config: &Config, region: MemoryRegion) -> u64 {
+    match config.arch {
+        Arch::Aarch64 => {
+            const PT_INDEX_OFFSET: u64 = 12;
+            const PD_INDEX_OFFSET: u64 = PT_INDEX_OFFSET + 9;
+            const PUD_INDEX_OFFSET: u64 = PD_INDEX_OFFSET + 9;
+
+            if config.aarch64_vspace_s2_start_l1() {
+                get_n_paging(region, PUD_INDEX_OFFSET) + get_n_paging(region, PD_INDEX_OFFSET)
+            } else {
+                const PGD_INDEX_OFFSET: u64 = PUD_INDEX_OFFSET + 9;
+                get_n_paging(region, PGD_INDEX_OFFSET)
+                    + get_n_paging(region, PUD_INDEX_OFFSET)
+                    + get_n_paging(region, PD_INDEX_OFFSET)
+            }
+        }
+        Arch::Riscv64 => match config.riscv_pt_levels.unwrap() {
+            RiscvVirtualMemory::Sv39 => {
+                const PT_INDEX_OFFSET: u64 = 12;
+                const LVL1_INDEX_OFFSET: u64 = PT_INDEX_OFFSET + 9;
+                const LVL2_INDEX_OFFSET: u64 = LVL1_INDEX_OFFSET + 9;
+
+                get_n_paging(region, LVL2_INDEX_OFFSET) + get_n_paging(region, LVL1_INDEX_OFFSET)
+            }
+        },
+        Arch::X86_64 => unreachable!("the kernel boot process should not be emulated for x86!"),
+    }
+}
+
+fn calculate_rootserver_size(config: &Config, initial_task_region: MemoryRegion) -> u64 {
+    // FIXME: These constants should ideally come from the config / kernel
+    // binary not be hard coded here.
+    // But they are constant so it isn't too bad.
+    let slot_bits = 5; // seL4_SlotBits
+    let root_cnode_bits = config.init_cnode_bits; // CONFIG_ROOT_CNODE_SIZE_BITS
+    let tcb_bits = ObjectType::Tcb.fixed_size_bits(config).unwrap(); // seL4_TCBBits
+    let page_bits = ObjectType::SmallPage.fixed_size_bits(config).unwrap(); // seL4_PageBits
+    let asid_pool_bits = 12; // seL4_ASIDPoolBits
+    let vspace_bits = ObjectType::VSpace.fixed_size_bits(config).unwrap(); // seL4_VSpaceBits
+    let page_table_bits = ObjectType::PageTable.fixed_size_bits(config).unwrap(); // seL4_PageTableBits
+    let min_sched_context_bits = 7; // seL4_MinSchedContextBits
+
+    let mut size = 0;
+    size += 1 << (root_cnode_bits + slot_bits);
+    size += 1 << (tcb_bits);
+    size += 2 * (1 << page_bits);
+    size += 1 << asid_pool_bits;
+    size += 1 << vspace_bits;
+    size += get_arch_n_paging(config, initial_task_region) * (1 << page_table_bits);
+    size += 1 << min_sched_context_bits;
+
+    size
+}
+
+fn rootserver_max_size_bits(config: &Config) -> u64 {
+    let slot_bits = 5; // seL4_SlotBits
+    let root_cnode_bits = config.init_cnode_bits; // CONFIG_ROOT_CNODE_SIZE_BITS
+    let vspace_bits = ObjectType::VSpace.fixed_size_bits(config).unwrap();
+
+    let cnode_size_bits = root_cnode_bits + slot_bits;
+    max(cnode_size_bits, vspace_bits)
+}
+
+/// Emulate what happens during a kernel boot, generating a
+/// representation of the BootInfo struct.
+pub fn emulate_kernel_boot(
+    config: &Config,
+    kernel_elf: &ElfFile,
+    initial_task_phys_region: MemoryRegion,
+    initial_task_virt_region: MemoryRegion,
+) -> BootInfo {
+    assert!(initial_task_phys_region.size() == initial_task_virt_region.size());
+    let partial_info = kernel_partial_boot(config, kernel_elf);
+    let mut normal_memory = partial_info.normal_memory;
+    let device_memory = partial_info.device_memory;
+    let boot_region = partial_info.boot_region;
+
+    normal_memory.remove_region(initial_task_phys_region.base, initial_task_phys_region.end);
+
+    // Now, the tricky part! determine which memory is used for the initial task objects
+    let initial_objects_size = calculate_rootserver_size(config, initial_task_virt_region);
+    let initial_objects_align = rootserver_max_size_bits(config);
+
+    // Find an appropriate region of normal memory to allocate the objects
+    // from; this follows the same algorithm used within the kernel boot code
+    // (or at least we hope it does!)
+    // TODO: this loop could be done better in a functional way?
+    let mut region_to_remove: Option<u64> = None;
+    for region in normal_memory.regions.iter().rev() {
+        let start = util::round_down(
+            region.end - initial_objects_size,
+            1 << initial_objects_align,
+        );
+        if start >= region.base {
+            region_to_remove = Some(start);
+            break;
+        }
+    }
+    if let Some(start) = region_to_remove {
+        normal_memory.remove_region(start, start + initial_objects_size);
+    } else {
+        panic!("Couldn't find appropriate region for initial task kernel objects");
+    }
+
+    let fixed_cap_count = 0x10;
+    let sched_control_cap_count = 1;
+    let paging_cap_count = get_arch_n_paging(config, initial_task_virt_region);
+    let page_cap_count = initial_task_virt_region.size() / config.minimum_page_size;
+    let first_untyped_cap =
+        fixed_cap_count + paging_cap_count + sched_control_cap_count + page_cap_count;
+    let sched_control_cap = fixed_cap_count + paging_cap_count;
+
+    let max_bits = match config.arch {
+        Arch::Aarch64 => 47,
+        Arch::Riscv64 => 38,
+        Arch::X86_64 => unreachable!("the kernel boot process should not be emulated for x86!"),
+    };
+    let device_regions: Vec<MemoryRegion> = [
+        device_memory.aligned_power_of_two_regions(config, max_bits),
+    ]
+    .concat();
+    let normal_regions: Vec<MemoryRegion> = [
+        boot_region.aligned_power_of_two_regions(config, max_bits),
+        normal_memory.aligned_power_of_two_regions(config, max_bits),
+    ]
+    .concat();
+    let mut untyped_objects = Vec::new();
+    for (i, r) in device_regions.iter().enumerate() {
+        let cap = i as u64 + first_untyped_cap;
+        untyped_objects.push(UntypedObject::new(cap, *r, true));
+    }
+    let normal_regions_start_cap = first_untyped_cap + device_regions.len() as u64;
+    for (i, r) in normal_regions.iter().enumerate() {
+        let cap = i as u64 + normal_regions_start_cap;
+        untyped_objects.push(UntypedObject::new(cap, *r, false));
+    }
+
+    let first_available_cap =
+        first_untyped_cap + device_regions.len() as u64 + normal_regions.len() as u64;
+    BootInfo {
+        fixed_cap_count,
+        paging_cap_count,
+        page_cap_count,
+        sched_control_cap,
+        first_available_cap,
+        untyped_objects,
+    }
 }
 
 #[derive(Deserialize)]
