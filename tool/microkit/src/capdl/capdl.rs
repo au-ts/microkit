@@ -53,6 +53,8 @@ const TCB_SLOT_SC: u64 = 6;
 // const TCB_SLOT_TEMP_FAULT_EP: u64 = 7;
 const TCB_SLOT_BOUND_NOTIFICATION: u64 = 8;
 const TCB_SLOT_VCPU: u64 = 9;
+// Guest VM root page table object on x86
+const TCB_SLOT_X86_EPTPML4: u64 = 10;
 
 // Where caps must be in the Monitor's CSpace
 const MON_FAULT_EP_CAP_IDX: u64 = 1;
@@ -756,109 +758,131 @@ pub fn build_capdl_spec(
                 );
             }
 
-            for (vcpu_idx, vcpu) in virtual_machine.vcpus.iter().enumerate() {
-                // All vCPUs get to access the same address space.
-                let mut caps_to_bind_to_vm_tcbs: Vec<CapTableEntry> = Vec::new();
-                caps_to_bind_to_vm_tcbs.push((TCB_SLOT_VSPACE as usize, vm_vspace_cap.clone()));
+            if kernel_config.arch == Arch::X86_64 {
+                // only support 1 vcpu on x86 right now.
+                assert_eq!(virtual_machine.vcpus.len(), 1);
+                let vcpu = virtual_machine.vcpus.get(0).unwrap();
 
-                // Create an empty CSpace
-                let vm_cnode_obj_id = capdl_util_make_cnode_obj(
-                    &mut spec,
-                    &format!("{}_{}", virtual_machine.name, vcpu.id),
-                    PD_CAP_BITS as usize,
-                    [].to_vec(),
-                );
-                let vm_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS;
-                let vm_cnode_cap = capdl_util_make_cnode_cap(vm_cnode_obj_id, 0, vm_guard_size);
-                caps_to_bind_to_vm_tcbs.push((TCB_SLOT_CSPACE as usize, vm_cnode_cap));
-
-                // Create and map the IPC buffer.
-                let vm_ipcbuf_frame_obj_id = capdl_util_make_frame_obj(
-                    &mut spec,
-                    FrameInit::Fill(Fill {
-                        entries: [].to_vec(),
-                    }),
-                    &format!("ipcbuf_{}_{}", virtual_machine.name, vcpu.id),
-                    None,
-                    // Must be consistent with the granule bits used in spec serialisation
-                    PageSize::Small.fixed_size_bits(kernel_config) as usize,
-                );
-                let vm_ipcbuf_frame_cap =
-                    capdl_util_make_frame_cap(vm_ipcbuf_frame_obj_id, true, true, false, true);
-                caps_to_bind_to_vm_tcbs.push((TCB_SLOT_IPC_BUFFER as usize, vm_ipcbuf_frame_cap));
-
-                // Create fault endpoint cap to the parent PD.
-                let vm_vcpu_fault_ep_cap = capdl_util_make_endpoint_cap(
-                    pd_ep_obj_id.unwrap(),
-                    true,
-                    true,
-                    true,
-                    FAULT_BADGE | vcpu.id,
-                );
-                caps_to_bind_to_vm_tcbs.push((TCB_SLOT_FAULT_EP as usize, vm_vcpu_fault_ep_cap));
-
-                // Create scheduling context
-                let vm_vcpu_sc_obj_id = capdl_util_make_sc_obj(
-                    &mut spec,
-                    &format!("{}_{}", virtual_machine.name, vcpu.id),
-                    PD_SCHEDCONTEXT_EXTRA_SIZE_BITS as usize,
-                    virtual_machine.period,
-                    virtual_machine.budget,
-                    0x100 + vcpu_idx as u64,
-                );
-                caps_to_bind_to_vm_tcbs.push((
-                    TCB_SLOT_SC as usize,
-                    capdl_util_make_sc_cap(vm_vcpu_sc_obj_id),
-                ));
-
-                // Create vCPU object
+                // Create the vCPU object and bind it to the VMM PD.
                 let vm_vcpu_obj_id = capdl_util_make_vcpu_obj(
                     &mut spec,
                     &format!("{}_{}", virtual_machine.name, vcpu.id),
                 );
-                caps_to_bind_to_vm_tcbs.push((
+                caps_to_bind_to_tcb.push((
                     TCB_SLOT_VCPU as usize,
                     capdl_util_make_vcpu_cap(vm_vcpu_obj_id),
                 ));
 
-                // Finally create TCB, unlike PDs, VMs are suspended by default until resume'd by their parent.
-                let vm_vcpu_tcb_inner_obj = object::Tcb {
-                    slots: caps_to_bind_to_vm_tcbs,
-                    extra: TcbExtraInfo {
-                        ipc_buffer_addr: 0,
-                        affinity: 0, // @billn revisit for SMP, need a way to specify node id in the XML
-                        prio: virtual_machine.priority,
-                        max_prio: virtual_machine.priority,
-                        resume: false,
-                        ip: 0,
-                        sp: 0,
-                        gprs: [].to_vec(),
-                        master_fault_ep: None, // Not used on MCS kernel.
-                    },
-                };
-                let vm_vcpu_tcb_obj_id = spec.add_root_object(NamedObject {
-                    name: format!("tcb_{}_{}", virtual_machine.name, vcpu.id),
-                    object: CapDLObject::Tcb(vm_vcpu_tcb_inner_obj),
-                });
-
-                // Allow parent PD to access this vCPU object and associated TCB
-                caps_to_insert_to_pd_cspace.push((
-                    (PD_BASE_VCPU_CAP + vcpu.id) as usize,
-                    capdl_util_make_vcpu_cap(vm_vcpu_obj_id),
+                // Bind the guest's root page table to the VMM PD.
+                caps_to_bind_to_tcb.push((
+                    TCB_SLOT_X86_EPTPML4 as usize,
+                    vm_vspace_cap
                 ));
-                caps_to_insert_to_pd_cspace.push((
-                    (PD_BASE_VM_TCB_CAP + vcpu.id) as usize,
-                    capdl_util_make_tcb_cap(vm_vcpu_tcb_obj_id),
-                ));
-
-                // Bind vCPU's TCB to the monitor so that the name can be set at start up in debug config
-                capdl_util_insert_cap_into_cspace(
-                    &mut spec,
-                    mon_cnode_obj_id,
-                    MON_BASE_VM_TCB_CAP as usize + vcpu_index_accumulator,
-                    capdl_util_make_tcb_cap(vm_vcpu_tcb_obj_id),
-                );
-                vcpu_index_accumulator += 1;
+            } else {
+                for (vcpu_idx, vcpu) in virtual_machine.vcpus.iter().enumerate() {
+                    // All vCPUs get to access the same address space.
+                    let mut caps_to_bind_to_vm_tcbs: Vec<CapTableEntry> = Vec::new();
+                    caps_to_bind_to_vm_tcbs.push((TCB_SLOT_VSPACE as usize, vm_vspace_cap.clone()));
+    
+                    // Create an empty CSpace
+                    let vm_cnode_obj_id = capdl_util_make_cnode_obj(
+                        &mut spec,
+                        &format!("{}_{}", virtual_machine.name, vcpu.id),
+                        PD_CAP_BITS as usize,
+                        [].to_vec(),
+                    );
+                    let vm_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS;
+                    let vm_cnode_cap = capdl_util_make_cnode_cap(vm_cnode_obj_id, 0, vm_guard_size);
+                    caps_to_bind_to_vm_tcbs.push((TCB_SLOT_CSPACE as usize, vm_cnode_cap));
+    
+                    // Create and map the IPC buffer.
+                    let vm_ipcbuf_frame_obj_id = capdl_util_make_frame_obj(
+                        &mut spec,
+                        FrameInit::Fill(Fill {
+                            entries: [].to_vec(),
+                        }),
+                        &format!("ipcbuf_{}_{}", virtual_machine.name, vcpu.id),
+                        None,
+                        // Must be consistent with the granule bits used in spec serialisation
+                        PageSize::Small.fixed_size_bits(kernel_config) as usize,
+                    );
+                    let vm_ipcbuf_frame_cap =
+                        capdl_util_make_frame_cap(vm_ipcbuf_frame_obj_id, true, true, false, true);
+                    caps_to_bind_to_vm_tcbs.push((TCB_SLOT_IPC_BUFFER as usize, vm_ipcbuf_frame_cap));
+    
+                    // Create fault endpoint cap to the parent PD.
+                    let vm_vcpu_fault_ep_cap = capdl_util_make_endpoint_cap(
+                        pd_ep_obj_id.unwrap(),
+                        true,
+                        true,
+                        true,
+                        FAULT_BADGE | vcpu.id,
+                    );
+                    caps_to_bind_to_vm_tcbs.push((TCB_SLOT_FAULT_EP as usize, vm_vcpu_fault_ep_cap));
+    
+                    // Create scheduling context
+                    let vm_vcpu_sc_obj_id = capdl_util_make_sc_obj(
+                        &mut spec,
+                        &format!("{}_{}", virtual_machine.name, vcpu.id),
+                        PD_SCHEDCONTEXT_EXTRA_SIZE_BITS as usize,
+                        virtual_machine.period,
+                        virtual_machine.budget,
+                        0x100 + vcpu_idx as u64,
+                    );
+                    caps_to_bind_to_vm_tcbs.push((
+                        TCB_SLOT_SC as usize,
+                        capdl_util_make_sc_cap(vm_vcpu_sc_obj_id),
+                    ));
+    
+                    // Create vCPU object
+                    let vm_vcpu_obj_id = capdl_util_make_vcpu_obj(
+                        &mut spec,
+                        &format!("{}_{}", virtual_machine.name, vcpu.id),
+                    );
+                    caps_to_bind_to_vm_tcbs.push((
+                        TCB_SLOT_VCPU as usize,
+                        capdl_util_make_vcpu_cap(vm_vcpu_obj_id),
+                    ));
+    
+                    // Finally create TCB, unlike PDs, VMs are suspended by default until resume'd by their parent.
+                    let vm_vcpu_tcb_inner_obj = object::Tcb {
+                        slots: caps_to_bind_to_vm_tcbs,
+                        extra: TcbExtraInfo {
+                            ipc_buffer_addr: 0,
+                            affinity: 0, // @billn revisit for SMP, need a way to specify node id in the XML
+                            prio: virtual_machine.priority,
+                            max_prio: virtual_machine.priority,
+                            resume: false,
+                            ip: 0,
+                            sp: 0,
+                            gprs: [].to_vec(),
+                            master_fault_ep: None, // Not used on MCS kernel.
+                        },
+                    };
+                    let vm_vcpu_tcb_obj_id = spec.add_root_object(NamedObject {
+                        name: format!("tcb_{}_{}", virtual_machine.name, vcpu.id),
+                        object: CapDLObject::Tcb(vm_vcpu_tcb_inner_obj),
+                    });
+    
+                    // Allow parent PD to access this vCPU object and associated TCB
+                    caps_to_insert_to_pd_cspace.push((
+                        (PD_BASE_VCPU_CAP + vcpu.id) as usize,
+                        capdl_util_make_vcpu_cap(vm_vcpu_obj_id),
+                    ));
+                    caps_to_insert_to_pd_cspace.push((
+                        (PD_BASE_VM_TCB_CAP + vcpu.id) as usize,
+                        capdl_util_make_tcb_cap(vm_vcpu_tcb_obj_id),
+                    ));
+    
+                    // Bind vCPU's TCB to the monitor so that the name can be set at start up in debug config
+                    capdl_util_insert_cap_into_cspace(
+                        &mut spec,
+                        mon_cnode_obj_id,
+                        MON_BASE_VM_TCB_CAP as usize + vcpu_index_accumulator,
+                        capdl_util_make_tcb_cap(vm_vcpu_tcb_obj_id),
+                    );
+                    vcpu_index_accumulator += 1;
+                }
             }
         }
 
