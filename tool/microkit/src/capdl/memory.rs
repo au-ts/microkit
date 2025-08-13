@@ -123,6 +123,7 @@ fn map_intermediary_level_helper(
     sel4_config: &Config,
     pd_name: &str,
     next_level_name_prefix: &str,
+    vspace_obj_id: ObjectId,
     cur_level_obj_id: ObjectId,
     cur_level: usize,
     cur_level_slot: u64,
@@ -150,7 +151,12 @@ fn map_intermediary_level_helper(
     }
 
     // Next level object not already created, create it.
+    let vspace_obj = match &spec.get_root_object(vspace_obj_id).unwrap().object {
+        CapDLObject::PageTable(o) => o,
+        _ => unreachable!("invalid VSpace VSpace ID"),
+    };
     let next_level_inner_obj = object::PageTable {
+        x86_ept: vspace_obj.x86_ept,
         is_root: false, // because the VSpace has already been created separately
         level: Some(cur_level as u8 + 1),
         slots: [].to_vec(),
@@ -185,6 +191,21 @@ pub fn create_vspace(spec: &mut CapDLSpec, sel4_config: &Config, pd_name: &str) 
     spec.add_root_object(NamedObject {
         name: format!("{}_{}", get_pt_level_name(sel4_config, 0), pd_name),
         object: CapDLObject::PageTable(object::PageTable {
+            x86_ept: false,
+            is_root: true,
+            level: Some(0),
+            slots: [].to_vec(),
+        }),
+    })
+}
+
+pub fn create_vspace_ept(spec: &mut CapDLSpec, sel4_config: &Config, vm_name: &str) -> ObjectId {
+    assert!(sel4_config.arch == Arch::X86_64);
+
+    spec.add_root_object(NamedObject {
+        name: format!("{}_{}", get_pt_level_name(sel4_config, 0), vm_name),
+        object: CapDLObject::PageTable(object::PageTable {
+            x86_ept: true,
             is_root: true,
             level: Some(0),
             slots: [].to_vec(),
@@ -196,6 +217,7 @@ fn map_recursive(
     spec: &mut CapDLSpec,
     sel4_config: &Config,
     pd_name: &str,
+    vspace_obj_id: ObjectId,
     pt_obj_id: ObjectId,
     cur_level: usize,
     frame_cap: Cap,
@@ -225,6 +247,7 @@ fn map_recursive(
             sel4_config,
             pd_name,
             next_level_name_prefix,
+            vspace_obj_id,
             pt_obj_id,
             cur_level,
             this_level_index,
@@ -234,6 +257,7 @@ fn map_recursive(
                 spec,
                 sel4_config,
                 pd_name,
+                vspace_obj_id,
                 next_level_pt_obj_id,
                 cur_level + 1,
                 frame_cap,
@@ -258,6 +282,7 @@ pub fn map_page(
         spec,
         sel4_config,
         pd_name,
+        vspace_obj_id,
         vspace_obj_id,
         0,
         frame_cap,

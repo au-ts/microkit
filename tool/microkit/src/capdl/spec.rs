@@ -277,6 +277,7 @@ pub mod object {
 
     #[derive(Serialize, Clone, Eq, PartialEq)]
     pub struct PageTable {
+        pub x86_ept: bool,
         pub is_root: bool,
         pub level: Option<u8>,
         pub slots: Vec<CapTableEntry>,

@@ -425,7 +425,7 @@ pub enum ObjectType {
     LargePage,
     PageTable,
     Vcpu,
-    AsidPool
+    AsidPool,
 }
 
 impl ObjectType {
@@ -496,8 +496,8 @@ impl ObjectType {
             ObjectType::SmallPage => "SEL4_SMALL_PAGE_OBJECT",
             ObjectType::LargePage => "SEL4_LARGE_PAGE_OBJECT",
             ObjectType::PageTable => "SEL4_PAGE_TABLE_OBJECT",
-            ObjectType::Vcpu => "SEL4_ASID_POOL_OBJECT",
-            ObjectType::AsidPool => todo!(),
+            ObjectType::Vcpu => "SEL4_VCPU_OBJECT",
+            ObjectType::AsidPool => "SEL4_ASID_POOL_OBJECT",
         }
     }
 
