@@ -771,9 +771,15 @@ pub fn build_capdl_spec(
                     &mut spec,
                     &format!("{}_{}", virtual_machine.name, vcpu.id),
                 );
+                let vcpu_cap = capdl_util_make_vcpu_cap(vm_vcpu_obj_id);
                 caps_to_bind_to_tcb.push((
                     TCB_SLOT_VCPU as usize,
-                    capdl_util_make_vcpu_cap(vm_vcpu_obj_id),
+                    vcpu_cap.clone(),
+                ));
+
+                caps_to_insert_to_pd_cspace.push((
+                    (PD_BASE_VCPU_CAP + vcpu.id) as usize,
+                    vcpu_cap
                 ));
 
                 // Bind the guest's root page table to the VMM PD.
