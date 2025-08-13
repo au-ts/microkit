@@ -16,7 +16,7 @@ use serde::Serialize;
 use crate::{
     capdl::{
         irq::create_irq_handler_cap,
-        memory::{create_vspace, map_page},
+        memory::{create_vspace, create_vspace_ept, map_page},
         spec::{
             object::{self, TcbExtraInfo},
             AsidSlotEntry, CapDLObject, CapTableEntry, ElfContent, Fill, FillEntry,
@@ -742,7 +742,10 @@ pub fn build_capdl_spec(
             // The difference is that it have a vCPU to store the virtual CPU's state:
 
             // Create VM's Address Space and map in all memory regions
-            let vm_vspace_obj_id = create_vspace(&mut spec, kernel_config, &virtual_machine.name);
+            let vm_vspace_obj_id = match kernel_config.arch {
+                Arch::X86_64 => create_vspace_ept(&mut spec, kernel_config, &virtual_machine.name),
+                _ => create_vspace(&mut spec, kernel_config, &virtual_machine.name),
+            };
             let vm_vspace_cap = capdl_util_make_page_table_cap(vm_vspace_obj_id);
             for map in virtual_machine.maps.iter() {
                 let (mr_description, frames) = mr_name_to_frames.get(&map.mr).unwrap();
