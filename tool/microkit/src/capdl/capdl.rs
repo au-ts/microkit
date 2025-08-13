@@ -19,8 +19,8 @@ use crate::{
         memory::{create_vspace, map_page},
         spec::{
             object::{self, TcbExtraInfo},
-            AsidSlotEntry, CapTableEntry, ElfContent, Fill, FillEntry, FillEntryContent, FrameInit,
-            IrqEntry, NamedObject, CapDLObject, ObjectId, UntypedCover,
+            AsidSlotEntry, CapDLObject, CapTableEntry, ElfContent, Fill, FillEntry,
+            FillEntryContent, FrameInit, IrqEntry, NamedObject, ObjectId, UntypedCover,
         },
         util::*,
     },
@@ -30,7 +30,9 @@ use crate::{
         MONITOR_PD_NAME, PD_DEFAULT_STACK_SIZE,
     },
     sel4::{Arch, Config, PageSize},
-    util::{monitor_serialise_names, monitor_serialise_u64_vec, round_down},
+    util::{
+        monitor_serialise_names, monitor_serialise_u64_vec, ranges_overlap, round_down, round_up,
+    },
     MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH, VM_MAX_NAME_LENGTH,
 };
 
@@ -81,7 +83,8 @@ const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
 
 const PD_CAP_SIZE: u64 = 512;
 const PD_CAP_BITS: u64 = PD_CAP_SIZE.ilog2() as u64;
-const PD_SCHEDCONTEXT_EXTRA_SIZE_BITS: u64 = 8;
+const PD_SCHEDCONTEXT_EXTRA_SIZE: u64 = 256;
+const PD_SCHEDCONTEXT_EXTRA_SIZE_BITS: u64 = PD_SCHEDCONTEXT_EXTRA_SIZE.ilog2() as u64;
 
 pub const SLOT_BITS: u64 = 5;
 pub const SLOT_SIZE: u64 = 1 << SLOT_BITS;
@@ -465,7 +468,9 @@ pub fn build_capdl_spec(
         let frame_size_bits = mr.page_size.fixed_size_bits(kernel_config);
 
         for frame_sequence in 0..mr.page_count {
-            let paddr = mr.phys_addr.map(|base_paddr| (base_paddr + (frame_sequence * mr.page_size_bytes())) as usize);
+            let paddr = mr
+                .phys_addr
+                .map(|base_paddr| (base_paddr + (frame_sequence * mr.page_size_bytes())) as usize);
             frame_ids.push(capdl_util_make_frame_obj(
                 &mut spec,
                 FrameInit::Fill(Fill {
@@ -508,19 +513,14 @@ pub fn build_capdl_spec(
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
 
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
-        let elf_obj = pd_elf_files[pd_global_idx].clone();
+        let elf_obj = &pd_elf_files[pd_global_idx];
 
         let mut caps_to_bind_to_tcb: Vec<CapTableEntry> = Vec::new();
         let mut caps_to_insert_to_pd_cspace: Vec<CapTableEntry> = Vec::new();
 
         // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
         let pd_tcb_obj_id = spec
-            .add_elf_to_spec(
-                kernel_config,
-                &pd.name,
-                pd_global_idx,
-                &pd_elf_files[pd_global_idx],
-            )
+            .add_elf_to_spec(kernel_config, &pd.name, pd_global_idx, elf_obj)
             .unwrap();
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec, pd_tcb_obj_id);
 
@@ -544,6 +544,30 @@ pub fn build_capdl_spec(
         for map in pd.maps.iter() {
             let (mr_description, frames) = mr_name_to_frames.get(&map.mr).unwrap();
             let page_size = mr_description.page_size;
+
+            // sdf.rs sanity checks that the memory regions doesn't overlap with each others, etc.
+            // But it doesn't actually check for whether they overlap with a PD's stack or ELF segments.
+            // We perform this check here, otherwise the tool will panic with quite cryptic page-table related errors.
+            let mr_vaddr_range =
+                Range::from(map.vaddr..(map.vaddr + (page_size as u64 * frames.len() as u64)));
+
+            let pd_stack_range = Range::from(
+                kernel_config.pd_stack_bottom(pd.stack_size)..kernel_config.pd_stack_top(),
+            );
+            if ranges_overlap(&mr_vaddr_range, &pd_stack_range) {
+                return Err(format!("Error: mapping MR '{}' to PD '{}' with vaddr 0x{:x}..0x{:x} will conflict with the stack at 0x{:x}..0x{:x}", mr_description.name, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, pd_stack_range.start, pd_stack_range.end));
+            }
+
+            for elf_seg in elf_obj.loadable_segments().iter() {
+                let elf_seg_vaddr_range = Range::from(
+                    elf_seg.virt_addr
+                        ..elf_seg.virt_addr + round_up(elf_seg.mem_size(), PageSize::Small as u64),
+                );
+                if ranges_overlap(&mr_vaddr_range, &elf_seg_vaddr_range) {
+                    return Err(format!("Error: mapping MR '{}' to PD '{}' with vaddr 0x{:x}..0x{:x} will conflict with an ELF segment at 0x{:x}..0x{:x}", mr_description.name, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, elf_seg_vaddr_range.start, elf_seg_vaddr_range.end));
+                }
+            }
+
             map_memory_region(
                 &mut spec,
                 kernel_config,
@@ -859,7 +883,9 @@ pub fn build_capdl_spec(
         pd_id_to_cspace_id.insert(pd_global_idx, pd_cnode_obj_id);
 
         // Step 3-15 Set the TCB parameters and all the various caps that we need to bind to this TCB.
-        if let CapDLObject::Tcb(pc_tcb) = &mut spec.get_root_object_mut(pd_tcb_obj_id).unwrap().object {
+        if let CapDLObject::Tcb(pc_tcb) =
+            &mut spec.get_root_object_mut(pd_tcb_obj_id).unwrap().object
+        {
             pc_tcb.extra.sp = kernel_config.pd_stack_top();
             pc_tcb.extra.master_fault_ep = None; // Not used on MCS kernel.
             pc_tcb.extra.prio = pd.priority;
@@ -1056,13 +1082,13 @@ pub fn build_capdl_spec(
     // 3. Record all of the root objects new index.
     // 4. Recurse through every cap, for any cap bearing the original object ID, write the new object ID.
 
-    // Step 7-1
+    // Step 6-1
     let mut obj_name_to_old_id: HashMap<String, ObjectId> = HashMap::new();
     for (id, obj) in spec.objects.iter().enumerate() {
         obj_name_to_old_id.insert(obj.name.clone(), id);
     }
 
-    // Step 7-2
+    // Step 6-2
     spec.objects.sort_by(|a, b| {
         // Objects with paddrs always come first.
         if a.object.paddr().is_none() && b.object.paddr().is_some() {
@@ -1097,13 +1123,13 @@ pub fn build_capdl_spec(
         }
     });
 
-    // Step 7-3
+    // Step 6-3
     let mut obj_old_id_to_new_id: HashMap<ObjectId, ObjectId> = HashMap::new();
     for (new_id, obj) in spec.objects.iter().enumerate() {
         obj_old_id_to_new_id.insert(*obj_name_to_old_id.get(&obj.name).unwrap(), new_id);
     }
 
-    // Step 7-4
+    // Step 6-4
     for obj in spec.objects.iter_mut() {
         match obj.object.get_cap_entries_mut() {
             Some(caps) => {
