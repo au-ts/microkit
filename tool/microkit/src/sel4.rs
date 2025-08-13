@@ -36,6 +36,7 @@ pub enum MicrokitConfig {
     Debug,
     Benchmark,
     Release,
+    Profiling,
 }
 
 impl MicrokitConfig {
@@ -44,6 +45,7 @@ impl MicrokitConfig {
             "debug" => MicrokitConfig::Debug,
             "release" => MicrokitConfig::Release,
             "benchmark" => MicrokitConfig::Benchmark,
+            "profiling" => MicrokitConfig::Profiling,
             _ => panic!("Invalid microkit configuration provided!"),
         }
     }

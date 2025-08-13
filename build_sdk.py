@@ -348,6 +348,18 @@ SUPPORTED_CONFIGS = (
             "KernelBenchmarks": "track_utilisation"
         },
     ),
+    ConfigInfo(
+        name="profiling",
+        debug=True,
+        kernel_options={
+            "KernelArmExportPMUUser": True,
+            "KernelDebugBuild": True,
+            "KernelPrinting": True,
+            "KernelVerificationBuild": False,
+            "KernelBenchmarks": "track_utilisation",
+            "ProfilerEnable": True
+        },
+    )
 )
 
 
