@@ -777,6 +777,7 @@ pub fn build_capdl_spec(
                     vcpu_cap.clone(),
                 ));
 
+                // Allow the VMM to access the vCPU object.
                 caps_to_insert_to_pd_cspace.push((
                     (PD_BASE_VCPU_CAP + vcpu.id) as usize,
                     vcpu_cap
@@ -1086,8 +1087,13 @@ pub fn build_capdl_spec(
         })
         .collect();
 
+    let vm_names_len = match kernel_config.arch {
+        Arch::Aarch64 | Arch::Riscv64 => vm_names.len(),
+        // VM on x86 doesn't have a separate TCB.
+        Arch::X86_64 => 0,
+    };
     monitor_elf
-        .write_symbol("vm_names_len", &vm_names.len().to_le_bytes())
+        .write_symbol("vm_names_len", &vm_names_len.to_le_bytes())
         .unwrap();
     monitor_elf
         .write_symbol(
