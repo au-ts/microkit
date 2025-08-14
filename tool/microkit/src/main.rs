@@ -26,6 +26,11 @@ use std::fs::{self, metadata};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
+// The capDL initialiser heap size is calculated by:
+// spec size * INITIALISER_HEAP_MULTIPLIER + INITIALISER_HEAP_ADD_ON_CONSTANT
+const INITIALISER_HEAP_MULTIPLIER: f64 = 2.0;
+const INITIALISER_HEAP_ADD_ON_CONSTANT: u64 = 16 * 4096; // 64kb
+
 fn get_full_path(path: &Path, search_paths: &Vec<PathBuf>) -> Option<PathBuf> {
     for search_path in search_paths {
         let full_path = search_path.join(path);
@@ -61,6 +66,7 @@ struct Args<'a> {
     report: &'a str,
     output: &'a str,
     search_paths: Vec<&'a String>,
+    initialiser_heap_size_multiplier: f64,
 }
 
 impl<'a> Args<'a> {
@@ -73,6 +79,7 @@ impl<'a> Args<'a> {
         let mut system = None;
         let mut board = None;
         let mut config = None;
+        let mut initialiser_heap_size_multiplier = INITIALISER_HEAP_MULTIPLIER;
 
         if args.len() <= 1 {
             print_usage();
@@ -125,6 +132,22 @@ impl<'a> Args<'a> {
                         i += 1;
                     } else {
                         eprintln!("microkit: error: argument --config: expected one argument");
+                        std::process::exit(1);
+                    }
+                }
+                "-x" | "--initialiser_heap_size_multiplier" => {
+                    in_search_path = false;
+                    if i < args.len() - 1 {
+                        match args[i + 1].parse::<f64>() {
+                            Ok(multiplier) => initialiser_heap_size_multiplier = multiplier,
+                            Err(e) => {
+                                eprintln!("microkit: error: argument --initialiser_heap_size_multiplier: failed to parse as float: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                        i += 1;
+                    } else {
+                        eprintln!("microkit: error: argument --initialiser_heap_size_multiplier: expected one argument");
                         std::process::exit(1);
                     }
                 }
@@ -183,6 +206,7 @@ impl<'a> Args<'a> {
             report,
             output,
             search_paths,
+            initialiser_heap_size_multiplier,
         }
     }
 }
@@ -522,7 +546,11 @@ fn main() -> Result<(), String> {
         reserialise_spec::reserialise_spec(&pd_elf_files, &spec_reserialised, &name_level);
 
     let footprint = capdl_spec_as_binary.len();
-    let heap_size = footprint * 2 + 16 * 4096;
+    let heap_size = round_up(
+        (footprint as f64 * args.initialiser_heap_size_multiplier) as u64
+            + INITIALISER_HEAP_ADD_ON_CONSTANT,
+        PageSize::Small as u64,
+    ) as usize;
 
     // Patch the spec and heap into the ELF image. These symbol names must match
     // rust-sel4/crates/sel4-capdl-initializer/src/main.rs
