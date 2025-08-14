@@ -4,15 +4,13 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
-use crate::{
-    capdl::{
-        spec::{
-            cap,
-            object::{self, SchedContextExtraInfo},
-            Cap, CapTableEntry, FrameInit, NamedObject, CapDLObject, ObjectId, Rights,
-        },
-        CapDLSpec,
+use crate::capdl::{
+    spec::{
+        cap,
+        object::{self, SchedContextExtraInfo},
+        Cap, CapDLObject, CapTableEntry, FrameInit, NamedObject, ObjectId, Rights,
     },
+    CapDLSpec,
 };
 
 /// This module contains utility functions used by higher-level
@@ -78,12 +76,12 @@ pub fn capdl_util_get_vspace_id_from_tcb_id(spec: &CapDLSpec, tcb_obj_id: Object
             if let CapDLObject::Tcb(tcb) = &named_object.object {
                 Some(tcb)
             } else {
-                unreachable!("internal bug: get_vspace_id_from_tcb_id() got a non TCB object ID.");
+                unreachable!("get_vspace_id_from_tcb_id(): internal bug: got a non TCB object id {} with name '{}'", tcb_obj_id, named_object.name);
             }
         }
         None => {
             unreachable!(
-                "internal bug: get_vspace_id_from_tcb_id() couldn't find tcb with given obj id."
+                "get_vspace_id_from_tcb_id(): internal bug: couldn't find tcb with given obj id."
             );
         }
     };
@@ -248,7 +246,7 @@ pub fn capdl_util_insert_cap_into_cspace(
     if let CapDLObject::CNode(cspace_inner_obj) = &mut cspace_obj.object {
         cspace_inner_obj.slots.push((idx, cap));
     } else {
-        unreachable!("internal bug: capdl_util_insert_cap_into_cspace() got a non CNode object.");
+        unreachable!("capdl_util_insert_cap_into_cspace(): internal bug: got a non CNode object id {} with name '{}'", cspace_obj_id, cspace_obj.name);
     }
 }
 

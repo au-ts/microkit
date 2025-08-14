@@ -509,6 +509,7 @@ pub fn build_capdl_spec(
     let mut pd_id_to_ep_id: HashMap<usize, ObjectId> = HashMap::new();
 
     // Keep track of the global count of vCPU objects so we can bind them to the monitor for setting TCB name in debug config.
+    // Only used on ARM and RISC-V.
     let mut vcpu_index_accumulator = 0;
 
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
@@ -739,9 +740,10 @@ pub fn build_capdl_spec(
         // Step 3-12 Create VM Spec.
         if let Some(virtual_machine) = &pd.virtual_machine {
             // A VM really is just a collection of special threads, it have its own TCBs, Scheduling Contexts, etc...
-            // The difference is that it have a vCPU to store the virtual CPU's state:
+            // The difference is that it have a vCPU for each TCB to store the virtual CPUs' states.
 
-            // Create VM's Address Space and map in all memory regions
+            // Create VM's Address Space and map in all memory regions.
+            // This address space is shared across all vCPUs. The virtual address that we "map" the region is guest-physical.
             let vm_vspace_obj_id = match kernel_config.arch {
                 Arch::X86_64 => create_vspace_ept(&mut spec, kernel_config, &virtual_machine.name),
                 _ => create_vspace(&mut spec, kernel_config, &virtual_machine.name),
@@ -762,7 +764,7 @@ pub fn build_capdl_spec(
             }
 
             if kernel_config.arch == Arch::X86_64 {
-                // only support 1 vcpu on x86 right now.
+                // Only support 1 vcpu on x86 right now.
                 assert_eq!(virtual_machine.vcpus.len(), 1);
                 let vcpu = virtual_machine.vcpus.get(0).unwrap();
 

@@ -52,7 +52,7 @@ fn create_irq_obj(
                     trigger: trigger as u64,
                 },
             }),
-            Arch::X86_64 => unreachable!("internal bug: ARM and RISC-V IRQs not supported on x86."),
+            Arch::X86_64 => unreachable!("create_irq_obj(): internal bug: ARM and RISC-V IRQs not supported on x86."),
         },
         SysIrqKind::IOAPIC {
             ioapic,
@@ -106,7 +106,11 @@ fn bind_irq_to_ntfn(spec: &mut CapDLSpec, irq_obj_id: ObjectId, ntfn_cap: Cap) {
         CapDLObject::RiscvIrq(riscv_irq) => {
             riscv_irq.slots.push((0, ntfn_cap));
         }
-        _ => unreachable!("internal bug: bind_irq_to_ntfn() got non irq object"),
+        _ => unreachable!(
+            "bind_irq_to_ntfn(): internal bug: got non irq object id {} with name '{}'",
+            irq_obj_id,
+            spec.get_root_object(irq_obj_id).unwrap().name
+        ),
     }
 }
 
@@ -115,7 +119,7 @@ fn make_irq_handler_cap(sel4_config: &Config, irq_obj_id: ObjectId, irq_kind: &S
         SysIrqKind::Conventional { .. } => match sel4_config.arch {
             Arch::Aarch64 => Cap::ArmIrqHandler(cap::ArmIrqHandler { object: irq_obj_id }),
             Arch::Riscv64 => Cap::RiscvIrqHandler(cap::RiscvIrqHandler { object: irq_obj_id }),
-            Arch::X86_64 => unreachable!("internal bug: ARM and RISC-V IRQs not supported on x86."),
+            Arch::X86_64 => unreachable!("make_irq_handler_cap(): internal bug: ARM and RISC-V IRQs not supported on x86."),
         },
         SysIrqKind::IOAPIC { .. } => {
             Cap::IrqIOApicHandler(cap::IrqIOApicHandler { object: irq_obj_id })
