@@ -5,7 +5,7 @@
 //
 use crate::{
     capdl::{
-        spec::{cap, object, Cap, NamedObject, CapDLObject, ObjectId},
+        spec::{cap, object, Cap, CapDLObject, NamedObject, ObjectId},
         CapDLSpec,
     },
     sel4::{Arch, Config, PageSize},
@@ -20,20 +20,29 @@ fn get_pt_level_name(sel4_config: &Config, level: usize) -> &str {
             1 => "pud",
             2 => "pd",
             3 => "pt",
-            _ => unreachable!("unknown page table level {} for aarch64", level),
+            _ => unreachable!(
+                "get_pt_level_name(): internal bug: unknown page table level {} for aarch64",
+                level
+            ),
         },
         crate::sel4::Arch::Riscv64 => match level {
             0 => "pgd",
             1 => "pmd",
             2 => "pte",
-            _ => unreachable!("unknown page table level {} for riscv64", level),
+            _ => unreachable!(
+                "get_pt_level_name(): internal bug: unknown page table level {} for riscv64",
+                level
+            ),
         },
         crate::sel4::Arch::X86_64 => match level {
             0 => "pml4",
             1 => "pdpt",
             2 => "pd",
             3 => "pt",
-            _ => unreachable!("unknown page table level {} for x86_64", level),
+            _ => unreachable!(
+                "get_pt_level_name(): internal bug: unknown page table level {} for x86_64",
+                level
+            ),
         },
     }
 }
@@ -102,8 +111,8 @@ fn insert_cap_into_page_table_level(
             .find(|cte| cte.0 == cur_level_slot as usize)
         {
             Some(_) => Err(format!(
-                "insert_cap_into_page_table_level(): slot {} at level {} already filled",
-                cur_level_slot, cur_level
+                "insert_cap_into_page_table_level(): internal bug: slot {} at PT level {} with name '{}' already filled",
+                cur_level_slot, cur_level, spec.get_root_object(cur_level_obj_id).unwrap().name
             )),
             None => {
                 page_table_object.slots.push((cur_level_slot as usize, cap));
@@ -112,8 +121,8 @@ fn insert_cap_into_page_table_level(
         }
     } else {
         Err(format!(
-            "insert_cap_into_page_table_level(): received a non-Page Table cap: {}",
-            cur_level_obj_id
+            "insert_cap_into_page_table_level(): internal bug: received a non-Page Table object id {} with name '{}'",
+            cur_level_obj_id, spec.get_root_object(cur_level_obj_id).unwrap().name
         ))
     }
 }
@@ -146,14 +155,17 @@ fn map_intermediary_level_helper(
             }
         }
     } else {
-        return Err(format!("map_intermediary_level_helper() received a non-Page Table cap: {}, for mapping at level {}, to pd {}.",
-            cur_level_obj_id, cur_level, pd_name));
+        return Err(format!("map_intermediary_level_helper(): internal bug: received a non-Page Table object id {} with name '{}', for mapping at level {}, to pd {}.",
+            cur_level_obj_id, spec.get_root_object(cur_level_obj_id).unwrap().name, cur_level, pd_name));
     }
 
     // Next level object not already created, create it.
     let vspace_obj = match &spec.get_root_object(vspace_obj_id).unwrap().object {
         CapDLObject::PageTable(o) => o,
-        _ => unreachable!("invalid VSpace VSpace ID"),
+        _ => unreachable!(
+            "map_intermediary_level_helper(): internal bug: received a non VSpace object id {} with name '{}'",
+            vspace_obj_id, spec.get_root_object(vspace_obj_id).unwrap().name
+        ),
     };
     let next_level_inner_obj = object::PageTable {
         x86_ept: vspace_obj.x86_ept,
