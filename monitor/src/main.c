@@ -912,11 +912,9 @@ void main(void)
     for (unsigned idx = 0; idx < pd_names_len; idx++) {
         seL4_DebugNameThread(BASE_PD_TCB_CAP + idx, pd_names[idx]);
     }
-#if !defined(ARCH_x86_64)
     for (unsigned idx = 0; idx < vm_names_len; idx++) {
         seL4_DebugNameThread(BASE_VM_TCB_CAP + idx, vm_names[idx]);
     }
-#endif
 #endif
 
     puts("MON|INFO: Microkit Monitor started!\n");
