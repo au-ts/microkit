@@ -133,34 +133,6 @@ impl CapDLObject {
             _ => None,
         }
     }
-
-    /// @billn get rid of this by making untyped covers code simpler
-    /// Get an `ObjectType` enum from a `CapDLObject` enum.
-    pub fn get_type(&self, sel4_config: &Config) -> Option<ObjectType> {
-        match self {
-            CapDLObject::Endpoint => Some(ObjectType::Endpoint),
-            CapDLObject::Notification => Some(ObjectType::Notification),
-            CapDLObject::CNode(_) => Some(ObjectType::CNode),
-            CapDLObject::Tcb(_) => Some(ObjectType::Tcb),
-            CapDLObject::VCpu => Some(ObjectType::Vcpu),
-            CapDLObject::Frame(frame) => {
-                if frame.size_bits == ObjectType::SmallPage.fixed_size_bits(sel4_config).unwrap() as usize {
-                    Some(ObjectType::SmallPage)
-                } else if frame.size_bits == ObjectType::LargePage.fixed_size_bits(sel4_config).unwrap() as usize {
-                    Some(ObjectType::LargePage)
-                } else if frame.size_bits == ObjectType::HugePage.fixed_size_bits(sel4_config).unwrap() as usize {
-                    Some(ObjectType::HugePage)
-                } else {
-                    unreachable!("internal bug, CapDL Frame object have incorrect size bits: {}", frame.size_bits);
-                }
-            }
-            CapDLObject::PageTable(_) => Some(ObjectType::PageTable),
-            CapDLObject::AsidPool(_) => Some(ObjectType::AsidPool),
-            CapDLObject::SchedContext(_) => Some(ObjectType::SchedContext),
-            CapDLObject::Reply => Some(ObjectType::Reply),
-            _ => None
-        }
-    }
 }
 
 #[derive(Serialize, Clone, Eq, PartialEq)]

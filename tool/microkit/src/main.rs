@@ -8,19 +8,19 @@
 #![allow(clippy::assertions_on_constants)]
 
 use microkit_tool::capdl::spec::ElfContent;
-use microkit_tool::capdl::untyped::InitSystem;
+// use microkit_tool::capdl::untyped::InitSystem;
 use microkit_tool::capdl::{build_capdl_spec, reserialise_spec};
 use microkit_tool::elf::{ElfFile, ElfSegmentAttributes};
 use microkit_tool::loader::Loader;
 use microkit_tool::sdf::parse;
 use microkit_tool::sel4::{
-    emulate_kernel_boot, emulate_kernel_boot_partial, Arch, Config, ObjectType, PageSize,
-    PlatformConfig, RiscvVirtualMemory,
+    emulate_kernel_boot, emulate_kernel_boot_partial, Arch, Config, PageSize, PlatformConfig,
+    RiscvVirtualMemory,
 };
 use microkit_tool::util::{
     human_size_strict, json_str, json_str_as_bool, json_str_as_u64, round_up,
 };
-use microkit_tool::{MemoryRegion, ObjectAllocator};
+use microkit_tool::MemoryRegion;
 use sel4_capdl_initializer_types::{ObjectNamesLevel, Spec};
 use std::fs::{self, metadata};
 use std::ops::Range;
@@ -613,15 +613,13 @@ fn main() -> Result<(), String> {
         initialiser_elf.reserialise(Path::new(args.output))?;
     } else {
         // Now that we have the entire spec and CapDL initialiser ELF with embedded spec,
-        // we can determine how much memory will be available statically when the kernel
+        // we can determine exactly how much memory will be available statically when the kernel
         // drops to userspace on ARM and RISC-V. This allow us to sanity check that:
         // 1. There are enough memory to allocate all the objects required in the spec.
         // 2. All frames with a physical attached reside in legal memory (device or normal).
         // 3. Objects can be allocated from the free untyped list. For example, we detect
-        //    situations where you might have a large page with size bit 21 but
-        //    only have untyped with size bit <21.
-        // 4. Finally, ensure that the initial task payload (CapDL initialiser) is placed
-        //    after the kernel window in physical memory.
+        //    situations where you might have a few frames with size bit 12 to allocate but
+        //    only have untyped with size bit <12 remaining.
 
         // We achieve this by emulating the kernel's boot process in the tool:
 
@@ -652,80 +650,207 @@ fn main() -> Result<(), String> {
 
         // With the initial task region determined the kernel boot can be emulated. This provides
         // the boot info information which is needed for the next steps
-        let kernel_boot_info = emulate_kernel_boot(
+        let mut kernel_boot_info = emulate_kernel_boot(
             &kernel_config,
             &kernel_elf,
             initial_task_phys_region,
             initial_task_virt_region,
         );
 
-        // The kernel boot info allows us to create an allocator for kernel objects
-        let kao = ObjectAllocator::new(
-            kernel_boot_info
-                .untyped_objects
-                .iter()
-                .filter(|ut| !ut.is_device)
-                .collect::<Vec<_>>(),
-        );
-        let kad = ObjectAllocator::new(
-            kernel_boot_info
-                .untyped_objects
-                .iter()
-                .filter(|ut| ut.is_device)
-                .collect::<Vec<_>>(),
-        );
+        // We got the untypeds list, now follow the CapDL object allocation algorithm to catch
+        // issues at build time.
+        // Step 1: sort untypeds by paddr.
+        kernel_boot_info.untyped_objects.sort_by_key(|ut| ut.base());
+        let untypeds_by_paddr = &kernel_boot_info.untyped_objects;
 
-        // Create the objects allocator that knows everything about the untypeds that
-        // the initial task (CapDL initialiser) will get at run time.
-        let mut init_system = InitSystem::new(
-            &kernel_config,
-            2, // INIT_CNODE_CAP_ADDRESS
-            kernel_boot_info.first_available_cap,
-            kao,
-            kad,
-        );
+        // Step 2: create object "windows" for objects that doesn't specify paddr,
+        // where each window contains all objects of the array index size bits.
+        let mut object_windows_by_size: Vec<Option<Range<usize>>> =
+            vec![None; kernel_config.word_size as usize];
+        let first_obj_id_without_paddr = spec
+            .objects
+            .partition_point(|named_obj| named_obj.object.paddr().is_some());
+        for (id, named_object) in spec.objects[first_obj_id_without_paddr..]
+            .iter()
+            .enumerate()
+        {
+            let phys_size_bit = named_object.object.physical_size_bits(&kernel_config) as usize;
+            if phys_size_bit > 0 {
+                let window_maybe = object_windows_by_size.get_mut(phys_size_bit).unwrap();
+                match window_maybe {
+                    Some(window) => window.end += 1,
+                    None => {
+                        let _ = window_maybe.insert(Range::from(
+                            first_obj_id_without_paddr + id..first_obj_id_without_paddr + id + 1,
+                        ));
+                    }
+                }
+            }
+        }
 
-        // Perform a dry run allocations of all objects in the CapDL spec.
-        // @billn revisit
-        // for named_obj in spec.objects.iter() {
-        //     let obj = &named_obj.object;
-        //     match obj.paddr() {
-        //         Some(paddr) => {
-        //             let _ = init_system.allocate_fixed_object(
-        //                 paddr as u64,
-        //                 obj.get_type(&kernel_config).unwrap(),
-        //                 named_obj.name.clone(),
-        //             );
-        //         }
-        //         None => {
-        //             if obj.get_type(&kernel_config).is_some() {
-        //                 if obj.get_type(&kernel_config).is_some() {
-        //                     let t = obj.get_type(&kernel_config).unwrap();
-        //                     if t == ObjectType::SchedContext {
-        //                         let _ = init_system.allocate_objects(
-        //                             obj.get_type(&kernel_config).unwrap(),
-        //                             vec![named_obj.name.clone()],
-        //                             Some(256),
-        //                         );
-        //                         continue;
-        //                     } else if t == ObjectType::CNode {
-        //                         let _ = init_system.allocate_objects(
-        //                             obj.get_type(&kernel_config).unwrap(),
-        //                             vec![named_obj.name.clone()],
-        //                             Some(512),
-        //                         );
-        //                         continue;
-        //                     }
-        //                 }
-        //                 let _ = init_system.allocate_objects(
-        //                     obj.get_type(&kernel_config).unwrap(),
-        //                     vec![named_obj.name.clone()],
-        //                     None,
-        //                 );
-        //             }
-        //         }
-        //     }
-        // }
+        // Step 3: Sanity check that all objects with a paddr attached can be allocated.
+        let mut phys_addrs_ok = true;
+        for obj_with_paddr_id in 0..first_obj_id_without_paddr {
+            let named_obj = spec.objects.get(obj_with_paddr_id).unwrap();
+            let paddr_base = named_obj.object.paddr().unwrap() as u64;
+
+            let obj_size_bytes = 1 << named_obj.object.physical_size_bits(&kernel_config);
+            let paddr_range = Range::from(paddr_base..paddr_base + obj_size_bytes);
+
+            // Binary search for the untyped that would fit, if we can't find one, this object is not in valid memory.
+            let mut low = 0;
+            let mut high = untypeds_by_paddr.len();
+            let mut found = false;
+            while low < high {
+                let mid = low + (high - low) / 2;
+                let candidate_ut = untypeds_by_paddr.get(mid).unwrap();
+
+                if paddr_range.start >= candidate_ut.end() {
+                    low = mid + 1;
+                } else if paddr_range.start < candidate_ut.base() {
+                    high = mid;
+                } else if paddr_range.start >= candidate_ut.base() {
+                    if paddr_range.end <= candidate_ut.end() {
+                        // Object paddr range doesn't span across 2 untypeds, all good.
+                        found = true;
+                    }
+                    break;
+                }
+            }
+
+            if !found {
+                eprintln!("Error: object '{}', with paddr 0x{:0>12x}..0x{:0>12x} is not in any valid memory region.", named_obj.name, paddr_range.start, paddr_range.end);
+                phys_addrs_ok = false;
+            }
+        }
+
+        if !phys_addrs_ok {
+            eprintln!("Below are the valid ranges of memory to be allocated from:");
+            eprintln!("Valid ranges outside of main memory:");
+            for ut in untypeds_by_paddr.iter().filter(|ut| ut.is_device) {
+                eprintln!("     [0x{:0>12x}..0x{:0>12x})", ut.base(), ut.end());
+            }
+            eprintln!("Valid ranges within main memory:");
+            for ut in untypeds_by_paddr.iter().filter(|ut| !ut.is_device) {
+                eprintln!("     [0x{:0>12x}..0x{:0>12x})", ut.base(), ut.end());
+            }
+            std::process::exit(1);
+        }
+
+        // Step 4: now simulate the allocations
+        let num_objs_with_paddr = first_obj_id_without_paddr;
+        let mut next_obj_id_with_paddr = 0;
+        for ut in untypeds_by_paddr.iter() {
+            let mut cur_paddr = ut.base();
+
+            // println!(
+            //     "TRACE [sel4_capdl_initializer_core] Allocating from untyped: {:#x}..{:#x} (size_bits = {}, device = {:?})",
+            //     ut.base(),
+            //     ut.end(),
+            //     ut.size_bits(),
+            //     ut.is_device
+            // );
+
+            loop {
+                // If this untyped covers frames that specify a paddr, don't allocate ordinary objects
+                // past the lowest frame's paddr.
+                let target = if next_obj_id_with_paddr < num_objs_with_paddr {
+                    ut.end().min(
+                        spec.objects
+                            .get(next_obj_id_with_paddr)
+                            .unwrap()
+                            .object
+                            .paddr()
+                            .unwrap() as u64,
+                    )
+                } else {
+                    ut.end()
+                };
+                let target_is_obj_with_paddr = target < ut.end();
+
+                while cur_paddr < target {
+                    let max_size_bits = usize::try_from(cur_paddr.trailing_zeros())
+                        .unwrap()
+                        .min((target - cur_paddr).trailing_zeros().try_into().unwrap());
+                    let mut created = false;
+
+                    // If this UT is in main memory, allocate all the objects that does not specify a paddr first.
+                    if !ut.is_device {
+                        // Greedily create a largest possible objects that would fit in this untyped.
+                        // If at the current size we cannot allocate any more object, drop to objects of smaller
+                        // size that still need to be allocated.
+                        for size_bits in (0..=max_size_bits).rev() {
+                            let obj_id_range_maybe =
+                                object_windows_by_size.get_mut(size_bits).unwrap();
+                            if obj_id_range_maybe.is_some() {
+                                // Got objects at this size bits, check if we still have any to allocate
+                                if obj_id_range_maybe.as_ref().unwrap().start
+                                    < obj_id_range_maybe.as_ref().unwrap().end
+                                {
+                                    let named_obj = spec
+                                        .get_root_object(obj_id_range_maybe.as_ref().unwrap().start)
+                                        .unwrap();
+
+                                    // println!("TRACE [sel4_capdl_initializer_core] Creating kernel object: paddr=0x{:x}, size_bits={} name={:?}", cur_paddr,named_obj.object.physical_size_bits(&kernel_config), named_obj.name);
+
+                                    cur_paddr +=
+                                        1 << named_obj.object.physical_size_bits(&kernel_config);
+                                    obj_id_range_maybe.as_mut().unwrap().start += 1;
+                                    created = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if !created {
+                        if target_is_obj_with_paddr {
+                            // Manipulate the untyped's watermark to allocate at the correct paddr.
+                            println!(
+                                // "TRACE [sel4_capdl_initializer_core] Creating dummy: paddr=0x{cur_paddr:x}, size_bits={max_size_bits}"
+                            );
+
+                            cur_paddr += 1 << max_size_bits;
+                        } else {
+                            cur_paddr = target;
+                        }
+                    }
+                }
+                if target_is_obj_with_paddr {
+                    // Watermark now at the correct level, make the actual object
+                    let named_obj = spec.get_root_object(next_obj_id_with_paddr).unwrap();
+
+                    // println!(
+                    //     "TRACE [sel4_capdl_initializer_core] Creating device object: paddr=0x{:x}, size_bits={} name={:?}",
+                    //     cur_paddr,
+                    //     named_obj.object.physical_size_bits(&kernel_config),
+                    //     named_obj.name
+                    // );
+
+                    cur_paddr += 1 << named_obj.object.physical_size_bits(&kernel_config);
+                    next_obj_id_with_paddr += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // Ensure that we've created every objects
+        let mut oom = false;
+        for size_bit in 0..kernel_config.word_size {
+            let obj_id_range_maybe = object_windows_by_size.get(size_bit as usize).unwrap();
+            if obj_id_range_maybe.is_some() {
+                let obj_id_range = obj_id_range_maybe.as_ref().unwrap();
+                if obj_id_range.start != obj_id_range.end {
+                    oom = true;
+                    let shortfall = obj_id_range.end - obj_id_range.start;
+                    eprintln!("Error: ran out of untypeds for allocating objects of size bit {}, still need to create {} objects which requires {} of additional memory.", size_bit, shortfall, human_size_strict(((1 << size_bit) * shortfall) as u64));
+                }
+            }
+        }
+        if oom {
+            eprintln!("Out of untypeds.");
+            std::process::exit(1);
+        }
 
         // Everything checks out, now build the bootloader!
         let loader = Loader::new(
