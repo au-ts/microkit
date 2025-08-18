@@ -230,6 +230,15 @@ SUPPORTED_BOARDS = (
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
+        name="nanopi_r5c",
+        arch=KernelArch.AARCH64,
+        gcc_cpu="cortex-a55",
+        loader_link_address=0x10000000,
+        kernel_options={
+            "KernelPlatform": "nanopi-r5c",
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
+    ),
+    BoardInfo(
         name="hifive_p550",
         arch=KernelArch.RISCV64,
         gcc_cpu=None,
