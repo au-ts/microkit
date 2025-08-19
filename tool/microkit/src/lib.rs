@@ -32,6 +32,19 @@ pub struct UntypedObject {
     pub is_device: bool,
 }
 
+pub const UNTYPED_DESC_PADDING: usize = size_of::<u64>() - (2 * size_of::<u8>());
+/// Getting a `seL4_UntypedDesc` for patching into the initialiser
+pub fn serialise_ut(ut: &UntypedObject) -> Vec<u8> {
+    let mut bytes = Vec::new();
+
+    bytes.extend_from_slice(&ut.base().to_le_bytes());
+    bytes.extend_from_slice(&(ut.size_bits() as u8).to_le_bytes());
+    bytes.extend_from_slice(&(ut.is_device as u8).to_le_bytes());
+    bytes.extend_from_slice(&[0u8; UNTYPED_DESC_PADDING]);
+
+    bytes
+}
+
 impl UntypedObject {
     pub fn new(cap: u64, region: MemoryRegion, is_device: bool) -> UntypedObject {
         UntypedObject {

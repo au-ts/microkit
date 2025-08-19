@@ -18,6 +18,7 @@ const DEFAULT_KERNEL_CONFIG: sel4::Config = sel4::Config {
     kernel_frame_size: 1 << 12,
     init_cnode_bits: 12,
     cap_address_bits: 64,
+    max_num_bootinfo_untypeds: 230,
     fan_out_limit: 256,
     hypervisor: true,
     benchmark: false,

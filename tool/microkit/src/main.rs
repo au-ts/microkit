@@ -20,14 +20,14 @@ use microkit_tool::sel4::{
 use microkit_tool::util::{
     human_size_strict, json_str, json_str_as_bool, json_str_as_u64, round_up,
 };
-use microkit_tool::MemoryRegion;
+use microkit_tool::{serialise_ut, MemoryRegion};
 use sel4_capdl_initializer_types::{ObjectNamesLevel, Spec};
 use std::fs::{self, metadata};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 // The capDL initialiser heap size is calculated by:
-// spec size * INITIALISER_HEAP_MULTIPLIER + INITIALISER_HEAP_ADD_ON_CONSTANT
+// (spec size * INITIALISER_HEAP_MULTIPLIER) + INITIALISER_HEAP_ADD_ON_CONSTANT
 const INITIALISER_HEAP_MULTIPLIER: f64 = 2.0;
 const INITIALISER_HEAP_ADD_ON_CONSTANT: u64 = 16 * 4096; // 64kb
 
@@ -450,6 +450,10 @@ fn main() -> Result<(), String> {
         init_cnode_bits: json_str_as_u64(&kernel_config_json, "ROOT_CNODE_SIZE_BITS")?,
         cap_address_bits: 64,
         fan_out_limit: json_str_as_u64(&kernel_config_json, "RETYPE_FAN_OUT_LIMIT")?,
+        max_num_bootinfo_untypeds: json_str_as_u64(
+            &kernel_config_json,
+            "MAX_NUM_BOOTINFO_UNTYPED_CAPS",
+        )?,
         hypervisor,
         benchmark: args.config == "benchmark",
         fpu: json_str_as_bool(&kernel_config_json, "HAVE_FPU")?,
@@ -842,15 +846,41 @@ fn main() -> Result<(), String> {
                 let obj_id_range = obj_id_range_maybe.as_ref().unwrap();
                 if obj_id_range.start != obj_id_range.end {
                     oom = true;
-                    let shortfall = obj_id_range.end - obj_id_range.start;
-                    eprintln!("Error: ran out of untypeds for allocating objects of size bit {}, still need to create {} objects which requires {} of additional memory.", size_bit, shortfall, human_size_strict(((1 << size_bit) * shortfall) as u64));
+                    let shortfall = (obj_id_range.end - obj_id_range.start) as u64;
+                    let individual_sz = (1 << size_bit) as u64;
+                    eprintln!("Error: ran out of untypeds for allocating objects of size {}, still need to create {} objects which requires {} of additional memory.", human_size_strict(individual_sz), shortfall, human_size_strict(individual_sz * shortfall));
                 }
             }
         }
         if oom {
-            eprintln!("Out of untypeds.");
+            eprintln!("Out of untypeds. Please see the report for more details.");
             std::process::exit(1);
         }
+
+        // Everything checks out, patch the list of untypeds we used to simulate object allocation into the initialiser.
+        // At runtime the intialiser will validate what we simulated against what the kernel gives it. If they deviate
+        // we will have problems! For example, if we simulated with more memory than what's actually available, the initialiser
+        // can crash.
+
+        // seL4 gives us untypeds by isDevice (true first) then paddr (ascending), so we have to sort accordingly.
+        kernel_boot_info.untyped_objects.sort_by(|ut_a, ut_b| {
+            if ut_a.is_device != ut_b.is_device {
+                ut_a.is_device.cmp(&ut_b.is_device).reverse()
+            } else {
+                ut_a.base().cmp(&ut_b.base())
+            }
+        });
+        let mut uts_desc: Vec<u8> = Vec::new();
+
+        for ut in kernel_boot_info.untyped_objects.iter() {
+            uts_desc.extend(serialise_ut(ut));
+        }
+
+        initialiser_elf.write_symbol(
+            "sel4_capdl_initializer_expected_untypeds_list_num_entries",
+            &(kernel_boot_info.untyped_objects.len() as u64).to_le_bytes(),
+        )?;
+        initialiser_elf.write_symbol("sel4_capdl_initializer_expected_untypeds_list", &uts_desc)?;
 
         // Everything checks out, now build the bootloader!
         let loader = Loader::new(
