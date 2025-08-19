@@ -44,7 +44,8 @@ LIBS := -lmicrokit -Tmicrokit.ld
 INITIAL_TASK = $(BUILD_DIR)/capdl_initialiser_with_spec.elf
 KERNEL = $(MICROKIT_SDK)/board/$(MICROKIT_BOARD)/$(MICROKIT_CONFIG)/elf/sel4.elf
 COPIED_KERNEL = $(BUILD_DIR)/kernel.elf
-REPORT = $(BUILD_DIR)/report.json
+REPORT = $(BUILD_DIR)/report.txt
+SPEC = $(BUILD_DIR)/capdl_spec.json
 
 all qemu: $(COPIED_KERNEL) $(INITIAL_TASK)
 
@@ -55,7 +56,7 @@ $(BUILD_DIR)/x86_64_ioport.elf: $(BUILD_DIR)/x86_64_ioport.o
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
 $(INITIAL_TASK): $(addprefix $(BUILD_DIR)/, $(IMAGES)) x86_64_ioport.system
-	$(MICROKIT_TOOL) x86_64_ioport.system --search-path $(BUILD_DIR) --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(INITIAL_TASK) -r $(REPORT)
+	$(MICROKIT_TOOL) x86_64_ioport.system --search-path $(BUILD_DIR) --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(INITIAL_TASK) -r $(REPORT) --capdl-spec $(SPEC)
 
 $(COPIED_KERNEL): $(KERNEL)
 	$(OBJCOPY) -O elf32-i386 $(KERNEL) $(COPIED_KERNEL)
