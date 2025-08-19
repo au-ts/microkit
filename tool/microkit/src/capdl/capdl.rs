@@ -321,6 +321,7 @@ impl CapDLSpec {
         let tcb_obj = NamedObject {
             name: tcb_name,
             object: CapDLObject::Tcb(tcb_inner_obj),
+            expected_alloc: None,
         };
 
         Ok(self.add_root_object(tcb_obj))
@@ -498,6 +499,7 @@ pub fn build_capdl_spec(
         Some(spec.add_root_object(NamedObject {
             name: "arm_smc".to_owned(),
             object: CapDLObject::ArmSmc,
+            expected_alloc: None,
         }))
     } else {
         None
@@ -874,6 +876,7 @@ pub fn build_capdl_spec(
                     let vm_vcpu_tcb_obj_id = spec.add_root_object(NamedObject {
                         name: format!("tcb_{}_{}", virtual_machine.name, vcpu.id),
                         object: CapDLObject::Tcb(vm_vcpu_tcb_inner_obj),
+                        expected_alloc: None,
                     });
     
                     // Allow parent PD to access this vCPU object and associated TCB

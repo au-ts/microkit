@@ -35,6 +35,7 @@ pub fn capdl_util_make_frame_obj(
     let frame_obj = NamedObject {
         name: format!("frame_{}", name),
         object: frame_inner_obj,
+        expected_alloc: None,
     };
     spec.add_root_object(frame_obj)
 }
@@ -104,6 +105,7 @@ pub fn capdl_util_make_endpoint_obj(
     let fault_ep_obj = NamedObject {
         name: format!("ep_{}{}", if is_fault { "fault_" } else { "" }, pd_name).to_string(),
         object: CapDLObject::Endpoint,
+        expected_alloc: None,
     };
     spec.add_root_object(fault_ep_obj)
 }
@@ -131,6 +133,7 @@ pub fn capdl_util_make_ntfn_obj(spec: &mut CapDLSpec, pd_name: &str) -> ObjectId
     let ntfn_obj = NamedObject {
         name: format!("ntfn_{}", pd_name),
         object: CapDLObject::Notification,
+        expected_alloc: None,
     };
     spec.add_root_object(ntfn_obj)
 }
@@ -153,6 +156,7 @@ pub fn capdl_util_make_reply_obj(spec: &mut CapDLSpec, pd_name: &str) -> ObjectI
     let reply_obj = NamedObject {
         name: format!("reply_{}", pd_name).to_string(),
         object: CapDLObject::Reply,
+        expected_alloc: None,
     };
     spec.add_root_object(reply_obj)
 }
@@ -182,6 +186,7 @@ pub fn capdl_util_make_sc_obj(
     let sc_obj = NamedObject {
         name: format!("sched_context_{}", pd_name).to_string(),
         object: sc_inner_obj,
+        expected_alloc: None,
     };
     spec.add_root_object(sc_obj)
 }
@@ -200,6 +205,7 @@ pub fn capdl_util_make_cnode_obj(
     let cnode_obj = NamedObject {
         name: format!("cnode_{}", pd_name).to_string(),
         object: cnode_inner_obj,
+        expected_alloc: None,
     };
     // Move monitor CSpace into spec and make a cap for it to insert into TCB later.
     spec.add_root_object(cnode_obj)
@@ -227,6 +233,7 @@ pub fn capdl_util_make_ioport_obj(
     let ioport_obj = NamedObject {
         name: format!("ioports_0x{:x}_{}", start_addr, pd_name),
         object: ioport_inner_obj,
+        expected_alloc: None,
     };
     spec.add_root_object(ioport_obj)
 }
@@ -256,6 +263,7 @@ pub fn capdl_util_make_vcpu_obj(spec: &mut CapDLSpec, name: &String) -> ObjectId
     let vcpu_obj = NamedObject {
         name: format!("vcpu_{}", name).to_string(),
         object: vcpu_inner_obj,
+        expected_alloc: None,
     };
     spec.add_root_object(vcpu_obj)
 }

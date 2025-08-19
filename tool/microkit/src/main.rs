@@ -7,7 +7,7 @@
 // we want our asserts, even if the compiler figures out they hold true already during compile-time
 #![allow(clippy::assertions_on_constants)]
 
-use microkit_tool::capdl::spec::ElfContent;
+use microkit_tool::capdl::spec::{ElfContent, ExpectedAllocation};
 // use microkit_tool::capdl::untyped::InitSystem;
 use microkit_tool::capdl::{build_capdl_spec, reserialise_spec};
 use microkit_tool::elf::{ElfFile, ElfSegmentAttributes};
@@ -20,7 +20,7 @@ use microkit_tool::sel4::{
 use microkit_tool::util::{
     human_size_strict, json_str, json_str_as_bool, json_str_as_u64, round_up,
 };
-use microkit_tool::{serialise_ut, MemoryRegion};
+use microkit_tool::{serialise_ut, MemoryRegion, UntypedObject};
 use sel4_capdl_initializer_types::{ObjectNamesLevel, Spec};
 use std::fs::{self, metadata};
 use std::ops::Range;
@@ -519,7 +519,7 @@ fn main() -> Result<(), String> {
     pd_elf_files.push(monitor_elf);
 
     // We have parsed the XML and all ELF files, create the CapDL spec of the system described in the XML.
-    let spec = build_capdl_spec(&kernel_config, &mut pd_elf_files, &system)?;
+    let mut spec = build_capdl_spec(&kernel_config, &mut pd_elf_files, &system)?;
 
     // Reserialise the spec into a type that can be understood by rust-sel4.
     // @billn improve? Instead of this serialise our spec type -> deserialise into their spec type -> serialise business, why dont we just serialise
@@ -664,8 +664,14 @@ fn main() -> Result<(), String> {
         // We got the untypeds list, now follow the CapDL object allocation algorithm to catch
         // issues at build time.
         // Step 1: sort untypeds by paddr.
-        let mut untypeds_by_paddr = kernel_boot_info.untyped_objects.clone();
-        untypeds_by_paddr.sort_by_key(|ut| ut.base());
+        let untypeds_clone = kernel_boot_info
+            .untyped_objects
+            .clone();
+        let mut untypeds_by_paddr: Vec<(usize, &UntypedObject)> = 
+            untypeds_clone.iter()
+            .enumerate()
+            .map(|(i, ut)| (i, ut)).collect();
+        untypeds_by_paddr.sort_by_key(|(_i, ut)| ut.base());
 
         // Step 2: create object "windows" for objects that doesn't specify paddr,
         // where each window contains all objects of the array index size bits.
@@ -707,7 +713,7 @@ fn main() -> Result<(), String> {
             let mut found = false;
             while low < high {
                 let mid = low + (high - low) / 2;
-                let candidate_ut = untypeds_by_paddr.get(mid).unwrap();
+                let (_, candidate_ut) = untypeds_by_paddr.get(mid).unwrap();
 
                 if paddr_range.start >= candidate_ut.end() {
                     low = mid + 1;
@@ -731,11 +737,11 @@ fn main() -> Result<(), String> {
         if !phys_addrs_ok {
             eprintln!("Below are the valid ranges of memory to be allocated from:");
             eprintln!("Valid ranges outside of main memory:");
-            for ut in untypeds_by_paddr.iter().filter(|ut| ut.is_device) {
+            for (_i, ut) in untypeds_by_paddr.iter().filter(|(_i, ut)| ut.is_device) {
                 eprintln!("     [0x{:0>12x}..0x{:0>12x})", ut.base(), ut.end());
             }
             eprintln!("Valid ranges within main memory:");
-            for ut in untypeds_by_paddr.iter().filter(|ut| !ut.is_device) {
+            for (_i, ut) in untypeds_by_paddr.iter().filter(|(_i, ut)| !ut.is_device) {
                 eprintln!("     [0x{:0>12x}..0x{:0>12x})", ut.base(), ut.end());
             }
             std::process::exit(1);
@@ -744,16 +750,8 @@ fn main() -> Result<(), String> {
         // Step 4: now simulate the allocations
         let num_objs_with_paddr = first_obj_id_without_paddr;
         let mut next_obj_id_with_paddr = 0;
-        for ut in untypeds_by_paddr.iter() {
+        for (ut_orig_idx, ut) in untypeds_by_paddr.iter() {
             let mut cur_paddr = ut.base();
-
-            // println!(
-            //     "TRACE [sel4_capdl_initializer_core] Allocating from untyped: {:#x}..{:#x} (size_bits = {}, device = {:?})",
-            //     ut.base(),
-            //     ut.end(),
-            //     ut.size_bits(),
-            //     ut.is_device
-            // );
 
             loop {
                 // If this untyped covers frames that specify a paddr, don't allocate ordinary objects
@@ -792,10 +790,13 @@ fn main() -> Result<(), String> {
                                     < obj_id_range_maybe.as_ref().unwrap().end
                                 {
                                     let named_obj = spec
-                                        .get_root_object(obj_id_range_maybe.as_ref().unwrap().start)
+                                        .get_root_object_mut(obj_id_range_maybe.as_ref().unwrap().start)
                                         .unwrap();
 
-                                    // println!("TRACE [sel4_capdl_initializer_core] Creating kernel object: paddr=0x{:x}, size_bits={} name={:?}", cur_paddr,named_obj.object.physical_size_bits(&kernel_config), named_obj.name);
+                                    // Should not have touched this object before
+                                    assert!(named_obj.expected_alloc.is_none());
+                                    // Book-keep where this object will be allocated so we can write the details out to the report later.
+                                    named_obj.expected_alloc = Some(ExpectedAllocation { ut_idx: *ut_orig_idx, paddr: cur_paddr });
 
                                     cur_paddr +=
                                         1 << named_obj.object.physical_size_bits(&kernel_config);
@@ -809,10 +810,6 @@ fn main() -> Result<(), String> {
                     if !created {
                         if target_is_obj_with_paddr {
                             // Manipulate the untyped's watermark to allocate at the correct paddr.
-                            println!(
-                                // "TRACE [sel4_capdl_initializer_core] Creating dummy: paddr=0x{cur_paddr:x}, size_bits={max_size_bits}"
-                            );
-
                             cur_paddr += 1 << max_size_bits;
                         } else {
                             cur_paddr = target;
@@ -821,14 +818,13 @@ fn main() -> Result<(), String> {
                 }
                 if target_is_obj_with_paddr {
                     // Watermark now at the correct level, make the actual object
-                    let named_obj = spec.get_root_object(next_obj_id_with_paddr).unwrap();
+                    let named_obj = spec.get_root_object_mut(next_obj_id_with_paddr).unwrap();
 
-                    // println!(
-                    //     "TRACE [sel4_capdl_initializer_core] Creating device object: paddr=0x{:x}, size_bits={} name={:?}",
-                    //     cur_paddr,
-                    //     named_obj.object.physical_size_bits(&kernel_config),
-                    //     named_obj.name
-                    // );
+                    assert_eq!(named_obj.object.paddr().unwrap() as u64, cur_paddr);
+                    // Should not have touched this object before
+                    assert!(named_obj.expected_alloc.is_none());
+                    // Book-keep where this object will be allocated so we can write the details out to the report later.
+                    named_obj.expected_alloc = Some(ExpectedAllocation { ut_idx: *ut_orig_idx, paddr: cur_paddr });
 
                     cur_paddr += 1 << named_obj.object.physical_size_bits(&kernel_config);
                     next_obj_id_with_paddr += 1;

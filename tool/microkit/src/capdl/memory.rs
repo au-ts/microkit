@@ -167,19 +167,21 @@ fn map_intermediary_level_helper(
             vspace_obj_id, spec.get_root_object(vspace_obj_id).unwrap().name
         ),
     };
+    let next_level_coverage = get_pt_level_coverage(sel4_config, cur_level + 1, vaddr);
     let next_level_inner_obj = object::PageTable {
         x86_ept: vspace_obj.x86_ept,
         is_root: false, // because the VSpace has already been created separately
         level: Some(cur_level as u8 + 1),
         slots: [].to_vec(),
+        coverage: next_level_coverage.clone()
     };
-    let next_level_coverage = get_pt_level_coverage(sel4_config, cur_level + 1, vaddr);
     let next_level_object = NamedObject {
         name: format!(
             "{}_{}_covers_0x{:x}..0x{:x}",
             next_level_name_prefix, pd_name, next_level_coverage.start, next_level_coverage.end
         ),
         object: CapDLObject::PageTable(next_level_inner_obj),
+        expected_alloc: None,
     };
     let next_level_obj_id = spec.add_root_object(next_level_object);
     let next_level_cap = Cap::PageTable(cap::PageTable {
@@ -207,7 +209,9 @@ pub fn create_vspace(spec: &mut CapDLSpec, sel4_config: &Config, pd_name: &str) 
             is_root: true,
             level: Some(0),
             slots: [].to_vec(),
+            coverage: Range { start: 0, end: sel4_config.user_top() }
         }),
+        expected_alloc: None,
     })
 }
 
@@ -221,7 +225,9 @@ pub fn create_vspace_ept(spec: &mut CapDLSpec, sel4_config: &Config, vm_name: &s
             is_root: true,
             level: Some(0),
             slots: [].to_vec(),
+            coverage: Range { start: 0, end: sel4_config.user_top() }
         }),
+        expected_alloc: None,
     })
 }
 

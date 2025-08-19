@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     capdl::SLOT_BITS,
-    sel4::{Config, ObjectType},
+    sel4::{Config, ObjectType, PageSize},
 };
 
 pub type ObjectId = usize;
@@ -34,10 +34,21 @@ pub struct UntypedCover {
     pub children: Range<ObjectId>,
 }
 
+#[derive(Clone, Eq, PartialEq)]
+pub struct ExpectedAllocation {
+    pub ut_idx: usize,
+    pub paddr: u64,
+}
+
 #[derive(Serialize, Clone, Eq, PartialEq)]
 pub struct NamedObject {
     pub name: String,
     pub object: CapDLObject,
+
+    // Internal Microkit tool use only, to keep tabs of
+    // where objects should be allocated for the report.
+    #[serde(skip_serializing)]
+    pub expected_alloc: Option<ExpectedAllocation>,
 }
 
 #[derive(Serialize, Clone, Eq, PartialEq)]
@@ -131,6 +142,35 @@ impl CapDLObject {
             CapDLObject::IrqIOApic(irq_ioapic) => Some(&mut irq_ioapic.slots),
             CapDLObject::RiscvIrq(riscv_irq) => Some(&mut riscv_irq.slots),
             _ => None,
+        }
+    }
+
+    pub fn human_name(&self, sel4_config: &Config) -> &str {
+        match self {
+            CapDLObject::Endpoint => "Endpoint",
+            CapDLObject::Notification => "Notification",
+            CapDLObject::CNode(_) => "CNode",
+            CapDLObject::Tcb(_) => "TCB",
+            CapDLObject::VCpu => "VCPU",
+            CapDLObject::Frame(frame) => {
+                if frame.size_bits == PageSize::Small.fixed_size_bits(sel4_config) as usize {
+                    "Page(4 KiB)"
+                } else if frame.size_bits == PageSize::Large.fixed_size_bits(sel4_config) as usize {
+                    "Page(2 MiB)"
+                } else {
+                    unreachable!("unknown frame size bits {}", frame.size_bits);
+                }
+            },
+            CapDLObject::PageTable(_) => "PageTable",
+            CapDLObject::AsidPool(_) => "AsidPool",
+            CapDLObject::ArmIrq(_) => "ARM IRQ",
+            CapDLObject::IrqMsi(_) => "x86 MSI IRQ",
+            CapDLObject::IrqIOApic(_) => "x86 IOAPIC IRQ",
+            CapDLObject::RiscvIrq(_) => "RISC-V IRQ",
+            CapDLObject::IOPorts(_) => "x86 I/O Ports",
+            CapDLObject::SchedContext(_) => "SchedContext",
+            CapDLObject::Reply => "Reply",
+            CapDLObject::ArmSmc => "ARM SMC",
         }
     }
 }
@@ -253,6 +293,10 @@ pub mod object {
         pub is_root: bool,
         pub level: Option<u8>,
         pub slots: Vec<CapTableEntry>,
+
+        // Internal Microkit tool use for debugging and report purpose only.
+        #[serde(skip_serializing)]
+        pub coverage: Range<u64>
     }
 
     #[derive(Serialize, Clone, Eq, PartialEq)]

@@ -88,6 +88,7 @@ fn create_irq_obj(
     let irq_obj = NamedObject {
         name: format!("irq_{}_{}", irq_desc.irq_num(), pd_name),
         object: irq_inner_obj,
+        expected_alloc: None,
     };
     spec.add_root_object(irq_obj)
 }

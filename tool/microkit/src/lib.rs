@@ -14,6 +14,7 @@ pub mod loader;
 pub mod sdf;
 pub mod sel4;
 pub mod util;
+pub mod report;
 
 // Note that these values are used in the monitor so should also be changed there
 // if any of these were to change.
