@@ -18,8 +18,8 @@ use crate::{capdl::spec::ElfContent, elf::ElfFile};
 
 // Given a `Spec` data structure from sel4_capdl_initializer_types, "flatten" it into a vector of bytes
 // for encapsulating it into the CapDL initialiser ELF.
-pub fn reserialise_spec<'a>(
-    elfs: &Vec<ElfFile>,
+pub fn reserialise_spec(
+    elfs: &[ElfFile],
     input_spec: &Spec<'static, String, ElfContent, ()>,
     object_names_level: &ObjectNamesLevel,
 ) -> Vec<u8> {

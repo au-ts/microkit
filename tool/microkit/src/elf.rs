@@ -417,7 +417,7 @@ impl ElfFile {
     pub fn add_segment(&mut self, attrs: ElfSegmentAttributes, vaddr: u64, data: Vec<u8>) {
         let elf_segment = ElfSegment {
             p_filesz: data.len() as u64,
-            p_offset: u64::max_value(),
+            p_offset: u64::MAX,
             data,
             phys_addr: vaddr,
             virt_addr: vaddr,
@@ -481,10 +481,8 @@ impl ElfFile {
             .write_all(unsafe {
                 from_raw_parts((&header as *const ElfHeader64) as *const u8, ehsize)
             })
-            .expect(&format!(
-                "Failed to write ELF header for '{}'",
-                out.display()
-            ));
+            .unwrap_or_else(|_| panic!("Failed to write ELF header for '{}'",
+                out.display()));
 
         // keep a running file offset where segment data will be written
         let mut data_off = (ehsize as u64) + (phnum as u64) * (phentsize as u64);
@@ -510,22 +508,18 @@ impl ElfFile {
                         phentsize,
                     )
                 })
-                .expect(&format!(
-                    "Failed to write ELF segment header #{} for '{}'",
+                .unwrap_or_else(|_| panic!("Failed to write ELF segment header #{} for '{}'",
                     i,
-                    out.display()
-                ));
+                    out.display()));
 
             data_off += seg.mem_size();
         }
 
         // then the data for each segment will follow
         for (i, seg) in self.loadable_segments().iter().enumerate() {
-            elf_file.write_all(&seg.data).expect(&format!(
-                "Failed to write ELF segment data #{} for '{}'",
+            elf_file.write_all(&seg.data).unwrap_or_else(|_| panic!("Failed to write ELF segment data #{} for '{}'",
                 i,
-                out.display()
-            ));
+                out.display()));
         }
 
         elf_file.flush().unwrap();

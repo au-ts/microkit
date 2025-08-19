@@ -85,7 +85,7 @@ fn get_pt_level_coverage(sel4_config: &Config, level: usize, vaddr: u64) -> Rang
     let low = (vaddr >> coverage_bits) << coverage_bits;
     let high = vaddr | ((1 << coverage_bits) - 1);
 
-    Range::from(low..high)
+    low..high
 }
 
 fn get_pt_level_to_insert(sel4_config: &Config, page_size: PageSize) -> usize {
@@ -127,6 +127,7 @@ fn insert_cap_into_page_table_level(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn map_intermediary_level_helper(
     spec: &mut CapDLSpec,
     sel4_config: &Config,
@@ -231,6 +232,7 @@ pub fn create_vspace_ept(spec: &mut CapDLSpec, sel4_config: &Config, vm_name: &s
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn map_recursive(
     spec: &mut CapDLSpec,
     sel4_config: &Config,
@@ -250,17 +252,17 @@ fn map_recursive(
 
     if cur_level == get_pt_level_to_insert(sel4_config, frame_size) {
         // Base case: we got to the target level to insert the frame cap.
-        return insert_cap_into_page_table_level(
+        insert_cap_into_page_table_level(
             spec,
             pt_obj_id,
             cur_level,
             this_level_index,
             frame_cap,
-        );
+        )
     } else {
         // Recursive case: we have not gotten to the correct level, create the next level and recurse down.
         let next_level_name_prefix = get_pt_level_name(sel4_config, cur_level + 1);
-        return match map_intermediary_level_helper(
+        match map_intermediary_level_helper(
             spec,
             sel4_config,
             pd_name,
@@ -283,7 +285,7 @@ fn map_recursive(
                 vaddr,
             ),
             Err(err_reason) => Err(err_reason),
-        };
+        }
     }
 }
 

@@ -13,10 +13,10 @@ use crate::capdl::{
     CapDLSpec,
 };
 
-/// This module contains utility functions used by higher-level
-/// CapDL spec generation code. For simplicity, this code will trust
-/// all arguments given to it as it is only meant to be used internally
-/// in the CapDL implementation.
+// This module contains utility functions used by higher-level
+// CapDL spec generation code. For simplicity, this code will trust
+// all arguments given to it as it is only meant to be used internally
+// in the CapDL implementation.
 
 /// Create a frame object and add it to the spec, returns the
 /// object number.
@@ -88,11 +88,7 @@ pub fn capdl_util_get_vspace_id_from_tcb_id(spec: &CapDLSpec, tcb_obj_id: Object
         }
     };
     let vspace_cap = tcb.unwrap().slots.iter().find(|&cte| {
-        if let Cap::PageTable(_) = &cte.1 {
-            true
-        } else {
-            false
-        }
+        matches!(&cte.1, Cap::PageTable(_))
     });
     vspace_cap.unwrap().1.obj()
 }

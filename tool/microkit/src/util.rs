@@ -186,7 +186,7 @@ pub fn monitor_serialise_u64_vec(vec: &[u64]) -> Vec<u8> {
 
 /// For serialising an array of PD or VM names
 pub fn monitor_serialise_names(
-    names: &Vec<String>,
+    names: &[String],
     max_len: usize,
     max_name_len: usize,
 ) -> Vec<u8> {

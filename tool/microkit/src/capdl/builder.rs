@@ -8,7 +8,6 @@ use core::ops::Range;
 use std::{
     cmp::{min, Ordering},
     collections::HashMap,
-    u8,
 };
 
 use serde::Serialize;
@@ -98,6 +97,12 @@ pub struct CapDLSpec {
     pub asid_slots: Vec<AsidSlotEntry>,
     pub root_objects: Range<ObjectId>,
     pub untyped_covers: Vec<UntypedCover>,
+}
+
+impl Default for CapDLSpec {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CapDLSpec {
@@ -333,11 +338,11 @@ impl CapDLSpec {
 fn map_memory_region(
     spec: &mut CapDLSpec,
     sel4_config: &Config,
-    pd_name: &String,
+    pd_name: &str,
     map: &SysMap,
     page_sz: PageSize,
     target_vspace: ObjectId,
-    frames: &Vec<ObjectId>,
+    frames: &[ObjectId],
 ) {
     let mut cur_vaddr = map.vaddr;
     let read = map.perms & SysMapPerms::Read as u8 != 0;
@@ -365,7 +370,7 @@ fn map_memory_region(
 /// Build a CapDL Spec according to the System Description File.
 pub fn build_capdl_spec(
     kernel_config: &Config,
-    pd_elf_files: &mut Vec<ElfFile>,
+    pd_elf_files: &mut [ElfFile],
     system: &SystemDescription,
 ) -> Result<CapDLSpec, String> {
     let mut spec = CapDLSpec::new();
@@ -554,20 +559,15 @@ pub fn build_capdl_spec(
             // But it doesn't actually check for whether they overlap with a PD's stack or ELF segments.
             // We perform this check here, otherwise the tool will panic with quite cryptic page-table related errors.
             let mr_vaddr_range =
-                Range::from(map.vaddr..(map.vaddr + (page_size as u64 * frames.len() as u64)));
+                map.vaddr..(map.vaddr + (page_size as u64 * frames.len() as u64));
 
-            let pd_stack_range = Range::from(
-                kernel_config.pd_stack_bottom(pd.stack_size)..kernel_config.pd_stack_top(),
-            );
+            let pd_stack_range = kernel_config.pd_stack_bottom(pd.stack_size)..kernel_config.pd_stack_top();
             if ranges_overlap(&mr_vaddr_range, &pd_stack_range) {
                 return Err(format!("Error: mapping MR '{}' to PD '{}' with vaddr 0x{:x}..0x{:x} will conflict with the stack at 0x{:x}..0x{:x}", mr_description.name, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, pd_stack_range.start, pd_stack_range.end));
             }
 
             for elf_seg in elf_obj.loadable_segments().iter() {
-                let elf_seg_vaddr_range = Range::from(
-                    elf_seg.virt_addr
-                        ..elf_seg.virt_addr + round_up(elf_seg.mem_size(), PageSize::Small as u64),
-                );
+                let elf_seg_vaddr_range = elf_seg.virt_addr..elf_seg.virt_addr + round_up(elf_seg.mem_size(), PageSize::Small as u64);
                 if ranges_overlap(&mr_vaddr_range, &elf_seg_vaddr_range) {
                     return Err(format!("Error: mapping MR '{}' to PD '{}' with vaddr 0x{:x}..0x{:x} will conflict with an ELF segment at 0x{:x}..0x{:x}", mr_description.name, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, elf_seg_vaddr_range.start, elf_seg_vaddr_range.end));
                 }
@@ -768,7 +768,7 @@ pub fn build_capdl_spec(
             if kernel_config.arch == Arch::X86_64 {
                 // Only support 1 vcpu on x86 right now.
                 assert_eq!(virtual_machine.vcpus.len(), 1);
-                let vcpu = virtual_machine.vcpus.get(0).unwrap();
+                let vcpu = virtual_machine.vcpus.first().unwrap();
 
                 // Create the vCPU object and bind it to the VMM PD.
                 let vm_vcpu_obj_id = capdl_util_make_vcpu_obj(

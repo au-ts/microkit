@@ -603,7 +603,7 @@ fn main() -> Result<(), String> {
     let initialiser_highest_vaddr_rounded =
         round_up(initialiser_elf.highest_vaddr(), PageSize::Small as u64);
     let initialiser_vaddr_range =
-        Range::from(initialiser_elf.lowest_vaddr()..initialiser_highest_vaddr_rounded);
+        initialiser_elf.lowest_vaddr()..initialiser_highest_vaddr_rounded;
     println!(
         "INITIAL TASK: size = {}, vaddr = [0x{:x}..0x{:x}], entry = 0x{:x}",
         human_size_strict(initialiser_vaddr_range.end - initialiser_vaddr_range.start),
@@ -669,8 +669,7 @@ fn main() -> Result<(), String> {
             .clone();
         let mut untypeds_by_paddr: Vec<(usize, &UntypedObject)> = 
             untypeds_clone.iter()
-            .enumerate()
-            .map(|(i, ut)| (i, ut)).collect();
+            .enumerate().collect();
         untypeds_by_paddr.sort_by_key(|(_i, ut)| ut.base());
 
         // Step 2: create object "windows" for objects that doesn't specify paddr,
@@ -690,9 +689,7 @@ fn main() -> Result<(), String> {
                 match window_maybe {
                     Some(window) => window.end += 1,
                     None => {
-                        let _ = window_maybe.insert(Range::from(
-                            first_obj_id_without_paddr + id..first_obj_id_without_paddr + id + 1,
-                        ));
+                        let _ = window_maybe.insert(first_obj_id_without_paddr + id..first_obj_id_without_paddr + id + 1);
                     }
                 }
             }
@@ -705,7 +702,7 @@ fn main() -> Result<(), String> {
             let paddr_base = named_obj.object.paddr().unwrap() as u64;
 
             let obj_size_bytes = 1 << named_obj.object.physical_size_bits(&kernel_config);
-            let paddr_range = Range::from(paddr_base..paddr_base + obj_size_bytes);
+            let paddr_range = paddr_base..paddr_base + obj_size_bytes;
 
             // Binary search for the untyped that would fit, if we can't find one, this object is not in valid memory.
             let mut low = 0;
