@@ -16,7 +16,7 @@
 /// but few seem to be concerned with giving any introspection regarding the parsed
 /// XML. The roxmltree project allows us to work on a lower-level than something based
 /// on serde and so we can report proper user errors.
-use crate::sel4::{Arch, ArmRiscvIrqTrigger, Config, PageSize};
+use crate::sel4::{Arch, ArmRiscvIrqTrigger, Config, PageSize, X86IoapicIrqPolarity, X86IoapicIrqTrigger};
 use crate::util::str_to_bool;
 use crate::MAX_PDS;
 use std::path::{Path, PathBuf};
@@ -139,8 +139,8 @@ pub enum SysIrqKind {
     IOAPIC {
         ioapic: u64,
         pin: u64,
-        level: u64,
-        polarity: u64,
+        trigger: X86IoapicIrqTrigger,
+        polarity: X86IoapicIrqPolarity,
         vector: u64,
     },
     MSI {
@@ -667,17 +667,37 @@ impl ProtectionDomain {
                             0
                         };
                         let pin = pin_str.parse::<u64>().unwrap();
-                        let level = if let Some(level_str) = child.attribute("level") {
-                            level_str.parse::<u64>().unwrap()
+                        let trigger = if let Some(trigger_str) = child.attribute("level") {
+                            match trigger_str {
+                                "level" => X86IoapicIrqTrigger::Level,
+                                "edge" => X86IoapicIrqTrigger::Edge,
+                                _ => {
+                                    return Err(value_error(
+                                        xml_sdf,
+                                        &child,
+                                        "trigger must be either 'level' or 'edge'".to_string(),
+                                    ))
+                                }
+                            }
                         } else {
                             // Default to level trigger.
-                            1
+                            X86IoapicIrqTrigger::Level
                         };
                         let polarity = if let Some(polarity_str) = child.attribute("polarity") {
-                            polarity_str.parse::<u64>().unwrap()
+                            match polarity_str {
+                                "low" => X86IoapicIrqPolarity::LowTriggered,
+                                "high" => X86IoapicIrqPolarity::HighTriggered,
+                                _ => {
+                                    return Err(value_error(
+                                        xml_sdf,
+                                        &child,
+                                        "trigger must be either 'low' or 'high'".to_string(),
+                                    ))
+                                }
+                            }
                         } else {
                             // Default to normal polarity
-                            1
+                            X86IoapicIrqPolarity::HighTriggered
                         };
                         let vector = checked_lookup(xml_sdf, &child, "vector")?
                             .parse::<u64>()
@@ -687,7 +707,7 @@ impl ProtectionDomain {
                             kind: SysIrqKind::IOAPIC {
                                 ioapic,
                                 pin,
-                                level,
+                                trigger,
                                 polarity,
                                 vector,
                             },

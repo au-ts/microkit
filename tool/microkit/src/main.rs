@@ -12,6 +12,7 @@ use microkit_tool::capdl::spec::{ElfContent, ExpectedAllocation};
 use microkit_tool::capdl::{build_capdl_spec, reserialise_spec};
 use microkit_tool::elf::{ElfFile, ElfSegmentAttributes};
 use microkit_tool::loader::Loader;
+use microkit_tool::report::write_report;
 use microkit_tool::sdf::parse;
 use microkit_tool::sel4::{
     emulate_kernel_boot, emulate_kernel_boot_partial, Arch, Config, PageSize, PlatformConfig,
@@ -64,6 +65,7 @@ struct Args<'a> {
     board: &'a str,
     config: &'a str,
     report: &'a str,
+    capdl_spec: Option<&'a str>,
     output: &'a str,
     search_paths: Vec<&'a String>,
     initialiser_heap_size_multiplier: f64,
@@ -74,6 +76,7 @@ impl<'a> Args<'a> {
         // Default arguments
         let mut output = "loader.img";
         let mut report = "report.txt";
+        let mut capdl_spec = None;
         let mut search_paths = Vec::new();
         // Arguments expected to be provided by the user
         let mut system = None;
@@ -135,7 +138,17 @@ impl<'a> Args<'a> {
                         std::process::exit(1);
                     }
                 }
-                "-x" | "--initialiser_heap_size_multiplier" => {
+                "--capdl-spec" => {
+                    in_search_path = false;
+                    if i < args.len() - 1 {
+                        capdl_spec = Some(args[i + 1].as_str());
+                        i += 1;
+                    } else {
+                        eprintln!("microkit: error: argument --config: expected one argument");
+                        std::process::exit(1);
+                    }
+                }
+                "--initialiser_heap_size_multiplier" => {
                     in_search_path = false;
                     if i < args.len() - 1 {
                         match args[i + 1].parse::<f64>() {
@@ -204,6 +217,7 @@ impl<'a> Args<'a> {
             board: board.unwrap(),
             config: config.unwrap(),
             report,
+            capdl_spec,
             output,
             search_paths,
             initialiser_heap_size_multiplier,
@@ -526,8 +540,10 @@ fn main() -> Result<(), String> {
     // our Spec type and let the run time initialiser deal with the type conversion?
     let spec_reserialised = {
         // Eagerly write out the spec so we can debug in case something crash later.
-        let spec_as_json = serde_json::to_string(&spec).unwrap();
-        fs::write(args.report, &spec_as_json).unwrap();
+        let spec_as_json = serde_json::to_string_pretty(&spec).unwrap();
+        if args.capdl_spec.is_some() {
+            fs::write(args.capdl_spec.unwrap(), &spec_as_json).unwrap();
+        }
 
         // The full type definition is `Spec<'a, N, D, M>` where:
         // N = object name type
@@ -726,7 +742,7 @@ fn main() -> Result<(), String> {
             }
 
             if !found {
-                eprintln!("Error: object '{}', with paddr 0x{:0>12x}..0x{:0>12x} is not in any valid memory region.", named_obj.name, paddr_range.start, paddr_range.end);
+                eprintln!("ERROR: object '{}', with paddr 0x{:0>12x}..0x{:0>12x} is not in any valid memory region.", named_obj.name, paddr_range.start, paddr_range.end);
                 phys_addrs_ok = false;
             }
         }
@@ -741,6 +757,7 @@ fn main() -> Result<(), String> {
             for (_i, ut) in untypeds_by_paddr.iter().filter(|(_i, ut)| !ut.is_device) {
                 eprintln!("     [0x{:0>12x}..0x{:0>12x})", ut.base(), ut.end());
             }
+            write_report(&spec, &kernel_config, args.report);
             std::process::exit(1);
         }
 
@@ -841,12 +858,13 @@ fn main() -> Result<(), String> {
                     oom = true;
                     let shortfall = (obj_id_range.end - obj_id_range.start) as u64;
                     let individual_sz = (1 << size_bit) as u64;
-                    eprintln!("Error: ran out of untypeds for allocating objects of size {}, still need to create {} objects which requires {} of additional memory.", human_size_strict(individual_sz), shortfall, human_size_strict(individual_sz * shortfall));
+                    eprintln!("ERROR: ran out of untypeds for allocating objects of size {}, still need to create {} objects which requires {} of additional memory.", human_size_strict(individual_sz), shortfall, human_size_strict(individual_sz * shortfall));
                 }
             }
         }
         if oom {
             eprintln!("Out of untypeds. Please see the report for more details.");
+            write_report(&spec, &kernel_config, args.report);
             std::process::exit(1);
         }
 
@@ -882,6 +900,8 @@ fn main() -> Result<(), String> {
             human_size_strict(metadata(args.output).unwrap().len())
         );
     }
+
+    write_report(&spec, &kernel_config, args.report);
 
     Ok(())
 }

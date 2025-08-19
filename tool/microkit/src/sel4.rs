@@ -510,10 +510,51 @@ impl PageSize {
     }
 }
 
-#[repr(u32)]
+#[repr(u64)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-/// The same values apply to all kernel architectures
+/// The same values apply to ARM and RISC-V
 pub enum ArmRiscvIrqTrigger {
     Level = 0,
     Edge = 1,
+}
+
+impl ArmRiscvIrqTrigger {
+    fn human_name(&self) -> &str {
+        match self {
+            ArmRiscvIrqTrigger::Level => "level",
+            ArmRiscvIrqTrigger::Edge => "edge",
+        }
+    }
+}
+
+#[repr(u64)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub enum X86IoapicIrqTrigger {
+    Level = 1,
+    Edge = 0,
+}
+
+impl X86IoapicIrqTrigger {
+    fn human_name(&self) -> &str {
+        match self {
+            X86IoapicIrqTrigger::Level => "level",
+            X86IoapicIrqTrigger::Edge => "edge",
+        }
+    }
+}
+
+#[repr(u64)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub enum X86IoapicIrqPolarity {
+    LowTriggered = 0,
+    HighTriggered = 1,
+}
+
+impl X86IoapicIrqPolarity {
+    fn human_name(&self) -> &str {
+        match self {
+            X86IoapicIrqPolarity::LowTriggered => "low-triggered",
+            X86IoapicIrqPolarity::HighTriggered => "high-triggered",
+        }
+    }
 }

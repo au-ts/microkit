@@ -57,7 +57,7 @@ fn create_irq_obj(
         SysIrqKind::IOAPIC {
             ioapic,
             pin,
-            level,
+            trigger,
             polarity,
             ..
         } => CapDLObject::IrqIOApic(object::IrqIOApic {
@@ -65,8 +65,8 @@ fn create_irq_obj(
             extra: object::IrqIOApicExtraInfo {
                 ioapic,
                 pin,
-                level,
-                polarity,
+                level: trigger as u64,
+                polarity: polarity as u64,
             },
         }),
         SysIrqKind::MSI {

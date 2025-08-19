@@ -558,16 +558,17 @@ pub fn build_capdl_spec(
             // sdf.rs sanity checks that the memory regions doesn't overlap with each others, etc.
             // But it doesn't actually check for whether they overlap with a PD's stack or ELF segments.
             // We perform this check here, otherwise the tool will panic with quite cryptic page-table related errors.
-            let mr_vaddr_range =
-                map.vaddr..(map.vaddr + (page_size as u64 * frames.len() as u64));
+            let mr_vaddr_range = map.vaddr..(map.vaddr + (page_size as u64 * frames.len() as u64));
 
-            let pd_stack_range = kernel_config.pd_stack_bottom(pd.stack_size)..kernel_config.pd_stack_top();
+            let pd_stack_range =
+                kernel_config.pd_stack_bottom(pd.stack_size)..kernel_config.pd_stack_top();
             if ranges_overlap(&mr_vaddr_range, &pd_stack_range) {
                 return Err(format!("Error: mapping MR '{}' to PD '{}' with vaddr 0x{:x}..0x{:x} will conflict with the stack at 0x{:x}..0x{:x}", mr_description.name, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, pd_stack_range.start, pd_stack_range.end));
             }
 
             for elf_seg in elf_obj.loadable_segments().iter() {
-                let elf_seg_vaddr_range = elf_seg.virt_addr..elf_seg.virt_addr + round_up(elf_seg.mem_size(), PageSize::Small as u64);
+                let elf_seg_vaddr_range = elf_seg.virt_addr
+                    ..elf_seg.virt_addr + round_up(elf_seg.mem_size(), PageSize::Small as u64);
                 if ranges_overlap(&mr_vaddr_range, &elf_seg_vaddr_range) {
                     return Err(format!("Error: mapping MR '{}' to PD '{}' with vaddr 0x{:x}..0x{:x} will conflict with an ELF segment at 0x{:x}..0x{:x}", mr_description.name, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, elf_seg_vaddr_range.start, elf_seg_vaddr_range.end));
                 }
@@ -776,28 +777,19 @@ pub fn build_capdl_spec(
                     &format!("{}_{}", virtual_machine.name, vcpu.id),
                 );
                 let vcpu_cap = capdl_util_make_vcpu_cap(vm_vcpu_obj_id);
-                caps_to_bind_to_tcb.push((
-                    TCB_SLOT_VCPU as usize,
-                    vcpu_cap.clone(),
-                ));
+                caps_to_bind_to_tcb.push((TCB_SLOT_VCPU as usize, vcpu_cap.clone()));
 
                 // Allow the VMM to access the vCPU object.
-                caps_to_insert_to_pd_cspace.push((
-                    (PD_BASE_VCPU_CAP + vcpu.id) as usize,
-                    vcpu_cap
-                ));
+                caps_to_insert_to_pd_cspace.push(((PD_BASE_VCPU_CAP + vcpu.id) as usize, vcpu_cap));
 
                 // Bind the guest's root page table to the VMM PD.
-                caps_to_bind_to_tcb.push((
-                    TCB_SLOT_X86_EPTPML4 as usize,
-                    vm_vspace_cap
-                ));
+                caps_to_bind_to_tcb.push((TCB_SLOT_X86_EPTPML4 as usize, vm_vspace_cap));
             } else {
                 for (vcpu_idx, vcpu) in virtual_machine.vcpus.iter().enumerate() {
                     // All vCPUs get to access the same address space.
                     let mut caps_to_bind_to_vm_tcbs: Vec<CapTableEntry> = Vec::new();
                     caps_to_bind_to_vm_tcbs.push((TCB_SLOT_VSPACE as usize, vm_vspace_cap.clone()));
-    
+
                     // Create an empty CSpace
                     let vm_cnode_obj_id = capdl_util_make_cnode_obj(
                         &mut spec,
@@ -808,7 +800,7 @@ pub fn build_capdl_spec(
                     let vm_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS;
                     let vm_cnode_cap = capdl_util_make_cnode_cap(vm_cnode_obj_id, 0, vm_guard_size);
                     caps_to_bind_to_vm_tcbs.push((TCB_SLOT_CSPACE as usize, vm_cnode_cap));
-    
+
                     // Create and map the IPC buffer.
                     let vm_ipcbuf_frame_obj_id = capdl_util_make_frame_obj(
                         &mut spec,
@@ -822,8 +814,9 @@ pub fn build_capdl_spec(
                     );
                     let vm_ipcbuf_frame_cap =
                         capdl_util_make_frame_cap(vm_ipcbuf_frame_obj_id, true, true, false, true);
-                    caps_to_bind_to_vm_tcbs.push((TCB_SLOT_IPC_BUFFER as usize, vm_ipcbuf_frame_cap));
-    
+                    caps_to_bind_to_vm_tcbs
+                        .push((TCB_SLOT_IPC_BUFFER as usize, vm_ipcbuf_frame_cap));
+
                     // Create fault endpoint cap to the parent PD.
                     let vm_vcpu_fault_ep_cap = capdl_util_make_endpoint_cap(
                         pd_ep_obj_id.unwrap(),
@@ -832,8 +825,9 @@ pub fn build_capdl_spec(
                         true,
                         FAULT_BADGE | vcpu.id,
                     );
-                    caps_to_bind_to_vm_tcbs.push((TCB_SLOT_FAULT_EP as usize, vm_vcpu_fault_ep_cap));
-    
+                    caps_to_bind_to_vm_tcbs
+                        .push((TCB_SLOT_FAULT_EP as usize, vm_vcpu_fault_ep_cap));
+
                     // Create scheduling context
                     let vm_vcpu_sc_obj_id = capdl_util_make_sc_obj(
                         &mut spec,
@@ -847,7 +841,7 @@ pub fn build_capdl_spec(
                         TCB_SLOT_SC as usize,
                         capdl_util_make_sc_cap(vm_vcpu_sc_obj_id),
                     ));
-    
+
                     // Create vCPU object
                     let vm_vcpu_obj_id = capdl_util_make_vcpu_obj(
                         &mut spec,
@@ -857,7 +851,7 @@ pub fn build_capdl_spec(
                         TCB_SLOT_VCPU as usize,
                         capdl_util_make_vcpu_cap(vm_vcpu_obj_id),
                     ));
-    
+
                     // Finally create TCB, unlike PDs, VMs are suspended by default until resume'd by their parent.
                     let vm_vcpu_tcb_inner_obj = object::Tcb {
                         slots: caps_to_bind_to_vm_tcbs,
@@ -878,7 +872,7 @@ pub fn build_capdl_spec(
                         object: CapDLObject::Tcb(vm_vcpu_tcb_inner_obj),
                         expected_alloc: None,
                     });
-    
+
                     // Allow parent PD to access this vCPU object and associated TCB
                     caps_to_insert_to_pd_cspace.push((
                         (PD_BASE_VCPU_CAP + vcpu.id) as usize,
@@ -888,7 +882,7 @@ pub fn build_capdl_spec(
                         (PD_BASE_VM_TCB_CAP + vcpu.id) as usize,
                         capdl_util_make_tcb_cap(vm_vcpu_tcb_obj_id),
                     ));
-    
+
                     // Bind vCPU's TCB to the monitor so that the name can be set at start up in debug config
                     capdl_util_insert_cap_into_cspace(
                         &mut spec,
@@ -1189,6 +1183,9 @@ pub fn build_capdl_spec(
     for irq in spec.irqs.iter_mut() {
         irq.handler = *obj_old_id_to_new_id.get(&irq.handler).unwrap();
     }
+
+    // Only for stylistic purposes
+    spec.irqs.sort_by_key(|irq_entry| irq_entry.irq);
 
     Ok(spec)
 }
