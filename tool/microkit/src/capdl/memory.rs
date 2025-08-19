@@ -178,8 +178,8 @@ fn map_intermediary_level_helper(
     };
     let next_level_object = NamedObject {
         name: format!(
-            "{}_{}_covers_0x{:x}..0x{:x}",
-            next_level_name_prefix, pd_name, next_level_coverage.start, next_level_coverage.end
+            "{}_{}_vaddr_0x{:x}",
+            next_level_name_prefix, pd_name, next_level_coverage.start
         ),
         object: CapDLObject::PageTable(next_level_inner_obj),
         expected_alloc: None,

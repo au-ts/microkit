@@ -518,8 +518,18 @@ pub enum ArmRiscvIrqTrigger {
     Edge = 1,
 }
 
+impl From<u64> for ArmRiscvIrqTrigger {
+    fn from(item: u64) -> ArmRiscvIrqTrigger {
+        match item {
+            0 => ArmRiscvIrqTrigger::Level,
+            1 => ArmRiscvIrqTrigger::Edge,
+            _ => panic!("Unknown ARM/RISC-V IRQ trigger {:x}", item),
+        }
+    }
+}
+
 impl ArmRiscvIrqTrigger {
-    fn human_name(&self) -> &str {
+    pub fn human_name(&self) -> &str {
         match self {
             ArmRiscvIrqTrigger::Level => "level",
             ArmRiscvIrqTrigger::Edge => "edge",
@@ -534,8 +544,18 @@ pub enum X86IoapicIrqTrigger {
     Edge = 0,
 }
 
+impl From<u64> for X86IoapicIrqTrigger {
+    fn from(item: u64) -> X86IoapicIrqTrigger {
+        match item {
+            0 => X86IoapicIrqTrigger::Edge,
+            1 => X86IoapicIrqTrigger::Level,
+            _ => panic!("Unknown x86 IOAPIC IRQ trigger {:x}", item),
+        }
+    }
+}
+
 impl X86IoapicIrqTrigger {
-    fn human_name(&self) -> &str {
+    pub fn human_name(&self) -> &str {
         match self {
             X86IoapicIrqTrigger::Level => "level",
             X86IoapicIrqTrigger::Edge => "edge",
@@ -550,8 +570,18 @@ pub enum X86IoapicIrqPolarity {
     HighTriggered = 1,
 }
 
+impl From<u64> for X86IoapicIrqPolarity {
+    fn from(item: u64) -> X86IoapicIrqPolarity {
+        match item {
+            0 => X86IoapicIrqPolarity::LowTriggered,
+            1 => X86IoapicIrqPolarity::HighTriggered,
+            _ => panic!("Unknown x86 IOAPIC IRQ polarity {:x}", item),
+        }
+    }
+}
+
 impl X86IoapicIrqPolarity {
-    fn human_name(&self) -> &str {
+    pub fn human_name(&self) -> &str {
         match self {
             X86IoapicIrqPolarity::LowTriggered => "low-triggered",
             X86IoapicIrqPolarity::HighTriggered => "high-triggered",
