@@ -654,7 +654,7 @@ fn main() -> Result<(), String> {
 
         // With the initial task region determined the kernel boot can be emulated. This provides
         // the boot info information which is needed for the next steps
-        let mut kernel_boot_info = emulate_kernel_boot(
+        let kernel_boot_info = emulate_kernel_boot(
             &kernel_config,
             &kernel_elf,
             initial_task_phys_region,
@@ -664,8 +664,8 @@ fn main() -> Result<(), String> {
         // We got the untypeds list, now follow the CapDL object allocation algorithm to catch
         // issues at build time.
         // Step 1: sort untypeds by paddr.
-        kernel_boot_info.untyped_objects.sort_by_key(|ut| ut.base());
-        let untypeds_by_paddr = &kernel_boot_info.untyped_objects;
+        let mut untypeds_by_paddr = kernel_boot_info.untyped_objects.clone();
+        untypeds_by_paddr.sort_by_key(|ut| ut.base());
 
         // Step 2: create object "windows" for objects that doesn't specify paddr,
         // where each window contains all objects of the array index size bits.
@@ -861,17 +861,7 @@ fn main() -> Result<(), String> {
         // At runtime the intialiser will validate what we simulated against what the kernel gives it. If they deviate
         // we will have problems! For example, if we simulated with more memory than what's actually available, the initialiser
         // can crash.
-
-        // seL4 gives us untypeds by isDevice (true first) then paddr (ascending), so we have to sort accordingly.
-        kernel_boot_info.untyped_objects.sort_by(|ut_a, ut_b| {
-            if ut_a.is_device != ut_b.is_device {
-                ut_a.is_device.cmp(&ut_b.is_device).reverse()
-            } else {
-                ut_a.base().cmp(&ut_b.base())
-            }
-        });
         let mut uts_desc: Vec<u8> = Vec::new();
-
         for ut in kernel_boot_info.untyped_objects.iter() {
             uts_desc.extend(serialise_ut(ut));
         }
