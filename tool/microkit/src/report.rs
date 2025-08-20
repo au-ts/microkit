@@ -260,39 +260,39 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
     }
 
     report_file
-        .write_all(b"\n# Kernel Objects Details\n")
+        .write_all(b"\n# Kernel Objects Details: ID, Type, Name, Physical Address (on ARM and RISC-V only)\n")
         .unwrap();
-    let kernel_objects = spec
-        .objects
-        .iter()
-        .filter(|named_object| named_object.object.physical_size_bits(kernel_config) > 0);
-    for named_object in kernel_objects {
-        match &named_object.expected_alloc {
-            Some(allocation_details) => {
-                report_file
-                    .write_all(
-                        format!(
-                            "\t{}: '{}',\tphys_addr: 0x{:0>12x}\n",
-                            named_object.object.human_name(kernel_config),
-                            named_object.name,
-                            allocation_details.paddr
+    for (id, named_object) in spec.objects.iter().enumerate() {
+        if named_object.object.physical_size_bits(&kernel_config) > 0 {
+            match &named_object.expected_alloc {
+                Some(allocation_details) => {
+                    report_file
+                        .write_all(
+                            format!(
+                                "\t{} - {}: '{}' @ 0x{:0>12x}\n",
+                                id,
+                                named_object.object.human_name(kernel_config),
+                                named_object.name,
+                                allocation_details.paddr
+                            )
+                            .as_bytes(),
                         )
-                        .as_bytes(),
-                    )
-                    .unwrap();
-            }
-            None => {
-                report_file
-                    .write_all(
-                        format!(
-                            "\t{}: '{}'\n",
-                            named_object.object.human_name(kernel_config),
-                            named_object.name
+                        .unwrap();
+                }
+                None => {
+                    report_file
+                        .write_all(
+                            format!(
+                                "\t{} - {}: '{}'\n",
+                                id,
+                                named_object.object.human_name(kernel_config),
+                                named_object.name,
+                            )
+                            .as_bytes(),
                         )
-                        .as_bytes(),
-                    )
-                    .unwrap();
-            }
-        };
+                        .unwrap();
+                }
+            };
+        }
     }
 }
