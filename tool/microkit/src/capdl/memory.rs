@@ -53,7 +53,7 @@ fn get_pt_level_index(sel4_config: &Config, level: usize, vaddr: u64) -> u64 {
     assert!(level < levels);
 
     let index_bits = |level: usize| -> u64 {
-        if level == 0
+        if level == top_pt_level_number(sel4_config)
             && sel4_config.arch == Arch::Aarch64
             && sel4_config.aarch64_vspace_s2_start_l1()
         {
@@ -92,6 +92,14 @@ fn get_pt_level_to_insert(sel4_config: &Config, page_size: PageSize) -> usize {
     match page_size {
         PageSize::Small => sel4_config.num_page_table_levels() - 1,
         PageSize::Large => sel4_config.num_page_table_levels() - 2,
+    }
+}
+
+fn top_pt_level_number(sel4_config: &Config) -> usize {
+    if sel4_config.arch == Arch::Aarch64 && sel4_config.aarch64_vspace_s2_start_l1() {
+        1
+    } else {
+        0
     }
 }
 
@@ -204,11 +212,11 @@ fn map_intermediary_level_helper(
 
 pub fn create_vspace(spec: &mut CapDLSpec, sel4_config: &Config, pd_name: &str) -> ObjectId {
     spec.add_root_object(NamedObject {
-        name: format!("{}_{}", get_pt_level_name(sel4_config, 0), pd_name),
+        name: format!("{}_{}", get_pt_level_name(sel4_config, top_pt_level_number(sel4_config)), pd_name),
         object: CapDLObject::PageTable(object::PageTable {
             x86_ept: false,
             is_root: true,
-            level: Some(0),
+            level: Some(top_pt_level_number(sel4_config) as u8),
             slots: [].to_vec(),
             coverage: Range { start: 0, end: sel4_config.user_top() }
         }),
@@ -224,7 +232,7 @@ pub fn create_vspace_ept(spec: &mut CapDLSpec, sel4_config: &Config, vm_name: &s
         object: CapDLObject::PageTable(object::PageTable {
             x86_ept: true,
             is_root: true,
-            level: Some(0),
+            level: Some(top_pt_level_number(sel4_config) as u8),
             slots: [].to_vec(),
             coverage: Range { start: 0, end: sel4_config.user_top() }
         }),
@@ -304,7 +312,7 @@ pub fn map_page(
         pd_name,
         vspace_obj_id,
         vspace_obj_id,
-        0,
+        top_pt_level_number(sel4_config),
         frame_cap,
         frame_size,
         vaddr,
