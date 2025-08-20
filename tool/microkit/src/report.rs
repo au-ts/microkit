@@ -23,10 +23,14 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
         let irq_num = irq.irq;
         let handler = spec.get_root_object(irq.handler).unwrap();
 
+        report_file
+            .write_all(format!("\t- IRQ: '{}'\n", handler.name).as_bytes())
+            .unwrap();
+
         match &handler.object {
             CapDLObject::ArmIrq(arm_irq) => {
                 report_file
-                    .write_all(format!("\t- IRQ Number: {}\n", irq_num).as_bytes())
+                    .write_all(format!("\t\t* Number: {}\n", irq_num).as_bytes())
                     .unwrap();
                 report_file
                     .write_all(
@@ -43,7 +47,7 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
             }
             CapDLObject::RiscvIrq(riscv_irq) => {
                 report_file
-                    .write_all(format!("\t- IRQ Number: {}\n", irq_num).as_bytes())
+                    .write_all(format!("\t\t* Number: {}\n", irq_num).as_bytes())
                     .unwrap();
                 report_file
                     .write_all(
@@ -57,7 +61,7 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
             }
             CapDLObject::IrqMsi(irq_msi) => {
                 report_file
-                    .write_all(format!("\t- IRQ Vector: {}\n", irq_num).as_bytes())
+                    .write_all(format!("\t\t* Vector: {}\n", irq_num).as_bytes())
                     .unwrap();
                 report_file
                     .write_all(format!("\t\t* PCI Bus: {}\n", irq_msi.extra.pci_bus).as_bytes())
@@ -76,7 +80,7 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
             }
             CapDLObject::IrqIOApic(irq_ioapic) => {
                 report_file
-                    .write_all(format!("\t- IRQ Vector: {}\n", irq_num).as_bytes())
+                    .write_all(format!("\t\t* Vector: {}\n", irq_num).as_bytes())
                     .unwrap();
                 report_file
                     .write_all(format!("\t\t* IOAPIC: {}\n", irq_ioapic.extra.ioapic).as_bytes())
