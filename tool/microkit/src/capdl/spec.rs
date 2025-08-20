@@ -132,6 +132,19 @@ impl CapDLObject {
         }
     }
 
+    pub fn get_cap_entries(&self) -> Option<&Vec<CapTableEntry>> {
+        match self {
+            CapDLObject::CNode(cnode) => Some(&cnode.slots),
+            CapDLObject::Tcb(tcb) => Some(&tcb.slots),
+            CapDLObject::PageTable(page_table) => Some(&page_table.slots),
+            CapDLObject::ArmIrq(arm_irq) => Some(&arm_irq.slots),
+            CapDLObject::IrqMsi(irq_msi) => Some(&irq_msi.slots),
+            CapDLObject::IrqIOApic(irq_ioapic) => Some(&irq_ioapic.slots),
+            CapDLObject::RiscvIrq(riscv_irq) => Some(&riscv_irq.slots),
+            _ => None,
+        }
+    }
+
     pub fn get_cap_entries_mut(&mut self) -> Option<&mut Vec<CapTableEntry>> {
         match self {
             CapDLObject::CNode(cnode) => Some(&mut cnode.slots),
@@ -238,6 +251,23 @@ impl Cap {
             Cap::ArmSmc(cap) => cap.object = new_id,
         }
     }
+
+    pub fn rights(&self) -> Option<&Rights> {
+        match self {
+            Cap::Endpoint(endpoint) => Some(&endpoint.rights),
+            Cap::Notification(notification) => Some(&notification.rights),
+            Cap::Frame(frame) => Some(&frame.rights),
+            _ => None,
+        }
+    }
+
+    pub fn badge(&self) -> Option<u64> {
+        match self {
+            Cap::Endpoint(endpoint) => Some(endpoint.badge),
+            Cap::Notification(notification) => Some(notification.badge),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Serialize, Clone, Eq, PartialEq)]
@@ -246,6 +276,37 @@ pub struct Rights {
     pub write: bool,
     pub grant: bool,
     pub grant_reply: bool,
+}
+
+impl Rights {
+    pub fn human_repr(&self) -> String {
+        let mut repr = "".to_string();
+        let sep = ", ";
+
+        if self.read {
+            repr += "Read";
+        }
+        if self.write {
+            if !repr.is_empty() {
+                repr += sep;
+            }
+            repr += "Write";
+        }
+        if self.grant {
+            if !repr.is_empty() {
+                repr += sep;
+            }
+            repr += "Grant";
+        }
+        if self.grant_reply {
+            if !repr.is_empty() {
+                repr += sep;
+            }
+            repr += "Grant Reply";
+        }
+
+        repr
+    }
 }
 
 pub mod object {

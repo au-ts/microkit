@@ -8,7 +8,7 @@ use std::{fs::File, io::Write};
 
 use crate::{
     capdl::{spec::CapDLObject, CapDLSpec, TcbBoundSlot},
-    sel4::{ArmRiscvIrqTrigger, Config, X86IoapicIrqPolarity, X86IoapicIrqTrigger},
+    sel4::{Arch, ArmRiscvIrqTrigger, Config, X86IoapicIrqPolarity, X86IoapicIrqTrigger},
 };
 
 pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str) {
@@ -105,6 +105,7 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
             }
             _ => unreachable!("internal bug: object is not IRQ!"),
         };
+        report_file.write_all(b"\n").unwrap();
     }
 
     report_file.write_all(b"\n# TCB Details\n").unwrap();
@@ -137,7 +138,7 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
                     .unwrap();
 
                 report_file
-                    .write_all(format!("\t\t* Bound Objects:\n").as_bytes())
+                    .write_all(b"\t\t* Bound Objects:\n")
                     .unwrap();
                 for (bound_slot, cap) in tcb.slots.iter() {
                     let slot_enum = TcbBoundSlot::from(*bound_slot);
@@ -160,6 +161,7 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
             }
             _ => unreachable!("internal bug: object is not TCB!"),
         }
+        report_file.write_all(b"\n").unwrap();
     }
 
     report_file.write_all(b"\n# CNode Details\n").unwrap();
@@ -167,50 +169,105 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
         .objects
         .iter()
         .filter(|named_object| matches!(named_object.object, CapDLObject::CNode(_)));
-    for named_cnode_objects in cnode_objects {
+    for named_cnode_object in cnode_objects {
         report_file
-            .write_all(format!("\t- CNode: '{}'\n", named_cnode_objects.name).as_bytes())
+            .write_all(format!("\t- CNode: '{}'\n", named_cnode_object.name).as_bytes())
             .unwrap();
+        for (cap_addr, cap) in named_cnode_object.object.get_cap_entries().unwrap() {
+            let to_object = spec.get_root_object(cap.obj()).unwrap();
+            report_file
+                .write_all(format!("\t\t* Slot: {}\n", cap_addr).as_bytes())
+                .unwrap();
+
+            report_file
+                .write_all(format!("\t\t\t-> Object: '{}'\n", to_object.name).as_bytes())
+                .unwrap();
+            let rights_maybe = cap.rights();
+            if rights_maybe.is_some() {
+                report_file
+                    .write_all(
+                        format!("\t\t\t-> Rights: {}\n", rights_maybe.unwrap().human_repr())
+                            .as_bytes(),
+                    )
+                    .unwrap();
+            }
+            let badge_maybe = cap.badge();
+            if badge_maybe.is_some() {
+                report_file
+                    .write_all(format!("\t\t\t-> Badge: 0x{:x}\n", badge_maybe.unwrap()).as_bytes())
+                    .unwrap();
+            }
+        }
+        report_file.write_all(b"\n").unwrap();
     }
 
     report_file
         .write_all(b"\n# Architecture Specific Details\n")
         .unwrap();
+    match kernel_config.arch {
+        Arch::Aarch64 => {
+            let is_smc = spec
+                .objects
+                .iter()
+                .filter(|named_object| matches!(named_object.object, CapDLObject::ArmSmc))
+                .count()
+                > 0;
+            if is_smc {
+                report_file
+                    .write_all(b"ARM SMC access is granted to userspace.")
+                    .unwrap();
+            }
+        }
+        Arch::X86_64 => {
+            // let ioports = spec
+            //     .objects
+            //     .iter()
+            //     .filter(|named_object| matches!(named_object.object, CapDLObject::IOPorts(_)));
 
-    report_file
-        .write_all(b"\n# Kernel Objects Details\n")
-        .unwrap();
-    let kernel_objects = spec
-        .objects
-        .iter()
-        .filter(|named_object| named_object.object.physical_size_bits(kernel_config) > 0);
-    for named_object in kernel_objects {
-        match &named_object.expected_alloc {
-            Some(allocation_details) => {
-                report_file
-                    .write_all(
-                        format!(
-                            "\t{}: name: {}\tphys_addr: 0x{:0>12x}\n",
-                            named_object.object.human_name(kernel_config),
-                            named_object.name,
-                            allocation_details.paddr
-                        )
-                        .as_bytes(),
-                    )
-                    .unwrap();
+            // for named_ioport_object in ioports {}
+        }
+        Arch::Riscv64 => {}
+    }
+
+    match kernel_config.arch {
+        Arch::Aarch64 | Arch::Riscv64 => {}
+        Arch::X86_64 => {
+            report_file
+                .write_all(b"\n# Kernel Objects Details\n")
+                .unwrap();
+            let kernel_objects = spec
+                .objects
+                .iter()
+                .filter(|named_object| named_object.object.physical_size_bits(kernel_config) > 0);
+            for named_object in kernel_objects {
+                match &named_object.expected_alloc {
+                    Some(allocation_details) => {
+                        report_file
+                            .write_all(
+                                format!(
+                                    "\t{}: name: {}\tphys_addr: 0x{:0>12x}\n",
+                                    named_object.object.human_name(kernel_config),
+                                    named_object.name,
+                                    allocation_details.paddr
+                                )
+                                .as_bytes(),
+                            )
+                            .unwrap();
+                    }
+                    None => {
+                        report_file
+                            .write_all(
+                                format!(
+                                    "\t{}: name: {}\n",
+                                    named_object.object.human_name(kernel_config),
+                                    named_object.name
+                                )
+                                .as_bytes(),
+                            )
+                            .unwrap();
+                    }
+                };
             }
-            None => {
-                report_file
-                    .write_all(
-                        format!(
-                            "\t{}: name: {}\n",
-                            named_object.object.human_name(kernel_config),
-                            named_object.name
-                        )
-                        .as_bytes(),
-                    )
-                    .unwrap();
-            }
-        };
+        }
     }
 }
