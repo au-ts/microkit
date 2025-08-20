@@ -7,7 +7,7 @@
 use std::{fs::File, io::Write};
 
 use crate::{
-    capdl::{spec::CapDLObject, CapDLSpec},
+    capdl::{spec::CapDLObject, CapDLSpec, TcbBoundSlot},
     sel4::{ArmRiscvIrqTrigger, Config, X86IoapicIrqPolarity, X86IoapicIrqTrigger},
 };
 
@@ -108,15 +108,77 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
     }
 
     report_file.write_all(b"\n# TCB Details\n").unwrap();
+    let tcb_objects = spec
+        .objects
+        .iter()
+        .filter(|named_object| matches!(named_object.object, CapDLObject::Tcb(_)));
+    for named_tcb_objects in tcb_objects {
+        report_file
+            .write_all(format!("\t- TCB: '{}'\n", named_tcb_objects.name).as_bytes())
+            .unwrap();
+        match &named_tcb_objects.object {
+            CapDLObject::Tcb(tcb) => {
+                report_file
+                    .write_all(format!("\t\t* IP: 0x{:x}\n", tcb.extra.ip).as_bytes())
+                    .unwrap();
+                report_file
+                    .write_all(format!("\t\t* SP: 0x{:x}\n", tcb.extra.sp).as_bytes())
+                    .unwrap();
+                report_file
+                    .write_all(
+                        format!("\t\t* IPC Buffer: 0x{:x}\n", tcb.extra.ipc_buffer_addr).as_bytes(),
+                    )
+                    .unwrap();
+                report_file
+                    .write_all(format!("\t\t* Priority: {}\n", tcb.extra.prio).as_bytes())
+                    .unwrap();
+                report_file
+                    .write_all(format!("\t\t* CPU Affinity: {}\n", tcb.extra.affinity).as_bytes())
+                    .unwrap();
 
-    report_file.write_all(b"# CNode Details\n").unwrap();
+                report_file
+                    .write_all(format!("\t\t* Bound Objects:\n").as_bytes())
+                    .unwrap();
+                for (bound_slot, cap) in tcb.slots.iter() {
+                    let slot_enum = TcbBoundSlot::from(*bound_slot);
+                    let object_name = &spec.get_root_object(cap.obj()).unwrap().name;
+                    let prefix = match slot_enum {
+                        TcbBoundSlot::CSpace => "CSpace",
+                        TcbBoundSlot::VSpace => "VSpace",
+                        TcbBoundSlot::IpcBuffer => "IPC Buffer",
+                        TcbBoundSlot::FaultEp => "Fault Endpoint",
+                        TcbBoundSlot::SchedContext => "Scheduling Context",
+                        TcbBoundSlot::BoundNotification => "Notification",
+                        TcbBoundSlot::VCpu => "VCpu",
+                        TcbBoundSlot::X86Eptpml4 => "x86 EPT PML4",
+                    };
+
+                    report_file
+                        .write_all(format!("\t\t\t-> {}: '{}'\n", prefix, object_name).as_bytes())
+                        .unwrap();
+                }
+            }
+            _ => unreachable!("internal bug: object is not TCB!"),
+        }
+    }
+
+    report_file.write_all(b"\n# CNode Details\n").unwrap();
+    let cnode_objects = spec
+        .objects
+        .iter()
+        .filter(|named_object| matches!(named_object.object, CapDLObject::CNode(_)));
+    for named_cnode_objects in cnode_objects {
+        report_file
+            .write_all(format!("\t- CNode: '{}'\n", named_cnode_objects.name).as_bytes())
+            .unwrap();
+    }
 
     report_file
-        .write_all(b"# Architecture Specific Details\n")
+        .write_all(b"\n# Architecture Specific Details\n")
         .unwrap();
 
     report_file
-        .write_all(b"# Kernel Objects Details\n")
+        .write_all(b"\n# Kernel Objects Details\n")
         .unwrap();
     let kernel_objects = spec
         .objects

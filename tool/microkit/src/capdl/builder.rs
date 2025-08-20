@@ -43,17 +43,33 @@ const PPC_BADGE: u64 = 1 << 63;
 
 // The sel4-capdl-initialiser crate expects caps that you want to bind to a TCB to be at
 // certain slots. From dep/rust-sel4/crates/sel4-capdl-initializer/types/src/cap_table.rs
-const TCB_SLOT_CSPACE: u64 = 0;
-const TCB_SLOT_VSPACE: u64 = 1;
-const TCB_SLOT_IPC_BUFFER: u64 = 4;
-const TCB_SLOT_FAULT_EP: u64 = 5;
-const TCB_SLOT_SC: u64 = 6;
-// Not used on MCS, but leaving here for clarity
-// const TCB_SLOT_TEMP_FAULT_EP: u64 = 7;
-const TCB_SLOT_BOUND_NOTIFICATION: u64 = 8;
-const TCB_SLOT_VCPU: u64 = 9;
-// Guest VM root page table object on x86
-const TCB_SLOT_X86_EPTPML4: u64 = 10;
+pub enum TcbBoundSlot {
+    CSpace = 0,
+    VSpace = 1,
+    IpcBuffer = 4,
+    FaultEp = 5,
+    SchedContext = 6,
+    BoundNotification = 8,
+    VCpu = 9,
+    // Guest VM root page table object on x86
+    X86Eptpml4 = 10,
+}
+
+impl From<usize> for TcbBoundSlot {
+    fn from(value: usize) -> Self {
+        match value {
+            0 => Self::CSpace,
+            1 => Self::VSpace,
+            4 => Self::IpcBuffer,
+            5 => Self::FaultEp,
+            6 => Self::SchedContext,
+            8 => Self::BoundNotification,
+            9 => Self::VCpu,
+            10 => Self::X86Eptpml4,
+            _ => unreachable!("internal bug: unknown value for TcbBoundSlot::from"),
+        }
+    }
+}
 
 // Where caps must be in the Monitor's CSpace
 const MON_FAULT_EP_CAP_IDX: u64 = 1;
@@ -316,8 +332,8 @@ impl CapDLSpec {
         let tcb_inner_obj = object::Tcb {
             // Bind the VSpace into the TCB
             slots: [
-                (TCB_SLOT_VSPACE as usize, vspace_cap),
-                (TCB_SLOT_IPC_BUFFER as usize, ipcbuf_frame_cap_for_tcb),
+                (TcbBoundSlot::VSpace as usize, vspace_cap),
+                (TcbBoundSlot::IpcBuffer as usize, ipcbuf_frame_cap_for_tcb),
             ]
             .to_vec(),
             extra: tcb_extra_info,
@@ -460,9 +476,11 @@ pub fn build_capdl_spec(
 
         monitor_tcb
             .slots
-            .push((TCB_SLOT_CSPACE as usize, mon_cnode_cap));
+            .push((TcbBoundSlot::CSpace as usize, mon_cnode_cap));
 
-        monitor_tcb.slots.push((TCB_SLOT_SC as usize, mon_sc_cap));
+        monitor_tcb
+            .slots
+            .push((TcbBoundSlot::SchedContext as usize, mon_sc_cap));
     } else {
         unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
     }
@@ -659,7 +677,7 @@ pub fn build_capdl_spec(
             0x100 + pd_global_idx as u64,
         );
         let pd_sc_cap = capdl_util_make_sc_cap(pd_sc_obj_id);
-        caps_to_bind_to_tcb.push((TCB_SLOT_SC as usize, pd_sc_cap));
+        caps_to_bind_to_tcb.push((TcbBoundSlot::SchedContext as usize, pd_sc_cap));
 
         // Step 3-6 Create fault Endpoint cap to parent/monitor
         let pd_fault_ep_cap = if pd.parent.is_none() {
@@ -686,7 +704,7 @@ pub fn build_capdl_spec(
             fault_ep_cap
         };
         caps_to_insert_to_pd_cspace.push((PD_FAULT_EP_CAP_IDX as usize, pd_fault_ep_cap.clone()));
-        caps_to_bind_to_tcb.push((TCB_SLOT_FAULT_EP as usize, pd_fault_ep_cap.clone()));
+        caps_to_bind_to_tcb.push((TcbBoundSlot::FaultEp as usize, pd_fault_ep_cap.clone()));
 
         // Step 3-7 Create cap to Monitor's endpoint for passive PDs.
         if pd.passive {
@@ -715,7 +733,7 @@ pub fn build_capdl_spec(
             let pd_ntfn_cap_clone = pd_ntfn_cap.clone();
             caps_to_insert_to_pd_cspace.push((PD_INPUT_CAP_IDX as usize, pd_ntfn_cap_clone));
         }
-        caps_to_bind_to_tcb.push((TCB_SLOT_BOUND_NOTIFICATION as usize, pd_ntfn_cap));
+        caps_to_bind_to_tcb.push((TcbBoundSlot::BoundNotification as usize, pd_ntfn_cap));
 
         // Step 3-9 Create Reply obj + cap and insert into CSpace
         let pd_reply_obj_id = capdl_util_make_reply_obj(&mut spec, &pd.name);
@@ -777,18 +795,19 @@ pub fn build_capdl_spec(
                     &format!("{}_{}", virtual_machine.name, vcpu.id),
                 );
                 let vcpu_cap = capdl_util_make_vcpu_cap(vm_vcpu_obj_id);
-                caps_to_bind_to_tcb.push((TCB_SLOT_VCPU as usize, vcpu_cap.clone()));
+                caps_to_bind_to_tcb.push((TcbBoundSlot::VCpu as usize, vcpu_cap.clone()));
 
                 // Allow the VMM to access the vCPU object.
                 caps_to_insert_to_pd_cspace.push(((PD_BASE_VCPU_CAP + vcpu.id) as usize, vcpu_cap));
 
                 // Bind the guest's root page table to the VMM PD.
-                caps_to_bind_to_tcb.push((TCB_SLOT_X86_EPTPML4 as usize, vm_vspace_cap));
+                caps_to_bind_to_tcb.push((TcbBoundSlot::X86Eptpml4 as usize, vm_vspace_cap));
             } else {
                 for (vcpu_idx, vcpu) in virtual_machine.vcpus.iter().enumerate() {
                     // All vCPUs get to access the same address space.
                     let mut caps_to_bind_to_vm_tcbs: Vec<CapTableEntry> = Vec::new();
-                    caps_to_bind_to_vm_tcbs.push((TCB_SLOT_VSPACE as usize, vm_vspace_cap.clone()));
+                    caps_to_bind_to_vm_tcbs
+                        .push((TcbBoundSlot::VSpace as usize, vm_vspace_cap.clone()));
 
                     // Create an empty CSpace
                     let vm_cnode_obj_id = capdl_util_make_cnode_obj(
@@ -799,7 +818,7 @@ pub fn build_capdl_spec(
                     );
                     let vm_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS;
                     let vm_cnode_cap = capdl_util_make_cnode_cap(vm_cnode_obj_id, 0, vm_guard_size);
-                    caps_to_bind_to_vm_tcbs.push((TCB_SLOT_CSPACE as usize, vm_cnode_cap));
+                    caps_to_bind_to_vm_tcbs.push((TcbBoundSlot::CSpace as usize, vm_cnode_cap));
 
                     // Create and map the IPC buffer.
                     let vm_ipcbuf_frame_obj_id = capdl_util_make_frame_obj(
@@ -815,7 +834,7 @@ pub fn build_capdl_spec(
                     let vm_ipcbuf_frame_cap =
                         capdl_util_make_frame_cap(vm_ipcbuf_frame_obj_id, true, true, false, true);
                     caps_to_bind_to_vm_tcbs
-                        .push((TCB_SLOT_IPC_BUFFER as usize, vm_ipcbuf_frame_cap));
+                        .push((TcbBoundSlot::IpcBuffer as usize, vm_ipcbuf_frame_cap));
 
                     // Create fault endpoint cap to the parent PD.
                     let vm_vcpu_fault_ep_cap = capdl_util_make_endpoint_cap(
@@ -826,7 +845,7 @@ pub fn build_capdl_spec(
                         FAULT_BADGE | vcpu.id,
                     );
                     caps_to_bind_to_vm_tcbs
-                        .push((TCB_SLOT_FAULT_EP as usize, vm_vcpu_fault_ep_cap));
+                        .push((TcbBoundSlot::FaultEp as usize, vm_vcpu_fault_ep_cap));
 
                     // Create scheduling context
                     let vm_vcpu_sc_obj_id = capdl_util_make_sc_obj(
@@ -838,7 +857,7 @@ pub fn build_capdl_spec(
                         0x100 + vcpu_idx as u64,
                     );
                     caps_to_bind_to_vm_tcbs.push((
-                        TCB_SLOT_SC as usize,
+                        TcbBoundSlot::SchedContext as usize,
                         capdl_util_make_sc_cap(vm_vcpu_sc_obj_id),
                     ));
 
@@ -848,7 +867,7 @@ pub fn build_capdl_spec(
                         &format!("{}_{}", virtual_machine.name, vcpu.id),
                     );
                     caps_to_bind_to_vm_tcbs.push((
-                        TCB_SLOT_VCPU as usize,
+                        TcbBoundSlot::VCpu as usize,
                         capdl_util_make_vcpu_cap(vm_vcpu_obj_id),
                     ));
 
@@ -912,7 +931,7 @@ pub fn build_capdl_spec(
         );
         let pd_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS;
         let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, pd_guard_size);
-        caps_to_bind_to_tcb.push((TCB_SLOT_CSPACE as usize, pd_cnode_cap));
+        caps_to_bind_to_tcb.push((TcbBoundSlot::CSpace as usize, pd_cnode_cap));
         pd_id_to_cspace_id.insert(pd_global_idx, pd_cnode_obj_id);
 
         // Step 3-15 Set the TCB parameters and all the various caps that we need to bind to this TCB.
@@ -926,6 +945,8 @@ pub fn build_capdl_spec(
             pc_tcb.extra.resume = true;
 
             pc_tcb.slots.extend(caps_to_bind_to_tcb);
+            // Stylistic purposes only
+            pc_tcb.slots.sort_by_key(|cte| cte.0);
         } else {
             unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
         }
@@ -1186,6 +1207,16 @@ pub fn build_capdl_spec(
 
     // Only for stylistic purposes
     spec.irqs.sort_by_key(|irq_entry| irq_entry.irq);
+    spec.objects
+        .iter_mut()
+        .filter(|named_object| matches!(named_object.object, CapDLObject::CNode(_)))
+        .for_each(|cnode_named_obj: &mut NamedObject| {
+            cnode_named_obj
+                .object
+                .get_cap_entries_mut()
+                .unwrap()
+                .sort_by_key(|(cap_addr, _)| *cap_addr)
+        });
 
     Ok(spec)
 }
