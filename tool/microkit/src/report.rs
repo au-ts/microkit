@@ -137,9 +137,7 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
                     .write_all(format!("\t\t* CPU Affinity: {}\n", tcb.extra.affinity).as_bytes())
                     .unwrap();
 
-                report_file
-                    .write_all(b"\t\t* Bound Objects:\n")
-                    .unwrap();
+                report_file.write_all(b"\t\t* Bound Objects:\n").unwrap();
                 for (bound_slot, cap) in tcb.slots.iter() {
                     let slot_enum = TcbBoundSlot::from(*bound_slot);
                     let object_name = &spec.get_root_object(cap.obj()).unwrap().name;
@@ -219,55 +217,78 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
             }
         }
         Arch::X86_64 => {
-            // let ioports = spec
-            //     .objects
-            //     .iter()
-            //     .filter(|named_object| matches!(named_object.object, CapDLObject::IOPorts(_)));
+            let ioports = spec
+                .objects
+                .iter()
+                .filter(|named_object| matches!(named_object.object, CapDLObject::IOPorts(_)));
 
-            // for named_ioport_object in ioports {}
+            for named_ioport_object in ioports {
+                report_file
+                    .write_all(
+                        format!(
+                            "\t- {}: '{}'\n",
+                            named_ioport_object.object.human_name(&kernel_config),
+                            named_ioport_object.name
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap();
+
+                match &named_ioport_object.object {
+                    CapDLObject::IOPorts(ioports) => {
+                        report_file
+                            .write_all(
+                                format!("\t\t* Start Port: 0x{:x}\n", ioports.start_port)
+                                    .as_bytes(),
+                            )
+                            .unwrap();
+                        report_file
+                            .write_all(
+                                format!("\t\t* End Port: 0x{:x}\n", ioports.end_port).as_bytes(),
+                            )
+                            .unwrap();
+                    }
+                    _ => unreachable!("internal bug: object is not x86 I/O ports!"),
+                }
+            }
         }
         Arch::Riscv64 => {}
     }
 
-    match kernel_config.arch {
-        Arch::Aarch64 | Arch::Riscv64 => {}
-        Arch::X86_64 => {
-            report_file
-                .write_all(b"\n# Kernel Objects Details\n")
-                .unwrap();
-            let kernel_objects = spec
-                .objects
-                .iter()
-                .filter(|named_object| named_object.object.physical_size_bits(kernel_config) > 0);
-            for named_object in kernel_objects {
-                match &named_object.expected_alloc {
-                    Some(allocation_details) => {
-                        report_file
-                            .write_all(
-                                format!(
-                                    "\t{}: name: {}\tphys_addr: 0x{:0>12x}\n",
-                                    named_object.object.human_name(kernel_config),
-                                    named_object.name,
-                                    allocation_details.paddr
-                                )
-                                .as_bytes(),
-                            )
-                            .unwrap();
-                    }
-                    None => {
-                        report_file
-                            .write_all(
-                                format!(
-                                    "\t{}: name: {}\n",
-                                    named_object.object.human_name(kernel_config),
-                                    named_object.name
-                                )
-                                .as_bytes(),
-                            )
-                            .unwrap();
-                    }
-                };
+    report_file
+        .write_all(b"\n# Kernel Objects Details\n")
+        .unwrap();
+    let kernel_objects = spec
+        .objects
+        .iter()
+        .filter(|named_object| named_object.object.physical_size_bits(kernel_config) > 0);
+    for named_object in kernel_objects {
+        match &named_object.expected_alloc {
+            Some(allocation_details) => {
+                report_file
+                    .write_all(
+                        format!(
+                            "\t{}: '{}',\tphys_addr: 0x{:0>12x}\n",
+                            named_object.object.human_name(kernel_config),
+                            named_object.name,
+                            allocation_details.paddr
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap();
             }
-        }
+            None => {
+                report_file
+                    .write_all(
+                        format!(
+                            "\t{}: '{}'\n",
+                            named_object.object.human_name(kernel_config),
+                            named_object.name
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap();
+            }
+        };
     }
 }
