@@ -221,7 +221,7 @@ static void putc(uint8_t ch)
     while ((*UART_REG(UART_STATUS) & UART_TX_FULL));
     *UART_REG(UART_WFIFO) = ch;
 }
-#elif defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel)
+#elif defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel) || defined(BOARD_odroidc4_multikernel_1) || defined(BOARD_odroidc4_multikernel_2)
 #define UART_BASE 0xff803000
 #define UART_WFIFO 0x0
 #define UART_STATUS 0xC
@@ -592,6 +592,12 @@ static int ensure_correct_el(void)
 
 static void start_kernel(int id)
 {
+    puts("Kernel ");
+    putc(id + '0');
+    puts(" has offset of");
+    puthex32(loader_data->kernel_data[id].pv_offset);
+    putc('\n');
+        
     ((sel4_entry)(loader_data->kernel_data[id].kernel_entry))(
         loader_data->kernel_data[id].ui_p_reg_start,
         loader_data->kernel_data[id].ui_p_reg_end,

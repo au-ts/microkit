@@ -639,6 +639,7 @@ fn kernel_phys_mem(kernel_config: &Config, kernel_elf: &ElfFile) -> Vec<(u64, u6
         let p_region = unsafe {
             bytes_to_struct::<KernelRegion64>(&p_region_bytes[offset..offset + p_region_size])
         };
+        print!("{} {} {} {}\n", size, offset, p_region.start, p_region.end);
         phys_mem.push((p_region.start, p_region.end));
         offset += p_region_size;
     }
@@ -3207,6 +3208,20 @@ fn main() -> Result<(), String> {
         .join("elf");
     let loader_elf_path = elf_path.join("loader.elf");
     let kernel_elf_path = elf_path.join("sel4.elf");
+
+    let elf_path_mk1 = sdk_dir
+        .join("board")
+        .join("odroidc4_multikernel_1")
+        .join(args.config)
+        .join("elf");
+    let elf_path_mk2 = sdk_dir
+        .join("board")
+        .join("odroidc4_multikernel_2")
+        .join(args.config)
+        .join("elf");
+    let kernel_elf_path_1 = elf_path_mk1.join("sel4.elf");
+    let kernel_elf_path_2 = elf_path_mk2.join("sel4.elf");
+    
     let monitor_elf_path = elf_path.join("monitor.elf");
 
     let kernel_config_path = sdk_dir
@@ -3366,6 +3381,8 @@ fn main() -> Result<(), String> {
     };
 
     let kernel_elf = ElfFile::from_path(&kernel_elf_path)?;
+    let kernel_elf_1 = ElfFile::from_path(&kernel_elf_path_1)?;
+    let kernel_elf_2 = ElfFile::from_path(&kernel_elf_path_2)?;
     let mut monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
 
     if monitor_elf.segments.iter().filter(|s| s.loadable).count() > 1 {
@@ -3407,7 +3424,7 @@ fn main() -> Result<(), String> {
         built_system = build_system(
             &kernel_config,
             &pd_elf_files,
-            &kernel_elf,
+            &kernel_elf_1,
             &monitor_elf,
             &system,
             invocation_table_size,
@@ -3626,7 +3643,8 @@ fn main() -> Result<(), String> {
     let loader = Loader::new(
         &kernel_config,
         Path::new(&loader_elf_path),
-        &kernel_elf,
+        &kernel_elf_1,
+        vec![&kernel_elf_2],
         &monitor_elf,
         Some(built_system.initial_task_phys_region.base),
         built_system.reserved_region,
