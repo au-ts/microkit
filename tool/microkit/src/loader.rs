@@ -408,11 +408,11 @@ impl<'a> Loader<'a> {
             println!("    HEADER INFO    ");
             println!("-------------------");
             println!("kernel_entry: {:x}", kernel_entries[i as usize]);
-            println!("ui_p_reg_start: {:x} (user image physical start address)", ui_p_reg_start + i * offset_size);
-            println!("ui_p_reg_end: {:x} (user image physical end address)", ui_p_reg_end + i * offset_size);
-            println!("pv_offset: {:x} (physical/virtual offset)", pv_offset + i * offset_size);
+            println!("ui_p_reg_start: {:x} (user image physical start address)", ui_p_reg_start);
+            println!("ui_p_reg_end: {:x} (user image physical end address)", ui_p_reg_end);
+            println!("pv_offset: {:x} (physical/virtual offset)", pv_offset);
             println!("initial_task_elf entry: {:x}  (user image virtual entry address)", v_entry);
-            println!("extra_device_addr_p: {:x}", extra_device_addr_p + i * offset_size);
+            println!("extra_device_addr_p: {:x}", extra_device_addr_p);
             println!("extra_device_size: {:x}", extra_device_size);
             println!("-------------------");
         }
@@ -423,11 +423,11 @@ impl<'a> Loader<'a> {
             kernel_data.push(
                 LoaderKernelInfo64 {
                     kernel_entry: kernel_entries[i as usize],
-                    ui_p_reg_start: ui_p_reg_start  + i * offset_size,
-                    ui_p_reg_end: ui_p_reg_end  + i * offset_size,
-                    pv_offset: pv_offset + i * offset_size,
+                    ui_p_reg_start: ui_p_reg_start,
+                    ui_p_reg_end: ui_p_reg_end,
+                    pv_offset: pv_offset,
                     v_entry: v_entry,
-                    extra_device_addr_p: extra_device_addr_p + i * offset_size,
+                    extra_device_addr_p: extra_device_addr_p,
                     extra_device_size: extra_device_size,
                 }
             );
