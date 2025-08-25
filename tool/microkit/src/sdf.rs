@@ -691,7 +691,7 @@ impl ProtectionDomain {
                                     return Err(value_error(
                                         xml_sdf,
                                         &child,
-                                        "trigger must be either 'low' or 'high'".to_string(),
+                                        "polarity must be either 'low' or 'high'".to_string(),
                                     ))
                                 }
                             }
