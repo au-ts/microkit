@@ -19,6 +19,7 @@ const DEFAULT_KERNEL_CONFIG: sel4::Config = sel4::Config {
     hypervisor: true,
     microkit_config: sel4::MicrokitConfig::Debug,
     fpu: true,
+    thread_local_pmu: false,
     arm_pa_size_bits: Some(40),
     arm_smc: None,
     riscv_pt_levels: None,

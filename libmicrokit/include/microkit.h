@@ -21,6 +21,7 @@ typedef seL4_MessageInfo_t microkit_msginfo;
 #define TCB_CAP 6
 /* Only valid when the PD has been configured to make SMC calls */
 #define ARM_SMC_CAP 7
+#define ARM_PMU_CONTROL_CAP 8
 #define BASE_OUTPUT_NOTIFICATION_CAP 10
 #define BASE_ENDPOINT_CAP 74
 #define BASE_IRQ_CAP 138

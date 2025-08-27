@@ -81,6 +81,7 @@ pub struct Config {
     pub hypervisor: bool,
     pub microkit_config: MicrokitConfig,
     pub fpu: bool,
+    pub thread_local_pmu: bool,
     /// ARM-specific, number of physical address bits
     pub arm_pa_size_bits: Option<usize>,
     /// ARM-specific, where or not SMC forwarding is allowed
@@ -214,9 +215,16 @@ impl ObjectType {
     pub fn fixed_size_bits(self, config: &Config) -> Option<u64> {
         match self {
             ObjectType::Tcb => match config.arch {
-                Arch::Aarch64 => match config.microkit_config {
-                    MicrokitConfig::Debug => Some(12),
-                    _ => Some(11),
+                Arch::Aarch64 => {
+                    let mut size = match config.microkit_config {
+                        MicrokitConfig::Debug => 12,
+                        _ => 11,
+                    };
+                    if config.thread_local_pmu {
+                        size = size + 1;
+                    }
+
+                    Some(size)
                 },
                 Arch::Riscv64 => match config.fpu {
                     true => Some(11),

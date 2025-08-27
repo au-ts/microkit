@@ -177,6 +177,7 @@ pub struct ProtectionDomain {
     pub passive: bool,
     pub stack_size: u64,
     pub smc: bool,
+    pub pmu: bool,
     pub program_image: PathBuf,
     pub maps: Vec<SysMap>,
     pub irqs: Vec<SysIrq>,
@@ -367,6 +368,7 @@ impl ProtectionDomain {
             // The SMC field is only available in certain configurations
             // but we do the error-checking further down.
             "smc",
+            "pmu",
             "child_pts",
         ];
         if is_child {
@@ -458,6 +460,21 @@ impl ProtectionDomain {
                 }
             }
         }
+
+        let pmu = if let Some(xml_pmu) = node.attribute("pmu") {
+            match str_to_bool(xml_pmu) {
+                Some(val) => val,
+                None => {
+                    return Err(value_error(
+                        xml_sdf,
+                        node,
+                        "pmu must be 'true' or 'false'".to_string(),
+                    ))
+                }
+            }
+        } else {
+            false
+        };
 
         #[allow(clippy::manual_range_contains)]
         if stack_size < PD_MIN_STACK_SIZE || stack_size > PD_MAX_STACK_SIZE {
@@ -692,6 +709,7 @@ impl ProtectionDomain {
             passive,
             stack_size,
             smc,
+            pmu,
             program_image: program_image.unwrap(),
             maps,
             irqs,

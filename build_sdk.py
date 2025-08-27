@@ -357,7 +357,8 @@ SUPPORTED_CONFIGS = (
             "KernelPrinting": True,
             "KernelVerificationBuild": False,
             "KernelBenchmarks": "track_utilisation",
-            "ProfilerEnable": True
+            "ProfilerEnable": True,
+            "ThreadLocalPMU" : True,
         },
     )
 )
