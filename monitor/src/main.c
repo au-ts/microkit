@@ -940,7 +940,7 @@ void main(seL4_BootInfo *bi)
     puts("MON|INFO: Microkit Bootstrap\n");
 
     // send to CPU 2 only, not 1.
-    seL4_Error err = seL4_IRQControl_IssueSGISignal(seL4_CapIRQControl, 0, 0b10, seL4_CapInitThreadCNode, 0xf00, 64);
+    seL4_Error err = seL4_IRQControl_IssueSGISignal(seL4_CapIRQControl, 0, 1, seL4_CapInitThreadCNode, 0xf00, 64);
     if (err != seL4_NoError) {
         puthex64(err);
         fail("failed to create SGI control\n");
@@ -952,6 +952,7 @@ void main(seL4_BootInfo *bi)
     }
     // XXXX: Extremely hacky, 0x54 is past the last untyped for kernel 1, but not for kernel 2.
     if (seL4_DebugCapIdentify(0x54) != 0) {
+        puts("making notification to receive IRQ\n");
         err = seL4_Untyped_Retype(0x54, seL4_NotificationObject, 0, seL4_CapInitThreadCNode, seL4_CapInitThreadCNode, 64, 0xf02, 1);
         if (err != seL4_NoError) {
             puthex64(err);
