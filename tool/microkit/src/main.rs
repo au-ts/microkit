@@ -2775,7 +2775,7 @@ fn build_system(
 
     // In the benchmark configuration, we allow PDs to access their own TCB.
     // This is necessary for accessing kernel's benchmark API.
-    if config.microkit_config == MicrokitConfig::Benchmark {
+    if config.microkit_config == MicrokitConfig::Benchmark || config.microkit_config == MicrokitConfig::Profiling {
         let mut tcb_cap_copy_invocation = Invocation::new(
             config,
             InvocationArgs::CnodeCopy {

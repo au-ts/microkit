@@ -352,7 +352,6 @@ SUPPORTED_CONFIGS = (
         name="profiling",
         debug=True,
         kernel_options={
-            "KernelArmExportPMUUser": True,
             "KernelDebugBuild": True,
             "KernelPrinting": True,
             "KernelVerificationBuild": False,
