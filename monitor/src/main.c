@@ -341,7 +341,16 @@ static void check_untypeds_match(seL4_BootInfo *bi)
         puts("  boot info cap end: ");
         puthex32(bi->untyped.end);
         puts("\n");
-        fail("cap end mismatch");
+
+        seL4_Word badge;
+        seL4_MessageInfo_t tag;
+
+        puts("waiting for the IRQ (long-ish delay)\n");
+        tag = seL4_Recv(0xf02, &badge, 0xfff);
+        puts("got IRQ reply\n");
+        (void)tag;
+
+        fail("stopping after success");
     }
 
     for (unsigned i = 0; i < untyped_info.cap_end - untyped_info.cap_start; i++) {
@@ -930,6 +939,47 @@ void main(seL4_BootInfo *bi)
     __sel4_ipc_buffer = bi->ipcBuffer;
     puts("MON|INFO: Microkit Bootstrap\n");
 
+    // send to CPU 2 only, not 1.
+    seL4_Error err = seL4_IRQControl_IssueSGISignal(seL4_CapIRQControl, 0, 0b10, seL4_CapInitThreadCNode, 0xf00, 64);
+    if (err != seL4_NoError) {
+        puthex64(err);
+        fail("failed to create SGI control\n");
+    }
+    err = seL4_IRQControl_Get(seL4_CapIRQControl, 0, seL4_CapInitThreadCNode, 0xf01, 64);
+    if (err != seL4_NoError) {
+        puthex64(err);
+        fail("failed to make IRQ control\n");
+    }
+    // XXXX: Extremely hacky, 0x54 is past the last untyped for kernel 1, but not for kernel 2.
+    if (seL4_DebugCapIdentify(0x54) != 0) {
+        err = seL4_Untyped_Retype(0x54, seL4_NotificationObject, 0, seL4_CapInitThreadCNode, seL4_CapInitThreadCNode, 64, 0xf02, 1);
+        if (err != seL4_NoError) {
+            puthex64(err);
+            fail("failed to make notification\n");
+        }
+        err = seL4_IRQHandler_SetNotification(0xf01, 0xf02);
+        if (err != seL4_NoError) {
+            puthex64(err);
+            fail("failed set IRQ notification\n");
+        }
+    }
+    seL4_Word cap_tag = seL4_DebugCapIdentify(0xf00);
+    // cap_sgi_signal_cap = 27 = 0x1b
+    puts("MON:sgi cap tag (0xf00) ");
+    puthex64(cap_tag);
+    puts("\n");
+    if (cap_tag != 27) {
+        fail("WRONG CAP TAG\n");
+    }
+    cap_tag = seL4_DebugCapIdentify(0xf01);
+    // cap irq_control_cap = 16
+    puts("MON:irq cap tag (0xf01) ");
+    puthex64(cap_tag);
+    puts("\n");
+    if (cap_tag != 16) {
+        fail("WRONG CAP TAG\n");
+    }
+
 #if 0
     /* This can be useful to enable during new platform bring up
      * if there are problems
@@ -976,5 +1026,11 @@ void main(seL4_BootInfo *bi)
 
     puts("MON|INFO: completed system invocations\n");
 
+    for (volatile uint64_t i = 0; i < 5000000000ULL; i++);
+
+    puts("\n\nKernel 1: Signalling...\n");
+    seL4_Signal(0xf00);
+
+    for (volatile uint64_t i = 0; i < 10000000000ULL; i++);
     monitor();
 }
