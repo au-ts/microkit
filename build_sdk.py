@@ -383,6 +383,7 @@ SUPPORTED_CONFIGS = (
         kernel_options={
             # @billn revisit
             "KernelRootCNodeSizeBits": "17",
+            # "KernelMapInitialTaskWithLargePage": True,
         },
     ),
     ConfigInfo(
@@ -392,7 +393,8 @@ SUPPORTED_CONFIGS = (
             "KernelRootCNodeSizeBits": "17",
             "KernelDebugBuild": True,
             "KernelPrinting": True,
-            "KernelVerificationBuild": False
+            "KernelVerificationBuild": False,
+            # "KernelMapInitialTaskWithLargePage": True,
         }
     ),
     ConfigInfo(
@@ -407,6 +409,7 @@ SUPPORTED_CONFIGS = (
             "KernelExportPMCUser": True,
             "KernelX86DangerousMSR": True,
             "KernelSignalFastpath": True,
+            "KernelMapInitialTaskWithLargePage": True,
         },
     ),
 )
@@ -694,19 +697,26 @@ def build_capdl_initialiser(
     board: BoardInfo,
     config: ConfigInfo,
 ) -> None:
+    if config.debug:
+        cargo_target_flag = ""
+        cargo_out_dir = "debug"
+    else:
+        cargo_target_flag = "--release"
+        cargo_out_dir = "release"
+
     sel4_src_dir = build_dir / board.name / config.name / "sel4" / "install"
 
     cargo_cross_options = "-Z build-std=core,alloc,compiler_builtins -Z build-std-features=compiler-builtins-mem"
     cargo_target = board.arch.rust_toolchain()
 
-    cmd = f"cd {rust_sel4_dir} && SEL4_PREFIX={sel4_src_dir.absolute()} cargo build {cargo_cross_options} --target {cargo_target} --release -p sel4-capdl-initializer"
+    cmd = f"cd {rust_sel4_dir} && SEL4_PREFIX={sel4_src_dir.absolute()} cargo build {cargo_cross_options} --target {cargo_target} {cargo_target_flag} -p sel4-capdl-initializer"
     r = system(cmd)
     if r != 0:
         raise Exception(
             f"Error building: {component_name} for board: {board.name} config: {config.name}"
         )
 
-    capdl_init_elf = rust_sel4_dir / "target" / cargo_target / "release" / "sel4-capdl-initializer.elf"
+    capdl_init_elf = rust_sel4_dir / "target" / cargo_target / cargo_out_dir / "sel4-capdl-initializer.elf"
     dest = (
         root_dir / "board" / board.name / config.name / "elf" / f"{component_name}.elf"
     )
