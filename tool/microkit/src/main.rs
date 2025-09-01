@@ -10,7 +10,7 @@
 use microkit_tool::capdl::spec::{ElfContent, ExpectedAllocation};
 // use microkit_tool::capdl::untyped::InitSystem;
 use microkit_tool::capdl::{build_capdl_spec, reserialise_spec};
-use microkit_tool::elf::{ElfFile, ElfSegmentAttributes};
+use microkit_tool::elf::ElfFile;
 use microkit_tool::loader::Loader;
 use microkit_tool::report::write_report;
 use microkit_tool::sdf::parse;
@@ -576,7 +576,7 @@ fn main() -> Result<(), String> {
     // rust-sel4/crates/sel4-capdl-initializer/src/main.rs
     let mut initialiser_elf = ElfFile::from_path(&capdl_init_elf_path)?;
     let spec_vaddr = round_up(initialiser_elf.next_vaddr(), PageSize::Small as u64);
-    initialiser_elf.add_segment(ElfSegmentAttributes::Read, spec_vaddr, capdl_spec_as_binary);
+    initialiser_elf.add_segment(true, false, false, spec_vaddr, capdl_spec_as_binary);
     initialiser_elf.write_symbol(
         "sel4_capdl_initializer_serialized_spec_start",
         &spec_vaddr.to_le_bytes(),
@@ -587,11 +587,7 @@ fn main() -> Result<(), String> {
     )?;
 
     let heap_vaddr = round_up(initialiser_elf.next_vaddr(), PageSize::Small as u64);
-    initialiser_elf.add_segment(
-        ElfSegmentAttributes::Read | ElfSegmentAttributes::Write,
-        heap_vaddr,
-        vec![0; heap_size],
-    );
+    initialiser_elf.add_segment(true, true, false, heap_vaddr, vec![0; heap_size]);
     initialiser_elf.write_symbol(
         "sel4_capdl_initializer_heap_start",
         &heap_vaddr.to_le_bytes(),
@@ -618,8 +614,7 @@ fn main() -> Result<(), String> {
     );
     let initialiser_highest_vaddr_rounded =
         round_up(initialiser_elf.highest_vaddr(), PageSize::Small as u64);
-    let initialiser_vaddr_range =
-        initialiser_elf.lowest_vaddr()..initialiser_highest_vaddr_rounded;
+    let initialiser_vaddr_range = initialiser_elf.lowest_vaddr()..initialiser_highest_vaddr_rounded;
     println!(
         "INITIAL TASK: size = {}, vaddr = [0x{:x}..0x{:x}], entry = 0x{:x}",
         human_size_strict(initialiser_vaddr_range.end - initialiser_vaddr_range.start),
@@ -680,12 +675,9 @@ fn main() -> Result<(), String> {
         // We got the untypeds list, now follow the CapDL object allocation algorithm to catch
         // issues at build time.
         // Step 1: sort untypeds by paddr.
-        let untypeds_clone = kernel_boot_info
-            .untyped_objects
-            .clone();
-        let mut untypeds_by_paddr: Vec<(usize, &UntypedObject)> = 
-            untypeds_clone.iter()
-            .enumerate().collect();
+        let untypeds_clone = kernel_boot_info.untyped_objects.clone();
+        let mut untypeds_by_paddr: Vec<(usize, &UntypedObject)> =
+            untypeds_clone.iter().enumerate().collect();
         untypeds_by_paddr.sort_by_key(|(_i, ut)| ut.base());
 
         // Step 2: create object "windows" for objects that doesn't specify paddr,
@@ -705,7 +697,9 @@ fn main() -> Result<(), String> {
                 match window_maybe {
                     Some(window) => window.end += 1,
                     None => {
-                        let _ = window_maybe.insert(first_obj_id_without_paddr + id..first_obj_id_without_paddr + id + 1);
+                        let _ = window_maybe.insert(
+                            first_obj_id_without_paddr + id..first_obj_id_without_paddr + id + 1,
+                        );
                     }
                 }
             }
@@ -804,13 +798,18 @@ fn main() -> Result<(), String> {
                                     < obj_id_range_maybe.as_ref().unwrap().end
                                 {
                                     let named_obj = spec
-                                        .get_root_object_mut(obj_id_range_maybe.as_ref().unwrap().start)
+                                        .get_root_object_mut(
+                                            obj_id_range_maybe.as_ref().unwrap().start,
+                                        )
                                         .unwrap();
 
                                     // Should not have touched this object before
                                     assert!(named_obj.expected_alloc.is_none());
                                     // Book-keep where this object will be allocated so we can write the details out to the report later.
-                                    named_obj.expected_alloc = Some(ExpectedAllocation { ut_idx: *ut_orig_idx, paddr: cur_paddr });
+                                    named_obj.expected_alloc = Some(ExpectedAllocation {
+                                        ut_idx: *ut_orig_idx,
+                                        paddr: cur_paddr,
+                                    });
 
                                     cur_paddr +=
                                         1 << named_obj.object.physical_size_bits(&kernel_config);
@@ -838,7 +837,10 @@ fn main() -> Result<(), String> {
                     // Should not have touched this object before
                     assert!(named_obj.expected_alloc.is_none());
                     // Book-keep where this object will be allocated so we can write the details out to the report later.
-                    named_obj.expected_alloc = Some(ExpectedAllocation { ut_idx: *ut_orig_idx, paddr: cur_paddr });
+                    named_obj.expected_alloc = Some(ExpectedAllocation {
+                        ut_idx: *ut_orig_idx,
+                        paddr: cur_paddr,
+                    });
 
                     cur_paddr += 1 << named_obj.object.physical_size_bits(&kernel_config);
                     next_obj_id_with_paddr += 1;

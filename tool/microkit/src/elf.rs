@@ -5,7 +5,6 @@
 //
 
 use crate::util::bytes_to_struct;
-use bitflags::bitflags;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Write;
@@ -99,6 +98,11 @@ struct ElfHeader64 {
 
 const ELF_MAGIC: &[u8; 4] = b"\x7FELF";
 
+/// ELF program-header flags (`p_flags`)
+const PF_X: u32 = 0x1;
+const PF_W: u32 = 0x2;
+const PF_R: u32 = 0x4;
+
 #[derive(Eq, PartialEq, Clone)]
 pub struct ElfSegment {
     pub p_filesz: u64,
@@ -107,7 +111,7 @@ pub struct ElfSegment {
     pub phys_addr: u64,
     pub virt_addr: u64,
     pub loadable: bool,
-    attrs: ElfSegmentAttributes,
+    attrs: u32,
 }
 
 impl ElfSegment {
@@ -116,28 +120,15 @@ impl ElfSegment {
     }
 
     pub fn is_writable(&self) -> bool {
-        self.attrs.contains(ElfSegmentAttributes::Write)
+        self.attrs & PF_W == PF_W
     }
 
     pub fn is_readable(&self) -> bool {
-        self.attrs.contains(ElfSegmentAttributes::Read)
+        self.attrs & PF_R == PF_R
     }
 
     pub fn is_executable(&self) -> bool {
-        self.attrs.contains(ElfSegmentAttributes::Execute)
-    }
-}
-
-bitflags! {
-    /// ELF program-header flags (`p_flags`)
-    #[derive(Eq, PartialEq, Clone)]
-    pub struct ElfSegmentAttributes: u32 {
-        /// Corresponds to PF_X
-        const Execute = 0x1;
-        /// Corresponds to PF_W
-        const Write   = 0x2;
-        /// Corresponds to PF_R
-        const Read    = 0x4;
+        self.attrs & PF_X == PF_X
     }
 }
 
@@ -233,12 +224,7 @@ impl ElfFile {
                 phys_addr: phent.paddr,
                 virt_addr: phent.vaddr,
                 loadable: phent.type_ == 1,
-                attrs: ElfSegmentAttributes::from_bits(flags).ok_or(format!(
-                    "ELF '{}': phent #{} have invalid flags {:x}",
-                    path.display(),
-                    i,
-                    flags
-                ))?,
+                attrs: flags,
                 p_filesz: phent.filesz,
                 p_offset: phent.offset,
             };
@@ -414,7 +400,18 @@ impl ElfFile {
 
     /// Segment will be added as loadable, though they won't have a valid p_offset
     /// as these are all in-memory operations.
-    pub fn add_segment(&mut self, attrs: ElfSegmentAttributes, vaddr: u64, data: Vec<u8>) {
+    pub fn add_segment(
+        &mut self,
+        read: bool,
+        write: bool,
+        execute: bool,
+        vaddr: u64,
+        data: Vec<u8>,
+    ) {
+        let r = if read { PF_R } else { 0 };
+        let w = if write { PF_W } else { 0 };
+        let x = if execute { PF_X } else { 0 };
+
         let elf_segment = ElfSegment {
             p_filesz: data.len() as u64,
             p_offset: u64::MAX,
@@ -422,7 +419,7 @@ impl ElfFile {
             phys_addr: vaddr,
             virt_addr: vaddr,
             loadable: true,
-            attrs,
+            attrs: r | w | x,
         };
         self.segments.push(elf_segment);
     }
@@ -481,8 +478,7 @@ impl ElfFile {
             .write_all(unsafe {
                 from_raw_parts((&header as *const ElfHeader64) as *const u8, ehsize)
             })
-            .unwrap_or_else(|_| panic!("Failed to write ELF header for '{}'",
-                out.display()));
+            .unwrap_or_else(|_| panic!("Failed to write ELF header for '{}'", out.display()));
 
         // keep a running file offset where segment data will be written
         let mut data_off = (ehsize as u64) + (phnum as u64) * (phentsize as u64);
@@ -491,7 +487,7 @@ impl ElfFile {
         for (i, seg) in self.loadable_segments().iter().enumerate() {
             let seg_serialised = ElfProgramHeader64 {
                 type_: 1, // loadable segment
-                flags: seg.attrs.bits(),
+                flags: seg.attrs,
                 offset: data_off,
                 vaddr: seg.virt_addr,
                 paddr: seg.phys_addr,
@@ -508,18 +504,26 @@ impl ElfFile {
                         phentsize,
                     )
                 })
-                .unwrap_or_else(|_| panic!("Failed to write ELF segment header #{} for '{}'",
-                    i,
-                    out.display()));
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "Failed to write ELF segment header #{} for '{}'",
+                        i,
+                        out.display()
+                    )
+                });
 
             data_off += seg.mem_size();
         }
 
         // then the data for each segment will follow
         for (i, seg) in self.loadable_segments().iter().enumerate() {
-            elf_file.write_all(&seg.data).unwrap_or_else(|_| panic!("Failed to write ELF segment data #{} for '{}'",
-                i,
-                out.display()));
+            elf_file.write_all(&seg.data).unwrap_or_else(|_| {
+                panic!(
+                    "Failed to write ELF segment data #{} for '{}'",
+                    i,
+                    out.display()
+                )
+            });
         }
 
         elf_file.flush().unwrap();
