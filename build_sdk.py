@@ -17,6 +17,7 @@ from os import popen, system, environ
 from shutil import copy
 from pathlib import Path
 from dataclasses import dataclass
+import shutil
 from sys import executable
 from tarfile import open as tar_open, TarInfo
 import platform as host_platform
@@ -672,6 +673,7 @@ def main() -> None:
         build_doc(root_dir)
 
     build_dir = Path("build")
+    shutil.rmtree(build_dir)
     for board in selected_boards:
         for config in selected_configs:
             if not args.skip_sel4:
