@@ -592,11 +592,13 @@ static int ensure_correct_el(void)
 
 static void start_kernel(int id)
 {
-    puts("Kernel ");
+    puts("LDR|INFO: Initial task ");
     putc(id + '0');
     puts(" has offset of ");
-    puthex32(loader_data->kernel_data[id].pv_offset);
-    putc('\n');
+    puthex64(loader_data->kernel_data[id].pv_offset);
+    puts(" (-");
+    puthex64(-loader_data->kernel_data[id].pv_offset);
+    puts(")\n");
         
     ((sel4_entry)(loader_data->kernel_data[id].kernel_entry))(
         loader_data->kernel_data[id].ui_p_reg_start,
