@@ -10,8 +10,8 @@
 use elf::ElfFile;
 use loader::Loader;
 use microkit_tool::{
-    elf, loader, sdf, sel4, util, DisjointMemoryRegion, MemoryRegion, ObjectAllocator, Region,
-    UntypedObject, MAX_PDS, PD_MAX_NAME_LENGTH,
+    elf, kernel_phys_mem, loader, sdf, sel4, util, DisjointMemoryRegion, MemoryRegion,
+    ObjectAllocator, Region, UntypedObject, MAX_PDS, PD_MAX_NAME_LENGTH,
 };
 use sdf::{
     parse, ProtectionDomain, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription,
@@ -561,6 +561,7 @@ fn get_full_path(path: &Path, search_paths: &Vec<PathBuf>) -> Option<PathBuf> {
 struct KernelPartialBootInfo {
     device_memory: DisjointMemoryRegion,
     normal_memory: DisjointMemoryRegion,
+    kernel_p_v_offset: u64,
     boot_region: MemoryRegion,
 }
 
@@ -619,55 +620,29 @@ fn kernel_device_addrs(config: &Config, kernel_elf: &ElfFile) -> Vec<u64> {
     kernel_devices
 }
 
-// Corresponds to p_region_t in the kernel
-#[repr(C)]
-struct KernelRegion64 {
-    start: u64,
-    end: u64,
-}
+// TODO: Both of the below are broken for multikernel changes....
 
-fn kernel_phys_mem(kernel_config: &Config, kernel_elf: &ElfFile) -> Vec<(u64, u64)> {
-    assert!(kernel_config.word_size == 64, "Unsupported word-size");
-    let mut phys_mem = Vec::new();
-    let (vaddr, size) = kernel_elf
-        .find_symbol("avail_p_regs")
-        .expect("Could not find 'avail_p_regs' symbol");
-    let p_region_bytes = kernel_elf.get_data(vaddr, size).unwrap();
-    let p_region_size = size_of::<KernelRegion64>();
-    let mut offset: usize = 0;
-    while offset < size as usize {
-        let p_region = unsafe {
-            bytes_to_struct::<KernelRegion64>(&p_region_bytes[offset..offset + p_region_size])
-        };
-        print!("{} {} {} {}\n", size, offset, p_region.start, p_region.end);
-        phys_mem.push((p_region.start, p_region.end));
-        offset += p_region_size;
-    }
+// fn kernel_self_mem(kernel_elf: &ElfFile) -> MemoryRegion {
+//     let segments = kernel_elf.loadable_segments();
+//     let base = 0x0;
+//     let (ki_end_v, _) = kernel_elf
+//         .find_symbol("ki_end")
+//         .expect("Could not find 'ki_end' symbol");
+//     let ki_end_p = ki_end_v - segments[0].virt_addr + base;
 
-    phys_mem
-}
+//     MemoryRegion::new(base, ki_end_p)
+// }
 
-fn kernel_self_mem(kernel_elf: &ElfFile) -> MemoryRegion {
-    let segments = kernel_elf.loadable_segments();
-    let base = segments[0].phys_addr;
-    let (ki_end_v, _) = kernel_elf
-        .find_symbol("ki_end")
-        .expect("Could not find 'ki_end' symbol");
-    let ki_end_p = ki_end_v - segments[0].virt_addr + base;
+// fn kernel_boot_mem(kernel_elf: &ElfFile) -> MemoryRegion {
+//     let segments = kernel_elf.loadable_segments();
+//     let base = 0x0;
+//     let (ki_boot_end_v, _) = kernel_elf
+//         .find_symbol("ki_boot_end")
+//         .expect("Could not find 'ki_boot_end' symbol");
+//     let ki_boot_end_p = ki_boot_end_v - segments[0].virt_addr + base;
 
-    MemoryRegion::new(base, ki_end_p)
-}
-
-fn kernel_boot_mem(kernel_elf: &ElfFile) -> MemoryRegion {
-    let segments = kernel_elf.loadable_segments();
-    let base = segments[0].phys_addr;
-    let (ki_boot_end_v, _) = kernel_elf
-        .find_symbol("ki_boot_end")
-        .expect("Could not find 'ki_boot_end' symbol");
-    let ki_boot_end_p = ki_boot_end_v - segments[0].virt_addr + base;
-
-    MemoryRegion::new(base, ki_boot_end_p)
-}
+//     MemoryRegion::new(base, ki_boot_end_p)
+// }
 
 ///
 /// Emulate what happens during a kernel boot, up to the point
@@ -696,22 +671,45 @@ fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile) -> KernelPa
 
     // Remove all the actual physical memory from the device regions
     // but add it all to the actual normal memory regions
-    for (start, end) in kernel_phys_mem(kernel_config, kernel_elf) {
-        device_memory.remove_region(start, end);
-        normal_memory.insert_region(start, end);
+    let avail_phys_mem = kernel_phys_mem(kernel_config, kernel_elf);
+    for (start, end) in &avail_phys_mem {
+        device_memory.remove_region(*start, *end);
+        normal_memory.insert_region(*start, *end);
     }
 
-    // Remove the kernel image itself
-    let self_mem = kernel_self_mem(kernel_elf);
-    normal_memory.remove_region(self_mem.base, self_mem.end);
+    // ============= Multikernel: calculate where we want to load the kernel ======================
+    let kernel_loadable_segments = kernel_elf.loadable_segments();
+    let kernel_first_vaddr = kernel_loadable_segments
+        .first()
+        .expect("kernel has at least one loadable segment")
+        .virt_addr;
+
+    // CHOICE!
+    let kernel_first_paddr = avail_phys_mem[0].0;
+    let kernel_p_v_offset = kernel_first_vaddr - kernel_first_paddr;
+
+    println!("Kernel First Paddr: {:x}", kernel_first_paddr);
+    println!("Kernel PV Offset: {:x}", kernel_p_v_offset as i64);
+
+    // ============= Remove the kernel image itself ====================
+    let (ki_end_v, _) = kernel_elf
+        .find_symbol("ki_end")
+        .expect("Could not find 'ki_end' symbol");
+    let ki_end_p = ki_end_v - kernel_p_v_offset;
+    normal_memory.remove_region(kernel_first_paddr, ki_end_p);
 
     // but get the boot region, we'll add that back later
     // FIXME: Why calcaultae it now if we add it back later?
-    let boot_region = kernel_boot_mem(kernel_elf);
+    let (ki_boot_end_v, _) = kernel_elf
+        .find_symbol("ki_boot_end")
+        .expect("Could not find 'ki_boot_end' symbol");
+    let ki_boot_end_p = ki_boot_end_v - kernel_p_v_offset;
+    let boot_region = MemoryRegion::new(kernel_first_paddr, ki_boot_end_p);
 
     KernelPartialBootInfo {
         device_memory,
         normal_memory,
+        kernel_p_v_offset,
         boot_region,
     }
 }
@@ -865,6 +863,7 @@ fn emulate_kernel_boot(
     let first_available_cap =
         first_untyped_cap + device_regions.len() as u64 + normal_regions.len() as u64;
     BootInfo {
+        p_v_offset: partial_info.kernel_p_v_offset,
         fixed_cap_count,
         paging_cap_count,
         page_cap_count,
@@ -3209,19 +3208,6 @@ fn main() -> Result<(), String> {
     let loader_elf_path = elf_path.join("loader.elf");
     let kernel_elf_path = elf_path.join("sel4.elf");
 
-    let elf_path_mk1 = sdk_dir
-        .join("board")
-        .join("odroidc4_multikernel_1")
-        .join(args.config)
-        .join("elf");
-    let elf_path_mk2 = sdk_dir
-        .join("board")
-        .join("odroidc4_multikernel_2")
-        .join(args.config)
-        .join("elf");
-    let kernel_elf_path_1 = elf_path_mk1.join("sel4.elf");
-    let kernel_elf_path_2 = elf_path_mk2.join("sel4.elf");
-    
     let monitor_elf_path = elf_path.join("monitor.elf");
 
     let kernel_config_path = sdk_dir
@@ -3381,8 +3367,6 @@ fn main() -> Result<(), String> {
     };
 
     let kernel_elf = ElfFile::from_path(&kernel_elf_path)?;
-    let kernel_elf_1 = ElfFile::from_path(&kernel_elf_path_1)?;
-    let kernel_elf_2 = ElfFile::from_path(&kernel_elf_path_2)?;
     let mut monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
 
     if monitor_elf.segments.iter().filter(|s| s.loadable).count() > 1 {
@@ -3424,7 +3408,7 @@ fn main() -> Result<(), String> {
         built_system = build_system(
             &kernel_config,
             &pd_elf_files,
-            &kernel_elf_1,
+            &kernel_elf,
             &monitor_elf,
             &system,
             invocation_table_size,
@@ -3643,8 +3627,8 @@ fn main() -> Result<(), String> {
     let loader = Loader::new(
         &kernel_config,
         Path::new(&loader_elf_path),
-        &kernel_elf_1,
-        vec![&kernel_elf_2],
+        &kernel_elf,
+        built_system.kernel_boot_info.p_v_offset,
         &monitor_elf,
         Some(built_system.initial_task_phys_region.base),
         built_system.reserved_region,

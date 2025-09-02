@@ -10,6 +10,7 @@ use std::io::{BufWriter, Write};
 
 #[derive(Clone)]
 pub struct BootInfo {
+    pub p_v_offset: u64,
     pub fixed_cap_count: u64,
     pub sched_control_cap: u64,
     pub paging_cap_count: u64,

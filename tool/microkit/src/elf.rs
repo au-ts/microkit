@@ -361,6 +361,8 @@ impl ElfFile {
     }
 
     pub fn loadable_segments(&self) -> Vec<&ElfSegment> {
-        self.segments.iter().filter(|s| s.loadable).collect()
+        let mut segments: Vec<_> = self.segments.iter().filter(|seg| seg.loadable).collect();
+        segments.sort_by_key(|seg| seg.virt_addr);
+        segments
     }
 }

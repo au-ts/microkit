@@ -14,6 +14,10 @@ use sel4::BootInfo;
 use std::cmp::min;
 use std::fmt;
 
+use crate::sel4::Config;
+use crate::elf::ElfFile;
+use crate::util::bytes_to_struct;
+
 // Note that this value is used in the monitor so should also be changed there
 // if this was to change.
 pub const MAX_PDS: usize = 63;
@@ -363,4 +367,33 @@ impl ObjectAllocator {
 
         panic!("Can't alloc of size {}, count: {} - no space", size, count);
     }
+}
+
+// Corresponds to p_region_t in the kernel
+#[repr(C)]
+pub struct KernelRegion64 {
+    pub start: u64,
+    pub end: u64,
+}
+
+pub fn kernel_phys_mem(kernel_config: &Config, kernel_elf: &ElfFile) -> Vec<(u64, u64)> {
+    assert!(kernel_config.word_size == 64, "Unsupported word-size");
+    let mut phys_mem = Vec::new();
+    let (vaddr, size) = kernel_elf
+        .find_symbol("avail_p_regs")
+        .expect("Could not find 'avail_p_regs' symbol");
+    let p_region_bytes = kernel_elf.get_data(vaddr, size).unwrap();
+    let p_region_size = size_of::<KernelRegion64>();
+    let mut offset: usize = 0;
+    println!("PHYS_MEM is:");
+    while offset < size as usize {
+        let p_region = unsafe {
+            bytes_to_struct::<KernelRegion64>(&p_region_bytes[offset..offset + p_region_size])
+        };
+        println!("size: {:x} offset {:x} start: {:x} end: {:x}", size, offset, p_region.start, p_region.end);
+        phys_mem.push((p_region.start, p_region.end));
+        offset += p_region_size;
+    }
+
+    phys_mem
 }

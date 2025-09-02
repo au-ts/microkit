@@ -31,7 +31,7 @@ _Static_assert(sizeof(uintptr_t) == 8 || sizeof(uintptr_t) == 4, "Expect uintptr
 #if defined(BOARD_zcu102)
 #define GICD_BASE 0x00F9010000UL
 #define GICC_BASE 0x00F9020000UL
-#elif defined(BOARD_qemu_virt_aarch64)
+#elif defined(BOARD_qemu_virt_aarch64) || defined(BOARD_qemu_virt_aarch64_multikernel)
 #define GICD_BASE 0x8010000UL
 #define GICC_BASE 0x8020000UL
 #elif defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel)
@@ -93,13 +93,13 @@ void switch_to_el2(void);
 void el1_mmu_enable(uint64_t *pgd_down, uint64_t *pgd_up);
 void el2_mmu_enable(uint64_t *pgd_down);
 
-#if NUM_MULTIKERNELS > 1
+#if 1 || NUM_MULTIKERNELS > 1
 volatile char _stack[NUM_MULTIKERNELS][STACK_SIZE] ALIGN(16);
 #else
 char _stack[STACK_SIZE] ALIGN(16);
 #endif
 
-#if defined(ARCH_aarch64) && NUM_MULTIKERNELS > 1
+#if defined(ARCH_aarch64)
 /* Paging structures for kernel mapping */
 uint64_t boot_lvl0_upper[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
 uint64_t boot_lvl1_upper[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
@@ -232,7 +232,7 @@ static void putc(uint8_t ch)
     while ((*UART_REG(UART_STATUS) & UART_TX_FULL));
     *UART_REG(UART_WFIFO) = ch;
 }
-#elif defined(BOARD_qemu_virt_aarch64)
+#elif defined(BOARD_qemu_virt_aarch64) || defined(BOARD_qemu_virt_aarch64_multikernel)
 #define UART_BASE                 0x9000000
 #define UARTDR                    0x000
 #define UARTFR                    0x018
@@ -594,7 +594,7 @@ static void start_kernel(int id)
 {
     puts("Kernel ");
     putc(id + '0');
-    puts(" has offset of");
+    puts(" has offset of ");
     puthex32(loader_data->kernel_data[id].pv_offset);
     putc('\n');
         
@@ -610,7 +610,7 @@ static void start_kernel(int id)
     );
 }
 
-#if defined(BOARD_zcu102) || defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel) 
+#if defined(BOARD_zcu102) || defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel) || defined(BOARD_qemu_virt_aarch64_multikernel)
 static void configure_gicv2(void)
 {
     /* The ZCU102 start in EL3, and then we drop to EL1(NS).
@@ -726,7 +726,7 @@ static inline void enable_mmu(void)
 #endif
 
 // Multikernel features, powers on extra cpus with their own stack and own kernel entry
-#if defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
+#if 1 || defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
 
 #define PSCI_SM64_CPU_ON 0xc4000003
 
@@ -830,8 +830,10 @@ int main(void)
      */
     copy_data();
 
-#if defined(BOARD_zcu102) || defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel)
+#if defined(BOARD_zcu102) || defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel) || defined(BOARD_qemu_virt_aarch64_multikernel)
     configure_gicv2();
+#else
+#error
 #endif
 
     puts("LDR|INFO: # of multikernels is ");
@@ -846,7 +848,7 @@ int main(void)
         goto fail;
     }
 
-#if NUM_MULTIKERNELS > 1
+#if 1 || NUM_MULTIKERNELS > 1
 
     disable_caches_el2();
 
@@ -899,13 +901,13 @@ int main(void)
     puts("LDR|INFO: enabling self MMU\n");
     el = current_el();
     if (el == EL1) {
-        #if NUM_MULTIKERNELS > 1
+        #if 1 || NUM_MULTIKERNELS > 1
         el1_mmu_enable(boot_lvl0_lower[0], boot_lvl0_upper[0]);
         #else
         el1_mmu_enable(boot_lvl0_lower, boot_lvl0_upper);
         #endif
     } else if (el == EL2) {
-        #if NUM_MULTIKERNELS > 1
+        #if 1 || NUM_MULTIKERNELS > 1
         el2_mmu_enable(boot_lvl0_lower[0]);
         #else
         el2_mmu_enable(boot_lvl0_lower);
