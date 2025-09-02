@@ -302,9 +302,11 @@ impl<'a> Loader<'a> {
             system_regions.len()
         );
         let mut all_regions = Vec::with_capacity(regions.len() + system_regions.len());
-        for region_set in [regions, system_regions] {
-            for r in region_set {
-                all_regions.push(r);
+        for i in 0..num_multikernels {
+            for region_set in [&regions, &system_regions] {
+                for r in region_set {
+                    all_regions.push((r.0 + 0x1000000 * i, r.1));
+                }
             }
         }
 
@@ -344,10 +346,10 @@ impl<'a> Loader<'a> {
         }
         // Assuming regions are packed together and start at load addr 0x0......
         //let offset_size: u64 = ((last_addr + last_size) + 0xFFF) & !(0xFFF);
-        let offset_size = 0x1000000;
+        const OFFSET_SIZE: u64 = 0x1000000;
         println!(
             "We can start adding from {:x} ({:x} + {:x} = {:x})",
-            offset_size,
+            OFFSET_SIZE,
             last_addr,
             last_size,
             last_addr + last_size
@@ -356,25 +358,24 @@ impl<'a> Loader<'a> {
         //
         // So for each region in the list, add it 1..num_multikernel times
         // Then same offset etc, but each load addr is now addr + total_size * i
-        let original_num_regions = region_metadata.len();
-        println!("We have {} regions", original_num_regions);
-        for i in 2..region_metadata.len() {
-            // Change 2 to be num_multikernels
-            for j in 1..num_multikernels {
-                region_metadata.push(LoaderRegion64 {
-                    load_addr: region_metadata[i].load_addr,
-                    size: region_metadata[i].size,
-                    offset: region_metadata[i].offset,
-                    r#type: region_metadata[i].r#type,
-                });
-            }
-        }
-        println!(
-            "We now have {} regions, expected {}",
-            region_metadata.len(),
-            original_num_regions * num_multikernels as usize
-        );
-        //assert!(region_metadata.len() == original_num_regions * num_multikernels as usize);
+        // let original_num_regions = region_metadata.len();
+        // println!("We have (had) {} regions", original_num_regions);
+        // for i in 0..original_num_regions {
+        //     for j in 1..num_multikernels {
+        //         region_metadata.push(LoaderRegion64 {
+        //             load_addr: region_metadata[i].load_addr + OFFSET_SIZE * j,
+        //             size: region_metadata[i].size,
+        //             offset: region_metadata[i].offset,
+        //             r#type: region_metadata[i].r#type,
+        //         });
+        //     }
+        // }
+        // println!(
+        //     "We now have {} regions, expected {}",
+        //     region_metadata.len(),
+        //     original_num_regions * num_multikernels as usize
+        // );
+        // assert!(region_metadata.len() == original_num_regions * num_multikernels as usize);
 
         for i in 0..num_multikernels {
             println!("-------------------");
@@ -410,7 +411,8 @@ impl<'a> Loader<'a> {
                 v_entry: v_entry,
                 extra_device_addr_p: extra_device_addr_p,
                 extra_device_size: extra_device_size,
-                kernel_pv_offset: kernel_elf_p_v_offset,
+                // XXXXXXXXX: Nah instead this should be the paddr directly
+                kernel_pv_offset: kernel_elf_p_v_offset - OFFSET_SIZE * i,
             });
         }
         println!(

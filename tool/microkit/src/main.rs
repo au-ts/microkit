@@ -515,7 +515,7 @@ struct KernelPartialBootInfo {
 /// This factors the common parts of 'emulate_kernel_boot' and
 /// 'emulate_kernel_boot_partial' to avoid code duplication.
 ///
-fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile) -> KernelPartialBootInfo {
+fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile, core: u64) -> KernelPartialBootInfo {
     // Determine the untyped caps of the system
     // This lets allocations happen correctly.
     let mut device_memory = DisjointMemoryRegion::default();
@@ -534,26 +534,29 @@ fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile) -> KernelPa
         .first()
         .expect("kernel has at least one loadable segment")
         .virt_addr;
+    let (kernel_last_vaddr, _) = kernel_elf
+        .find_symbol("ki_end")
+        .expect("Could not find 'ki_end' symbol");
 
     // CHOICE!
-    let kernel_first_paddr = kernel_config.normal_regions[0].start;
+    // TODO: How to choose?
+    assert!(core == 0);
+    let kernel_first_paddr = kernel_config.normal_regions[0].start + (0x1000000 * core);
     let kernel_p_v_offset = kernel_first_vaddr - kernel_first_paddr;
 
     println!("Kernel First Paddr: {:x}", kernel_first_paddr);
     println!("Kernel PV Offset: {:x}", kernel_p_v_offset as i64);
 
     // ============= Remove the kernel image itself ====================
-    let (ki_end_v, _) = kernel_elf
-        .find_symbol("ki_end")
-        .expect("Could not find 'ki_end' symbol");
-    let ki_end_p = ki_end_v - kernel_p_v_offset;
-    normal_memory.remove_region(kernel_first_paddr, ki_end_p);
+    let kernel_last_paddr = kernel_last_vaddr - kernel_p_v_offset;
+    normal_memory.remove_region(kernel_first_paddr, kernel_last_paddr);
 
     // but get the boot region, we'll add that back later
     // FIXME: Why calcaultae it now if we add it back later?
     let (ki_boot_end_v, _) = kernel_elf
         .find_symbol("ki_boot_end")
         .expect("Could not find 'ki_boot_end' symbol");
+    assert!(ki_boot_end_v < kernel_last_vaddr);
     let ki_boot_end_p = ki_boot_end_v - kernel_p_v_offset;
     let boot_region = MemoryRegion::new(kernel_first_paddr, ki_boot_end_p);
 
@@ -568,8 +571,9 @@ fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile) -> KernelPa
 fn emulate_kernel_boot_partial(
     kernel_config: &Config,
     kernel_elf: &ElfFile,
+    core: u64,
 ) -> (DisjointMemoryRegion, MemoryRegion) {
-    let partial_info = kernel_partial_boot(kernel_config, kernel_elf);
+    let partial_info = kernel_partial_boot(kernel_config, kernel_elf, core);
     (partial_info.normal_memory, partial_info.boot_region)
 }
 
@@ -647,12 +651,13 @@ fn calculate_rootserver_size(config: &Config, initial_task_region: MemoryRegion)
 fn emulate_kernel_boot(
     config: &Config,
     kernel_elf: &ElfFile,
+    core: u64,
     initial_task_phys_region: MemoryRegion,
     initial_task_virt_region: MemoryRegion,
     reserved_region: MemoryRegion,
 ) -> BootInfo {
     assert!(initial_task_phys_region.size() == initial_task_virt_region.size());
-    let partial_info = kernel_partial_boot(config, kernel_elf);
+    let partial_info = kernel_partial_boot(config, kernel_elf, core);
     let mut normal_memory = partial_info.normal_memory;
     let device_memory = partial_info.device_memory;
     let boot_region = partial_info.boot_region;
@@ -777,7 +782,7 @@ fn build_system(
     // Now that the size is determined, find a free region in the physical memory
     // space.
     let (mut available_memory, kernel_boot_region) =
-        emulate_kernel_boot_partial(config, kernel_elf);
+        emulate_kernel_boot_partial(config, kernel_elf, /* core */ 0);
 
     // The kernel relies on the reserved region being allocated above the kernel
     // boot/ELF region, so we have the end of the kernel boot region as the lower
@@ -811,6 +816,7 @@ fn build_system(
     let kernel_boot_info = emulate_kernel_boot(
         config,
         kernel_elf,
+        /* core */ 0,
         initial_task_phys_region,
         initial_task_virt_region,
         reserved_region,

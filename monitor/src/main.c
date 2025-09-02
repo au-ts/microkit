@@ -1139,50 +1139,50 @@ void main(seL4_BootInfo *bi)
     dump_untyped_info();
 #endif
 
-    check_untypeds_match(bi);
+//     check_untypeds_match(bi);
 
-    puts("MON|INFO: Number of bootstrap invocations: ");
-    puthex32(bootstrap_invocation_count);
-    puts("\n");
+//     puts("MON|INFO: Number of bootstrap invocations: ");
+//     puthex32(bootstrap_invocation_count);
+//     puts("\n");
 
-    puts("MON|INFO: Number of system invocations:    ");
-    puthex32(system_invocation_count);
-    puts("\n");
+//     puts("MON|INFO: Number of system invocations:    ");
+//     puthex32(system_invocation_count);
+//     puts("\n");
 
-    unsigned offset = 0;
-    for (unsigned idx = 0; idx < bootstrap_invocation_count; idx++) {
-        offset = perform_invocation(bootstrap_invocation_data, offset, idx);
-    }
-    puts("MON|INFO: completed bootstrap invocations\n");
+//     unsigned offset = 0;
+//     for (unsigned idx = 0; idx < bootstrap_invocation_count; idx++) {
+//         offset = perform_invocation(bootstrap_invocation_data, offset, idx);
+//     }
+//     puts("MON|INFO: completed bootstrap invocations\n");
 
-    offset = 0;
-    for (unsigned idx = 0; idx < system_invocation_count; idx++) {
-        offset = perform_invocation(system_invocation_data, offset, idx);
-    }
+//     offset = 0;
+//     for (unsigned idx = 0; idx < system_invocation_count; idx++) {
+//         offset = perform_invocation(system_invocation_data, offset, idx);
+//     }
 
-#if CONFIG_DEBUG_BUILD
-    /*
-     * Assign PD/VM names to each TCB with seL4, this helps debugging when an error
-     * message is printed by seL4 or if we dump the scheduler state.
-     * This is done specifically in the monitor rather than being prepared as an
-     * invocation like everything else because it is technically a separate system
-     * call and not an invocation.
-     * If we end up doing various different kinds of system calls we should add
-     * support in the tooling and make the monitor generic.
-     */
-    for (unsigned idx = 1; idx < pd_names_len + 1; idx++) {
-        seL4_DebugNameThread(pd_tcbs[idx], pd_names[idx]);
-    }
-    for (unsigned idx = 1; idx < vm_names_len + 1; idx++) {
-        seL4_DebugNameThread(vm_tcbs[idx], vm_names[idx]);
-    }
-#endif
+// #if CONFIG_DEBUG_BUILD
+//     /*
+//      * Assign PD/VM names to each TCB with seL4, this helps debugging when an error
+//      * message is printed by seL4 or if we dump the scheduler state.
+//      * This is done specifically in the monitor rather than being prepared as an
+//      * invocation like everything else because it is technically a separate system
+//      * call and not an invocation.
+//      * If we end up doing various different kinds of system calls we should add
+//      * support in the tooling and make the monitor generic.
+//      */
+//     for (unsigned idx = 1; idx < pd_names_len + 1; idx++) {
+//         seL4_DebugNameThread(pd_tcbs[idx], pd_names[idx]);
+//     }
+//     for (unsigned idx = 1; idx < vm_names_len + 1; idx++) {
+//         seL4_DebugNameThread(vm_tcbs[idx], vm_names[idx]);
+//     }
+// #endif
 
-    puts("MON|INFO: completed system invocations\n");
+//     puts("MON|INFO: completed system invocations\n");
 
     for (volatile uint64_t i = 0; i < 5000000000ULL; i++);
 
-    puts("\n\nKernel 1: Signalling...\n");
+    puts("\n\nKernel 0: Signalling...\n");
     seL4_Signal(0xf00);
 
     for (volatile uint64_t i = 0; i < 10000000000ULL; i++);

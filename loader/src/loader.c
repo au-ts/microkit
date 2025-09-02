@@ -583,6 +583,13 @@ static void print_loader_data(void)
         puts("LDR|INFO: Kernel:      entry:   ");
         puthex64(loader_data->kernel_data[i].kernel_entry);
         puts("\n");
+        puts("LDR|INFO: Kernel:      pv_offset:   ");
+        puthex64(loader_data->kernel_data[i].kernel_pv_offset);
+        puts("\n");
+        puts("LDR|INFO: Kernel:      paddr base:   ");
+        // UNDER assumption entry == base.
+        puthex64(loader_data->kernel_data[i].kernel_entry - loader_data->kernel_data[i].kernel_pv_offset);
+        puts("\n");
 
         puts("LDR|INFO: Root server: physmem: ");
         puthex64(loader_data->kernel_data[i].ui_p_reg_start);
@@ -680,13 +687,28 @@ static int ensure_correct_el(void)
 
 static void start_kernel(int id)
 {
-    puts("LDR|INFO: Initial task ");
+    // puts("LDR|INFO: Initial task ");
+    // putc(id + '0');
+    // puts(" has offset of ");
+    // puthex64(loader_data->kernel_data[id].pv_offset);
+    // puts(" (-");
+    // puthex64(-loader_data->kernel_data[id].pv_offset);
+    // puts(")\n");
+
+    puts("LDR|INFO: Kernel starting: ");
     putc(id + '0');
     puts(" has offset of ");
-    puthex64(loader_data->kernel_data[id].pv_offset);
+    puthex64(loader_data->kernel_data[id].kernel_pv_offset);
     puts(" (-");
-    puthex64(-loader_data->kernel_data[id].pv_offset);
+    puthex64(-loader_data->kernel_data[id].kernel_pv_offset);
     puts(")\n");
+    puts("entry point: ");
+    puthex64(loader_data->kernel_data[id].kernel_entry);
+    puts("\n");
+    puts("paddr: ");
+    puthex64(loader_data->kernel_data[id].kernel_entry - loader_data->kernel_data[id].kernel_pv_offset);
+    puts("\n");
+
         
     ((sel4_entry)(loader_data->kernel_data[id].kernel_entry))(
         loader_data->kernel_data[id].ui_p_reg_start,
@@ -882,7 +904,7 @@ void secondary_cpu_entry() {
     dsb();
 
     // Temp: Hang all other kernels otherwise output becomes garbled
-    for (volatile int i = 0; i < cpu * 1000000; i++);
+    for (volatile int i = 0; i < cpu * 2000000; i++);
     start_kernel(cpu);
 
     puts("LDR|ERROR: seL4 Loader: Error - KERNEL RETURNED (CPU ");
