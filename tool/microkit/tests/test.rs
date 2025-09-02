@@ -24,6 +24,8 @@ const DEFAULT_KERNEL_CONFIG: sel4::Config = sel4::Config {
     riscv_pt_levels: None,
     // Not necessary for SDF parsing
     invocations_labels: json!(null),
+    device_regions: vec![],
+    normal_regions: vec![],
 };
 
 fn check_error(test_name: &str, expected_err: &str) {
@@ -34,20 +36,15 @@ fn check_error(test_name: &str, expected_err: &str) {
     let parse_err = sdf::parse(test_name, &sdf, &DEFAULT_KERNEL_CONFIG).unwrap_err();
 
     if !parse_err.starts_with(expected_err) {
-        eprintln!(
-            "Expected error:\n{}\nGot error:\n{}\n",
-            expected_err, parse_err
-        );
+        eprintln!("Expected error:\n{expected_err}\nGot error:\n{parse_err}\n");
     }
 
     assert!(parse_err.starts_with(expected_err));
 }
 
 fn check_missing(test_name: &str, attr: &str, element: &str) {
-    let expected_error = format!(
-        "Error: Missing required attribute '{}' on element '{}'",
-        attr, element
-    );
+    let expected_error =
+        format!("Error: Missing required attribute '{attr}' on element '{element}'");
     check_error(test_name, expected_error.as_str());
 }
 
@@ -530,7 +527,7 @@ mod system {
     fn test_map_too_high() {
         check_error(
             "sys_map_too_high.system",
-            "Error: vaddr (0x1000000000000000) must be less than 0xfffffff000 on element 'map'",
+            "Error: vaddr (0x1000000000000000) must be less than 0xffffffe000 on element 'map'",
         )
     }
 

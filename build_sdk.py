@@ -27,30 +27,42 @@ import json
 from typing import Any, Dict, Union, List, Tuple, Optional
 
 NAME = "microkit"
-VERSION = "1.4.1"
 
 ENV_BIN_DIR = Path(executable).parent
 
 MICROKIT_EPOCH = 1616367257
 
-TOOLCHAIN_AARCH64 = "aarch64-none-elf"
-TOOLCHAIN_RISCV = "riscv64-unknown-elf"
+TRIPLE_AARCH64 = "aarch64-none-elf"
+TRIPLE_RISCV = "riscv64-unknown-elf"
 
 KERNEL_CONFIG_TYPE = Union[bool, str]
 KERNEL_OPTIONS = Dict[str, Union[bool, str]]
+
+DEFAULT_KERNEL_OPTIONS = {
+    "KernelIsMCS": True,
+}
+
+DEFAULT_KERNEL_OPTIONS_AARCH64 = {
+    "KernelArmExportPCNTUser": True,
+    "KernelArmHypervisorSupport": True,
+    "KernelArmVtimerUpdateVOffset": False,
+    "KernelAllowSMCCalls": True,
+} | DEFAULT_KERNEL_OPTIONS
+
+DEFAULT_KERNEL_OPTIONS_RISCV64 = DEFAULT_KERNEL_OPTIONS
 
 
 class KernelArch(IntEnum):
     AARCH64 = 1
     RISCV64 = 2
 
-    def c_toolchain(self) -> str:
+    def target_triple(self) -> str:
         if self == KernelArch.AARCH64:
-            return TOOLCHAIN_AARCH64
+            return TRIPLE_AARCH64
         elif self == KernelArch.RISCV64:
-            return TOOLCHAIN_RISCV
+            return TRIPLE_RISCV
         else:
-            raise Exception(f"Unsupported toolchain architecture '{self}'")
+            raise Exception(f"Unsupported toolchain target triple '{self}'")
 
     def is_riscv(self) -> bool:
         return self == KernelArch.RISCV64
@@ -65,6 +77,12 @@ class KernelArch(IntEnum):
             return "riscv64"
         else:
             raise Exception(f"Unsupported arch {self}")
+
+    def as_kernel_arch_config(self) -> tuple[str, str]:
+        return ("KernelSel4Arch", self.to_str())
+
+
+KERNEL_OPTIONS_ARCH = Dict[KernelArch, KERNEL_OPTIONS]
 
 
 @dataclass
@@ -82,6 +100,7 @@ class ConfigInfo:
     name: str
     debug: bool
     kernel_options: KERNEL_OPTIONS
+    kernel_options_arch: KERNEL_OPTIONS_ARCH
 
 
 SUPPORTED_BOARDS = (
@@ -92,11 +111,7 @@ SUPPORTED_BOARDS = (
         loader_link_address=0x80280000,
         kernel_options={
             "KernelPlatform": "tqma8xqp1gb",
-            "KernelIsMCS": True,
-            "KernelArmExportPCNTUser": True,
-            "KernelArmHypervisorSupport": True,
-            "KernelArmVtimerUpdateVOffset": False,
-        },
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
         name="zcu102",
@@ -106,11 +121,7 @@ SUPPORTED_BOARDS = (
         kernel_options={
             "KernelPlatform": "zynqmp",
             "KernelARMPlatform": "zcu102",
-            "KernelIsMCS": True,
-            "KernelArmExportPCNTUser": True,
-            "KernelArmHypervisorSupport": True,
-            "KernelArmVtimerUpdateVOffset": False,
-        },
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
         name="maaxboard",
@@ -119,11 +130,7 @@ SUPPORTED_BOARDS = (
         loader_link_address=0x50000000,
         kernel_options={
             "KernelPlatform": "maaxboard",
-            "KernelIsMCS": True,
-            "KernelArmExportPCNTUser": True,
-            "KernelArmHypervisorSupport": True,
-            "KernelArmVtimerUpdateVOffset": False,
-        },
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
         name="imx8mm_evk",
@@ -132,11 +139,7 @@ SUPPORTED_BOARDS = (
         loader_link_address=0x41000000,
         kernel_options={
             "KernelPlatform": "imx8mm-evk",
-            "KernelIsMCS": True,
-            "KernelArmExportPCNTUser": True,
-            "KernelArmHypervisorSupport": True,
-            "KernelArmVtimerUpdateVOffset": False,
-        },
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
         name="imx8mp_evk",
@@ -145,11 +148,7 @@ SUPPORTED_BOARDS = (
         loader_link_address=0x41000000,
         kernel_options={
             "KernelPlatform": "imx8mp-evk",
-            "KernelIsMCS": True,
-            "KernelArmExportPCNTUser": True,
-            "KernelArmHypervisorSupport": True,
-            "KernelArmVtimerUpdateVOffset": False,
-        },
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
         name="imx8mq_evk",
@@ -158,11 +157,7 @@ SUPPORTED_BOARDS = (
         loader_link_address=0x41000000,
         kernel_options={
             "KernelPlatform": "imx8mq-evk",
-            "KernelIsMCS": True,
-            "KernelArmExportPCNTUser": True,
-            "KernelArmHypervisorSupport": True,
-            "KernelArmVtimerUpdateVOffset": False,
-        },
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
         name="odroidc2",
@@ -171,11 +166,7 @@ SUPPORTED_BOARDS = (
         loader_link_address=0x20000000,
         kernel_options={
             "KernelPlatform": "odroidc2",
-            "KernelIsMCS": True,
-            "KernelArmExportPCNTUser": True,
-            "KernelArmHypervisorSupport": True,
-            "KernelArmVtimerUpdateVOffset": False,
-        },
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
         name="odroidc4",
@@ -184,11 +175,17 @@ SUPPORTED_BOARDS = (
         loader_link_address=0x20000000,
         kernel_options={
             "KernelPlatform": "odroidc4",
-            "KernelIsMCS": True,
-            "KernelArmExportPCNTUser": True,
-            "KernelArmHypervisorSupport": True,
-            "KernelArmVtimerUpdateVOffset": False,
-        },
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
+    ),
+    BoardInfo(
+        name="ultra96v2",
+        arch=KernelArch.AARCH64,
+        gcc_cpu="cortex-a53",
+        loader_link_address=0x40000000,
+        kernel_options={
+            "KernelPlatform": "zynqmp",
+            "KernelARMPlatform": "ultra96v2",
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
         name="odroidc4_multikernel",
@@ -211,14 +208,11 @@ SUPPORTED_BOARDS = (
         loader_link_address=0x70000000,
         kernel_options={
             "KernelPlatform": "qemu-arm-virt",
-            "KernelIsMCS": True,
-            "KernelArmExportPCNTUser": True,
             "QEMU_MEMORY": "2048",
-            "KernelArmHypervisorSupport": True,
-            "KernelArmExportPCNTUser": True,
+            # There is not peripheral timer, so we use the ARM
+            # architectural timer
             "KernelArmExportPTMRUser": True,
-            "KernelArmVtimerUpdateVOffset": False,
-        },
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
         name="qemu_virt_aarch64_multikernel",
@@ -241,14 +235,53 @@ SUPPORTED_BOARDS = (
         name="qemu_virt_riscv64",
         arch=KernelArch.RISCV64,
         gcc_cpu=None,
-        loader_link_address=0x80200000,
+        loader_link_address=0x90000000,
         kernel_options={
             "KernelPlatform": "qemu-riscv-virt",
-            "KernelIsMCS": True,
             "QEMU_MEMORY": "2048",
             "KernelRiscvExtD": True,
             "KernelRiscvExtF": True,
-        },
+        } | DEFAULT_KERNEL_OPTIONS_RISCV64,
+    ),
+    BoardInfo(
+        name="rpi4b_1gb",
+        arch=KernelArch.AARCH64,
+        gcc_cpu="cortex-a72",
+        loader_link_address=0x10000000,
+        kernel_options={
+            "KernelPlatform": "bcm2711",
+            "RPI4_MEMORY": 1024,
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
+    ),
+    BoardInfo(
+        name="rpi4b_2gb",
+        arch=KernelArch.AARCH64,
+        gcc_cpu="cortex-a72",
+        loader_link_address=0x10000000,
+        kernel_options={
+            "KernelPlatform": "bcm2711",
+            "RPI4_MEMORY": 2048,
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
+    ),
+    BoardInfo(
+        name="rpi4b_4gb",
+        arch=KernelArch.AARCH64,
+        gcc_cpu="cortex-a72",
+        loader_link_address=0x10000000,
+        kernel_options={
+            "KernelPlatform": "bcm2711",
+            "RPI4_MEMORY": 4096,
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
+    ),
+    BoardInfo(
+        name="rpi4b_8gb",
+        arch=KernelArch.AARCH64,
+        gcc_cpu="cortex-a72",
+        loader_link_address=0x10000000,
+        kernel_options={
+            "KernelPlatform": "bcm2711",
+            "RPI4_MEMORY": 8192,
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
         name="rockpro64",
@@ -257,11 +290,18 @@ SUPPORTED_BOARDS = (
         loader_link_address=0x30000000,
         kernel_options={
             "KernelPlatform": "rockpro64",
-            "KernelIsMCS": True,
-            "KernelArmExportPCNTUser": True,
-            "KernelArmHypervisorSupport": True,
-            "KernelArmVtimerUpdateVOffset": False,
-        },
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
+    ),
+    BoardInfo(
+        name="hifive_p550",
+        arch=KernelArch.RISCV64,
+        gcc_cpu=None,
+        loader_link_address=0x90000000,
+        kernel_options={
+            "KernelPlatform": "hifive-p550",
+            "KernelRiscvExtD": True,
+            "KernelRiscvExtF": True,
+        } | DEFAULT_KERNEL_OPTIONS_RISCV64,
     ),
     BoardInfo(
         name="star64",
@@ -269,11 +309,32 @@ SUPPORTED_BOARDS = (
         gcc_cpu=None,
         loader_link_address=0x60000000,
         kernel_options={
-            "KernelIsMCS": True,
             "KernelPlatform": "star64",
             "KernelRiscvExtD": True,
             "KernelRiscvExtF": True,
-        },
+        } | DEFAULT_KERNEL_OPTIONS_RISCV64,
+    ),
+    BoardInfo(
+        name="ariane",
+        arch=KernelArch.RISCV64,
+        gcc_cpu=None,
+        loader_link_address=0x90000000,
+        kernel_options={
+            "KernelPlatform": "ariane",
+            "KernelRiscvExtD": True,
+            "KernelRiscvExtF": True,
+        } | DEFAULT_KERNEL_OPTIONS_RISCV64,
+    ),
+    BoardInfo(
+        name="cheshire",
+        arch=KernelArch.RISCV64,
+        gcc_cpu=None,
+        loader_link_address=0x90000000,
+        kernel_options={
+            "KernelPlatform": "cheshire",
+            "KernelRiscvExtD": True,
+            "KernelRiscvExtF": True,
+        } | DEFAULT_KERNEL_OPTIONS_RISCV64,
     ),
 )
 
@@ -282,6 +343,7 @@ SUPPORTED_CONFIGS = (
         name="release",
         debug=False,
         kernel_options={},
+        kernel_options_arch={},
     ),
     ConfigInfo(
         name="debug",
@@ -290,16 +352,21 @@ SUPPORTED_CONFIGS = (
             "KernelDebugBuild": True,
             "KernelPrinting": True,
             "KernelVerificationBuild": False
-        }
+        },
+        kernel_options_arch={},
     ),
     ConfigInfo(
         name="benchmark",
         debug=False,
         kernel_options={
-            "KernelArmExportPMUUser": True,
             "KernelDebugBuild": False,
             "KernelVerificationBuild": False,
             "KernelBenchmarks": "track_utilisation"
+        },
+        kernel_options_arch={
+            KernelArch.AARCH64: {
+                "KernelArmExportPMUUser": True,
+            },
         },
     ),
 )
@@ -341,7 +408,13 @@ def tar_filter(tarinfo: TarInfo) -> TarInfo:
 def get_tool_target_triple() -> str:
     host_system = host_platform.system()
     if host_system == "Linux":
-        return "x86_64-unknown-linux-musl"
+        host_arch = host_platform.machine()
+        if host_arch == "x86_64":
+            return "x86_64-unknown-linux-musl"
+        elif host_arch == "aarch64":
+            return "aarch64-unknown-linux-musl"
+        else:
+            raise Exception(f"Unexpected Linux architecture: {host_arch}")
     elif host_system == "Darwin":
         host_arch = host_platform.machine()
         if host_arch == "x86_64":
@@ -380,6 +453,7 @@ def build_sel4(
     build_dir: Path,
     board: BoardInfo,
     config: ConfigInfo,
+    llvm: bool
 ) -> Dict[str, Any]:
     """Build seL4"""
     build_dir = build_dir / board.name / config.name / "sel4"
@@ -393,7 +467,14 @@ def build_sel4(
 
     print(f"Building sel4: {sel4_dir=} {root_dir=} {build_dir=} {board=} {config=}")
 
-    config_args = list(board.kernel_options.items()) + list(config.kernel_options.items())
+    config_args = [
+        *board.kernel_options.items(),
+        *config.kernel_options.items(),
+        board.arch.as_kernel_arch_config(),
+    ]
+    if config.kernel_options_arch is not None:
+        if board.arch in config.kernel_options_arch:
+            config_args += config.kernel_options_arch[board.arch].items()
     config_strs = []
     for arg, val in sorted(config_args):
         if isinstance(val, bool):
@@ -404,13 +485,18 @@ def build_sel4(
         config_strs.append(s)
     config_str = " ".join(config_strs)
 
-    toolchain = f"{board.arch.c_toolchain()}-"
+    target_triple = f"{board.arch.target_triple()}"
+
     cmd = (
         f"cmake -GNinja -DCMAKE_INSTALL_PREFIX={sel4_install_dir.absolute()} "
         f" -DPYTHON3={executable} "
-        f" -DCROSS_COMPILER_PREFIX={toolchain}"
         f" {config_str} "
         f"-S {sel4_dir.absolute()} -B {sel4_build_dir.absolute()}")
+
+    if llvm:
+        cmd += f" -DTRIPLE={target_triple}"
+    else:
+        cmd += f" -DCROSS_COMPILER_PREFIX={target_triple}-"
 
     r = system(cmd)
     if r != 0:
@@ -454,6 +540,12 @@ def build_sel4(
             copy(p, dest)
             dest.chmod(0o744)
 
+    platform_gen = sel4_build_dir / "gen_headers" / "plat" / "machine" / "platform_gen.json"
+    dest = root_dir / "board" / board.name / config.name / "platform_gen.json"
+    dest.unlink(missing_ok=True)
+    copy(platform_gen, dest)
+    dest.chmod(0o744)
+
     gen_config_path = sel4_install_dir / "libsel4/include/kernel/gen_config.json"
     with open(gen_config_path, "r") as f:
         gen_config = json.load(f)
@@ -466,7 +558,8 @@ def build_elf_component(
     build_dir: Path,
     board: BoardInfo,
     config: ConfigInfo,
-    defines: List[Tuple[str, str]]
+    llvm: bool,
+    defines: List[Tuple[str, str]],
 ) -> None:
     """Build a specific ELF component.
 
@@ -475,9 +568,9 @@ def build_elf_component(
     sel4_dir = root_dir / "board" / board.name / config.name
     build_dir = build_dir / board.name / config.name / component_name
     build_dir.mkdir(exist_ok=True, parents=True)
-    toolchain = f"{board.arch.c_toolchain()}-"
+    target_triple = f"{board.arch.target_triple()}"
     defines_str = " ".join(f"{k}={v}" for k, v in defines)
-    defines_str += f" ARCH={board.arch.to_str()} BOARD={board.name} BUILD_DIR={build_dir.absolute()} SEL4_SDK={sel4_dir.absolute()} TOOLCHAIN={toolchain}"
+    defines_str += f" ARCH={board.arch.to_str()} BOARD={board.name} BUILD_DIR={build_dir.absolute()} SEL4_SDK={sel4_dir.absolute()} TARGET_TRIPLE={target_triple} LLVM={llvm}"
 
     if board.gcc_cpu is not None:
         defines_str += f" GCC_CPU={board.gcc_cpu}"
@@ -502,8 +595,8 @@ def build_elf_component(
 def build_doc(root_dir: Path):
     output = root_dir / "doc" / "microkit_user_manual.pdf"
 
-    environ["TEXINPUTS"] = "docs/style:"
-    r = system(f'pandoc docs/manual.md -o {output}')
+    environ["TEXINPUTS"] = "style:"
+    r = system(f'cd docs && pandoc manual.md -o ../{output}')
     assert r == 0
 
 
@@ -513,17 +606,18 @@ def build_lib_component(
     build_dir: Path,
     board: BoardInfo,
     config: ConfigInfo,
+    llvm: bool
 ) -> None:
     """Build a specific library component.
 
-    Right now this is just libsel4.a
+    Right now this is just libmicrokit.a
     """
     sel4_dir = root_dir / "board" / board.name / config.name
     build_dir = build_dir / board.name / config.name / component_name
     build_dir.mkdir(exist_ok=True, parents=True)
 
-    toolchain = f"{board.arch.c_toolchain()}-"
-    defines_str = f" ARCH={board.arch.to_str()} BUILD_DIR={build_dir.absolute()} SEL4_SDK={sel4_dir.absolute()} TOOLCHAIN={toolchain}"
+    target_triple = f"{board.arch.target_triple()}"
+    defines_str = f" ARCH={board.arch.to_str()} BUILD_DIR={build_dir.absolute()} SEL4_SDK={sel4_dir.absolute()} TARGET_TRIPLE={target_triple} LLVM={llvm}"
 
     if board.gcc_cpu is not None:
         defines_str += f" GCC_CPU={board.gcc_cpu}"
@@ -567,23 +661,28 @@ def main() -> None:
     parser = ArgumentParser()
     parser.add_argument("--sel4", type=Path, required=True)
     parser.add_argument("--tool-target-triple", default=get_tool_target_triple(), help="Compile the Microkit tool for this target triple")
+    parser.add_argument("--llvm", action="store_true", help="Cross-compile seL4 and Microkit's run-time targets with LLVM")
     parser.add_argument("--boards", metavar="BOARDS", help="Comma-separated list of boards to support. When absent, all boards are supported.")
     parser.add_argument("--configs", metavar="CONFIGS", help="Comma-separated list of configurations to support. When absent, all configurations are supported.")
     parser.add_argument("--skip-tool", action="store_true", help="Tool will not be built")
     parser.add_argument("--skip-sel4", action="store_true", help="seL4 will not be built")
     parser.add_argument("--skip-docs", action="store_true", help="Docs will not be built")
     parser.add_argument("--skip-tar", action="store_true", help="SDK and source tarballs will not be built")
-    parser.add_argument("--version", default=VERSION, help="SDK version")
+    # Read from the version file as unless someone has specified
+    # a version, that is the source of truth
+    with open("VERSION", "r") as f:
+        default_version = f.read().strip()
+    parser.add_argument("--version", default=default_version, help="SDK version")
     for arch in KernelArch:
         arch_str = arch.name.lower()
-        parser.add_argument(f"--toolchain-prefix-{arch_str}", default=arch.c_toolchain(), help=f"C toolchain prefix when compiling for {arch_str}, e.g {arch_str}-none-elf")
+        parser.add_argument(f"--gcc-toolchain-prefix-{arch_str}", default=arch.target_triple(), help=f"GCC toolchain prefix when compiling for {arch_str}, e.g {arch_str}-none-elf")
 
     args = parser.parse_args()
 
-    global TOOLCHAIN_AARCH64
-    global TOOLCHAIN_RISCV
-    TOOLCHAIN_AARCH64 = args.toolchain_prefix_aarch64
-    TOOLCHAIN_RISCV = args.toolchain_prefix_riscv64
+    global TRIPLE_AARCH64
+    global TRIPLE_RISCV
+    TRIPLE_AARCH64 = args.gcc_toolchain_prefix_aarch64
+    TRIPLE_RISCV = args.gcc_toolchain_prefix_riscv64
 
     version = args.version
 
@@ -664,7 +763,7 @@ def main() -> None:
     for board in selected_boards:
         for config in selected_configs:
             if not args.skip_sel4:
-                sel4_gen_config = build_sel4(sel4_dir, root_dir, build_dir, board, config)
+                sel4_gen_config = build_sel4(sel4_dir, root_dir, build_dir, board, config, args.llvm)
             loader_printing = 1 if config.name == "debug" else 0
             loader_defines = [
                 ("LINK_ADDRESS", hex(board.loader_link_address)),
@@ -692,9 +791,9 @@ def main() -> None:
                 loader_defines.append(("NUM_MULTIKERNELS", 1))
                 print(f"Number of multikernels is DEFAULT")
 
-            build_elf_component("loader", root_dir, build_dir, board, config, loader_defines)
-            build_elf_component("monitor", root_dir, build_dir, board, config, [])
-            build_lib_component("libmicrokit", root_dir, build_dir, board, config)
+            build_elf_component("loader", root_dir, build_dir, board, config, args.llvm, loader_defines)
+            build_elf_component("monitor", root_dir, build_dir, board, config, args.llvm, [])
+            build_lib_component("libmicrokit", root_dir, build_dir, board, config, args.llvm)
 
     # Setup the examples
     for example, example_path in EXAMPLES.items():

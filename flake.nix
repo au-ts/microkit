@@ -6,7 +6,7 @@
   description = "A flake for building microkit";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/24.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/25.05";
     utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
     treefmt-nix = {
@@ -37,34 +37,7 @@
           }
         );
 
-        aarch64-toolchain = import nixpkgs {
-          localSystem = "${system}";
-          crossSystem = {
-            config = "aarch64-none-elf";
-          };
-        };
-
-        # pyfdt is not officially supported in Nix so we compile it ourselves
-        pyfdt = with pkgs.python311Packages;
-          buildPythonPackage rec {
-            pname = "pyfdt";
-            version = "0.3";
-            src = pkgs.fetchFromGitHub {
-              owner = "superna9999";
-              repo = pname;
-              rev = "${pname}-${version}";
-              hash = "sha256-lt/Mcw3j1aTBVOVhDBSYtriDyzeJHcSli69EXLfsgDM=";
-            };
-
-            meta = with lib; {
-              description = "Python Flattened Device Tree Library";
-              homepage = "https://github.com/superna9999/pyfdt";
-              license = with licenses; [ asl20 ];
-              maintainers = with maintainers; [ wucke13 ];
-            };
-          };
-
-        pythonTool = pkgs.python311.withPackages (ps: [
+        pythonTool = pkgs.python312.withPackages (ps: [
           ps.mypy
           ps.black
           ps.flake8
@@ -72,7 +45,7 @@
           ps.jinja2
           ps.pyaml
           ps.lxml
-          pyfdt
+          ps.pyfdt
           ps.setuptools
         ]);
 
@@ -111,6 +84,7 @@
             cmake
             ninja
             libxml2
+            qemu
           ];
         };
       });

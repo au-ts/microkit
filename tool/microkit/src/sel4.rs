@@ -5,6 +5,7 @@
 //
 
 use crate::UntypedObject;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{BufWriter, Write};
 
@@ -17,6 +18,18 @@ pub struct BootInfo {
     pub page_cap_count: u64,
     pub untyped_objects: Vec<UntypedObject>,
     pub first_available_cap: u64,
+}
+
+#[derive(Deserialize)]
+pub struct PlatformConfigRegion {
+    pub start: u64,
+    pub end: u64,
+}
+
+#[derive(Deserialize)]
+pub struct PlatformConfig {
+    pub devices: Vec<PlatformConfigRegion>,
+    pub memory: Vec<PlatformConfigRegion>,
 }
 
 /// Represents an allocated kernel object.
@@ -58,6 +71,8 @@ pub struct Config {
     /// RISC-V specific, what kind of virtual memory system (e.g Sv39)
     pub riscv_pt_levels: Option<RiscvVirtualMemory>,
     pub invocations_labels: serde_json::Value,
+    pub device_regions: Vec<PlatformConfigRegion>,
+    pub normal_regions: Vec<PlatformConfigRegion>,
 }
 
 impl Config {
@@ -72,6 +87,19 @@ impl Config {
                 false => 0x800000000000,
             },
             Arch::Riscv64 => 0x0000003ffffff000,
+        }
+    }
+
+    pub fn virtual_base(&self) -> u64 {
+        // These match the PPTR_BASE define in the kernel source.
+        match self.arch {
+            Arch::Aarch64 => match self.hypervisor {
+                true => 0x0000008000000000,
+                false => 0xffffff8000000000,
+            },
+            Arch::Riscv64 => match self.riscv_pt_levels.unwrap() {
+                RiscvVirtualMemory::Sv39 => 0xffffffc000000000,
+            },
         }
     }
 
@@ -105,6 +133,21 @@ impl Config {
     /// in a VSpace.
     pub fn vm_map_max_vaddr(&self) -> u64 {
         self.user_top()
+    }
+
+    pub fn paddr_to_kernel_vaddr(&self, paddr: u64) -> u64 {
+        paddr.wrapping_add(self.virtual_base())
+    }
+
+    pub fn kernel_vaddr_to_paddr(&self, vaddr: u64) -> u64 {
+        vaddr.wrapping_sub(self.virtual_base())
+    }
+
+    pub fn aarch64_vspace_s2_start_l1(&self) -> bool {
+        match self.arch {
+            Arch::Aarch64 => self.hypervisor && self.arm_pa_size_bits.unwrap() == 40,
+            _ => panic!("internal error"),
+        }
     }
 }
 
@@ -247,7 +290,7 @@ impl ObjectType {
 
     pub fn format(&self, config: &Config) -> String {
         let object_size = if let Some(fixed_size) = self.fixed_size(config) {
-            format!("0x{:x}", fixed_size)
+            format!("0x{fixed_size:x}")
         } else {
             "variable size".to_string()
         };
@@ -272,7 +315,7 @@ impl From<u64> for PageSize {
         match item {
             0x1000 => PageSize::Small,
             0x200_000 => PageSize::Large,
-            _ => panic!("Unknown page size {:x}", item),
+            _ => panic!("Unknown page size {item:x}"),
         }
     }
 }
@@ -426,7 +469,7 @@ enum InvocationLabel {
 
 impl std::fmt::Display for InvocationLabel {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -735,27 +778,27 @@ impl Invocation {
         assert!(extra_caps < 8);
         assert!(length < 0x80);
 
-        label << 12 | caps << 9 | extra_caps << 7 | length
+        (label << 12) | (caps << 9) | (extra_caps << 7) | length
     }
 
     fn fmt_field(field_name: &'static str, value: u64) -> String {
-        format!("         {:<20} {}", field_name, value)
+        format!("         {field_name:<20} {value}")
     }
 
     fn fmt_field_str(field_name: &'static str, value: String) -> String {
-        format!("         {:<20} {}", field_name, value)
+        format!("         {field_name:<20} {value}")
     }
 
     fn fmt_field_hex(field_name: &'static str, value: u64) -> String {
-        format!("         {:<20} 0x{:x}", field_name, value)
+        format!("         {field_name:<20} 0x{value:x}")
     }
 
     fn fmt_field_reg(reg: &'static str, value: u64) -> String {
-        format!("{}: 0x{:016x}", reg, value)
+        format!("{reg}: 0x{value:016x}")
     }
 
     fn fmt_field_bool(field_name: &'static str, value: bool) -> String {
-        format!("         {:<20} {}", field_name, value)
+        format!("         {field_name:<20} {value}")
     }
 
     fn fmt_field_cap(
@@ -768,8 +811,8 @@ impl Invocation {
         } else {
             "None"
         };
-        let field = format!("{} (cap)", field_name);
-        format!("         {:<20} 0x{:016x} ({})", field, cap, s)
+        let field = format!("{field_name} (cap)");
+        format!("         {field:<20} 0x{cap:016x} ({s})")
     }
 
     // This function is not particularly elegant. What is happening is that we are formatting
@@ -803,7 +846,7 @@ impl Invocation {
                 };
                 arg_strs.push(Invocation::fmt_field_str(
                     "size_bits",
-                    format!("{} ({})", size_bits, sz_fmt),
+                    format!("{size_bits} ({sz_fmt})"),
                 ));
                 arg_strs.push(Invocation::fmt_field_cap("root", root, cap_lookup));
                 arg_strs.push(Invocation::fmt_field("node_index", node_index));
@@ -888,7 +931,7 @@ impl Invocation {
                     .collect::<Vec<_>>();
                 arg_strs.push(Invocation::fmt_field_str("regs", reg_strs[0].clone()));
                 for s in &reg_strs[1..] {
-                    arg_strs.push(format!("                              {}", s));
+                    arg_strs.push(format!("                              {s}"));
                 }
 
                 (tcb, &cap_lookup[&tcb])
@@ -1031,7 +1074,7 @@ impl Invocation {
             arg_strs.join("\n")
         );
         if let Some((count, _)) = self.repeat {
-            _ = writeln!(f, "      REPEAT: count={}", count);
+            _ = writeln!(f, "      REPEAT: count={count}");
         }
     }
 

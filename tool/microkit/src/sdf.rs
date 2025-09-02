@@ -37,8 +37,8 @@ const PD_MAX_PRIORITY: u8 = 254;
 /// In microseconds
 const BUDGET_DEFAULT: u64 = 1000;
 
-/// Default to a stack size of a single page
-const PD_DEFAULT_STACK_SIZE: u64 = 0x1000;
+/// Default to a stack size of 8KiB
+const PD_DEFAULT_STACK_SIZE: u64 = 0x2000;
 const PD_MIN_STACK_SIZE: u64 = 0x1000;
 const PD_MAX_STACK_SIZE: u64 = 1024 * 1024 * 16;
 
@@ -90,6 +90,13 @@ pub struct SysMap {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub enum SysMemoryRegionKind {
+    User,
+    Elf,
+    Stack,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct SysMemoryRegion {
     pub name: String,
     pub size: u64,
@@ -97,6 +104,10 @@ pub struct SysMemoryRegion {
     pub page_count: u64,
     pub phys_addr: Option<u64>,
     pub text_pos: Option<roxmltree::TextPos>,
+    /// For error reporting is useful to know whether the MR was created
+    /// due to the user's SDF or created by the tool for setting up the
+    /// stack, ELF, etc.
+    pub kind: SysMemoryRegionKind,
 }
 
 impl SysMemoryRegion {
@@ -127,6 +138,10 @@ pub struct SysIrq {
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub enum SysSetVarKind {
+    // For size we do not store the size since when we parse mappings
+    // we do not have access to the memory region yet. The size is resolved
+    // when we actually need to perform the setvar.
+    Size { mr: String },
     Vaddr { address: u64 },
     Paddr { region: String },
 }
@@ -246,6 +261,7 @@ impl SysMap {
         let mut attrs = vec!["mr", "vaddr", "perms", "cached"];
         if allow_setvar {
             attrs.push("setvar_vaddr");
+            attrs.push("setvar_size");
         }
         check_attributes(xml_sdf, node, &attrs)?;
 
@@ -256,7 +272,7 @@ impl SysMap {
             return Err(value_error(
                 xml_sdf,
                 node,
-                format!("vaddr (0x{:x}) must be less than 0x{:x}", vaddr, max_vaddr),
+                format!("vaddr (0x{vaddr:x}) must be less than 0x{max_vaddr:x}"),
             ));
         }
 
@@ -321,6 +337,15 @@ impl ProtectionDomain {
             })
     }
 
+    pub fn irq_bits(&self) -> u64 {
+        let mut irqs = 0;
+        for irq in &self.irqs {
+            irqs |= 1 << irq.id;
+        }
+
+        irqs
+    }
+
     fn from_xml(
         config: &Config,
         xml_sdf: &XmlSystemDescription,
@@ -369,10 +394,7 @@ impl ProtectionDomain {
             return Err(value_error(
                 xml_sdf,
                 node,
-                format!(
-                    "budget ({}) must be less than, or equal to, period ({})",
-                    budget, period
-                ),
+                format!("budget ({budget}) must be less than, or equal to, period ({period})"),
             ));
         }
 
@@ -416,7 +438,7 @@ impl ProtectionDomain {
             match config.arm_smc {
                 Some(smc_allowed) => {
                     if !smc_allowed {
-                        return Err(value_error(xml_sdf, node, "Using SMC support without ARM SMC forwarding support enabled for this platform".to_string()));
+                        return Err(value_error(xml_sdf, node, "Using SMC support without ARM SMC forwarding support enabled in the kernel for this platform".to_string()));
                     }
                 }
                 None => {
@@ -434,8 +456,7 @@ impl ProtectionDomain {
                 xml_sdf,
                 node,
                 format!(
-                    "stack size must be between 0x{:x} bytes and 0x{:x} bytes",
-                    PD_MIN_STACK_SIZE, PD_MAX_STACK_SIZE
+                    "stack size must be between 0x{PD_MIN_STACK_SIZE:x} bytes and 0x{PD_MAX_STACK_SIZE:x} bytes"
                 ),
             ));
         }
@@ -470,7 +491,7 @@ impl ProtectionDomain {
             return Err(value_error(
                 xml_sdf,
                 node,
-                format!("priority must be between 0 and {}", PD_MAX_PRIORITY),
+                format!("priority must be between 0 and {PD_MAX_PRIORITY}"),
             ));
         }
 
@@ -504,7 +525,7 @@ impl ProtectionDomain {
                                 return Err(value_error(
                                     xml_sdf,
                                     &child,
-                                    format!("setvar on symbol '{}' already exists", setvar_vaddr),
+                                    format!("setvar on symbol '{setvar_vaddr}' already exists"),
                                 ));
                             }
                         }
@@ -512,6 +533,24 @@ impl ProtectionDomain {
                         setvars.push(SysSetVar {
                             symbol: setvar_vaddr.to_string(),
                             kind: SysSetVarKind::Vaddr { address: map.vaddr },
+                        });
+                    }
+
+                    if let Some(setvar_size) = child.attribute("setvar_size") {
+                        // Check that the symbol does not already exist
+                        for setvar in &setvars {
+                            if setvar_size == setvar.symbol {
+                                return Err(value_error(
+                                    xml_sdf,
+                                    &child,
+                                    format!("setvar on symbol '{setvar_size}' already exists"),
+                                ));
+                            }
+                        }
+
+                        setvars.push(SysSetVar {
+                            symbol: setvar_size.to_string(),
+                            kind: SysSetVarKind::Size { mr: map.mr.clone() },
                         });
                     }
 
@@ -570,7 +609,7 @@ impl ProtectionDomain {
                             return Err(value_error(
                                 xml_sdf,
                                 &child,
-                                format!("setvar on symbol '{}' already exists", symbol),
+                                format!("setvar on symbol '{symbol}' already exists"),
                             ));
                         }
                     }
@@ -606,8 +645,7 @@ impl ProtectionDomain {
 
         if program_image.is_none() {
             return Err(format!(
-                "Error: missing 'program_image' element on protection_domain: '{}'",
-                name
+                "Error: missing 'program_image' element on protection_domain: '{name}'"
             ));
         }
 
@@ -661,10 +699,7 @@ impl VirtualMachine {
             return Err(value_error(
                 xml_sdf,
                 node,
-                format!(
-                    "budget ({}) must be less than, or equal to, period ({})",
-                    budget, period
-                ),
+                format!("budget ({budget}) must be less than, or equal to, period ({period})"),
             ));
         }
 
@@ -730,8 +765,7 @@ impl VirtualMachine {
 
         if vcpus.is_empty() {
             return Err(format!(
-                "Error: missing 'vcpu' element on virtual_machine: '{}'",
-                name
+                "Error: missing 'vcpu' element on virtual_machine: '{name}'"
             ));
         }
 
@@ -770,7 +804,7 @@ impl SysMemoryRegion {
             return Err(value_error(
                 xml_sdf,
                 node,
-                format!("page size 0x{:x} not supported", page_size),
+                format!("page size 0x{page_size:x} not supported"),
             ));
         }
 
@@ -805,6 +839,7 @@ impl SysMemoryRegion {
             page_count,
             phys_addr,
             text_pos: Some(xml_sdf.doc.text_pos_at(node.range().start)),
+            kind: SysMemoryRegionKind::User,
         })
     }
 }
@@ -1144,7 +1179,7 @@ fn pd_flatten(
 pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescription, String> {
     let doc = match roxmltree::Document::parse(xml) {
         Ok(doc) => doc,
-        Err(err) => return Err(format!("Could not parse '{}': {}", filename, err)),
+        Err(err) => return Err(format!("Could not parse '{filename}': {err}")),
     };
 
     let xml_sdf = XmlSystemDescription {
@@ -1381,8 +1416,8 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
     for mr in &mut mrs {
         // If the largest possible page size based on the MR's size is already
         // set as its page size, skip it.
-        let mr_larget_page_size = mr.optimal_page_size(config);
-        if mr.page_size_bytes() == mr_larget_page_size {
+        let mr_largest_page_size = mr.optimal_page_size(config);
+        if mr.page_size_bytes() == mr_largest_page_size {
             continue;
         }
 

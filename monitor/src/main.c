@@ -30,7 +30,7 @@
  * The motivation for this design is to keep both the initial
  * task image and the initial CNode as small, fixed size entities.
  *
- * Fixed size allows both kernel and monitor to avoid unnecesary
+ * Fixed size allows both kernel and monitor to avoid unnecessary
  * recompilation for different system configurations. Keeping things
  * small optimizes overall memory usage.
  *
@@ -65,9 +65,9 @@
 #include "util.h"
 #include "debug.h"
 
+#define MAX_VMS 64
 #define MAX_PDS 64
 #define MAX_NAME_LEN 64
-#define MAX_TCBS 64
 
 #define MAX_UNTYPED_REGIONS 256
 
@@ -85,14 +85,20 @@ seL4_IPCBuffer *__sel4_ipc_buffer;
 
 char _stack[4096];
 
-static char pd_names[MAX_PDS][MAX_NAME_LEN];
+char pd_names[MAX_PDS][MAX_NAME_LEN];
 seL4_Word pd_names_len;
+char vm_names[MAX_VMS][MAX_NAME_LEN] __attribute__((unused));
+seL4_Word vm_names_len;
 
 seL4_Word fault_ep;
 seL4_Word reply;
-seL4_Word tcbs[MAX_TCBS];
-seL4_Word scheduling_contexts[MAX_TCBS];
-seL4_Word notification_caps[MAX_TCBS];
+seL4_Word pd_tcbs[MAX_PDS];
+seL4_Word vm_tcbs[MAX_VMS];
+seL4_Word scheduling_contexts[MAX_PDS];
+seL4_Word notification_caps[MAX_PDS];
+
+/* For reporting potential stack overflows, keep track of the stack regions for each PD. */
+seL4_Word pd_stack_addrs[MAX_PDS];
 
 struct region {
     uintptr_t paddr;
@@ -116,7 +122,7 @@ struct untyped_info untyped_info;
 
 void dump_untyped_info()
 {
-    puts("\nUntyped Info Memory Ranges\n");
+    puts("\nUntyped Info Expected Memory Ranges\n");
     seL4_Word start = untyped_info.regions[0].paddr;
     seL4_Word end = start + (1ULL << untyped_info.regions[0].size_bits);
     seL4_Word is_device = untyped_info.regions[0].is_device;
@@ -303,15 +309,15 @@ static char *data_abort_dfsc_to_string(uintptr_t dfsc)
     case 0x17:
         return "synchronous external abort, level 3";
     case 0x18:
-        return "syncrhonous partity or ECC error";
+        return "synchronous parity or ECC error";
     case 0x1c:
-        return "syncrhonous partity or ECC error, level 0";
+        return "synchronous parity or ECC error, level 0";
     case 0x1d:
-        return "syncrhonous partity or ECC error, level 1";
+        return "synchronous parity or ECC error, level 1";
     case 0x1e:
-        return "syncrhonous partity or ECC error, level 2";
+        return "synchronous parity or ECC error, level 2";
     case 0x1f:
-        return "syncrhonous partity or ECC error, level 3";
+        return "synchronous parity or ECC error, level 3";
     case 0x21:
         return "alignment fault";
     case 0x30:
@@ -323,7 +329,105 @@ static char *data_abort_dfsc_to_string(uintptr_t dfsc)
 }
 #endif
 
-static void check_untypeds_match(seL4_BootInfo *bi)
+/* UBSAN decoding related functionality */
+#define UBSAN_ARM64_BRK_IMM 0x5500
+#define UBSAN_ARM64_BRK_MASK 0x00ff
+#define ESR_COMMENT_MASK ((1 << 16) - 1)
+#define ARM64_BRK_EC 60
+
+/*
+ * ABI defined by Clang's UBSAN enum SanitizerHandler:
+ * https://github.com/llvm/llvm-project/blob/release/16.x/clang/lib/CodeGen/CodeGenFunction.h#L113
+ */
+enum UBSAN_CHECKS {
+    UBSAN_ADD_OVERFLOW,
+    UBSAN_BUILTIN_UNREACHABLE,
+    UBSAN_CFI_CHECK_FAIL,
+    UBSAN_DIVREM_OVERFLOW,
+    UBSAN_DYNAMIC_TYPE_CACHE_MISS,
+    UBSAN_FLOAT_CAST_OVERFLOW,
+    UBSAN_FUNCTION_TYPE_MISMATCH,
+    UBSAN_IMPLICIT_CONVERSION,
+    UBSAN_INVALID_BUILTIN,
+    UBSAN_INVALID_OBJC_CAST,
+    UBSAN_LOAD_INVALID_VALUE,
+    UBSAN_MISSING_RETURN,
+    UBSAN_MUL_OVERFLOW,
+    UBSAN_NEGATE_OVERFLOW,
+    UBSAN_NULLABILITY_ARG,
+    UBSAN_NULLABILITY_RETURN,
+    UBSAN_NONNULL_ARG,
+    UBSAN_NONNULL_RETURN,
+    UBSAN_OUT_OF_BOUNDS,
+    UBSAN_POINTER_OVERFLOW,
+    UBSAN_SHIFT_OUT_OF_BOUNDS,
+    UBSAN_SUB_OVERFLOW,
+    UBSAN_TYPE_MISMATCH,
+    UBSAN_ALIGNMENT_ASSUMPTION,
+    UBSAN_VLA_BOUND_NOT_POSITIVE,
+};
+
+#ifdef CONFIG_ARM_HYPERVISOR_SUPPORT
+static char *usban_code_to_string(seL4_Word code)
+{
+    switch (code) {
+    case UBSAN_ADD_OVERFLOW:
+        return "add overflow";
+    case UBSAN_BUILTIN_UNREACHABLE:
+        return "builtin unreachable";
+    case UBSAN_CFI_CHECK_FAIL:
+        return "control-flow-integrity check fail";
+    case UBSAN_DIVREM_OVERFLOW:
+        return "division remainder overflow";
+    case UBSAN_DYNAMIC_TYPE_CACHE_MISS:
+        return "dynamic type cache miss";
+    case UBSAN_FLOAT_CAST_OVERFLOW:
+        return "float case overflow";
+    case UBSAN_FUNCTION_TYPE_MISMATCH:
+        return "function type mismatch";
+    case UBSAN_IMPLICIT_CONVERSION:
+        return "implicit conversion";
+    case UBSAN_INVALID_BUILTIN:
+        return "invalid builtin";
+    case UBSAN_INVALID_OBJC_CAST:
+        return "invalid objc cast";
+    case UBSAN_LOAD_INVALID_VALUE:
+        return "load invalid value";
+    case UBSAN_MISSING_RETURN:
+        return "missing return";
+    case UBSAN_MUL_OVERFLOW:
+        return "multiplication overflow";
+    case UBSAN_NEGATE_OVERFLOW:
+        return "negate overflow";
+    case UBSAN_NULLABILITY_ARG:
+        return "nullability argument";
+    case UBSAN_NULLABILITY_RETURN:
+        return "nullability return";
+    case UBSAN_NONNULL_ARG:
+        return "non-null argument";
+    case UBSAN_NONNULL_RETURN:
+        return "non-null return";
+    case UBSAN_OUT_OF_BOUNDS:
+        return "out of bounds access";
+    case UBSAN_POINTER_OVERFLOW:
+        return "pointer overflow";
+    case UBSAN_SHIFT_OUT_OF_BOUNDS:
+        return "shift out of bounds";
+    case UBSAN_SUB_OVERFLOW:
+        return "subtraction overflow";
+    case UBSAN_TYPE_MISMATCH:
+        return "type mismatch";
+    case UBSAN_ALIGNMENT_ASSUMPTION:
+        return "alignment assumption";
+    case UBSAN_VLA_BOUND_NOT_POSITIVE:
+        return "variable-length-array bound not positive";
+    default:
+        return "unknown reason";
+    }
+}
+#endif
+
+static bool check_untypeds_match(seL4_BootInfo *bi)
 {
     /* Check that untypeds list generate from build matches the kernel */
     if (untyped_info.cap_start != bi->untyped.start) {
@@ -332,7 +436,8 @@ static void check_untypeds_match(seL4_BootInfo *bi)
         puts("  boot info cap start: ");
         puthex32(bi->untyped.start);
         puts("\n");
-        fail("cap start mismatch");
+        puts("cap start mismatch");
+        return false;
     }
 
     if (untyped_info.cap_end != bi->untyped.end) {
@@ -362,7 +467,8 @@ static void check_untypeds_match(seL4_BootInfo *bi)
             puts("  boot info paddr: ");
             puthex64(bi->untypedList[i].paddr);
             puts("\n");
-            fail("paddr mismatch");
+            puts("paddr mismatch");
+            return false;
         }
         if (untyped_info.regions[i].size_bits != bi->untypedList[i].sizeBits) {
             puts("MON|ERROR: size_bits mismatch for untyped region: ");
@@ -372,7 +478,8 @@ static void check_untypeds_match(seL4_BootInfo *bi)
             puts("  boot info size_bits: ");
             puthex32(bi->untypedList[i].sizeBits);
             puts("\n");
-            fail("size_bits mismatch");
+            puts("size_bits mismatch");
+            return false;
         }
         if (untyped_info.regions[i].is_device != bi->untypedList[i].isDevice) {
             puts("MON|ERROR: is_device mismatch for untyped region: ");
@@ -382,11 +489,14 @@ static void check_untypeds_match(seL4_BootInfo *bi)
             puts("  boot info is_device: ");
             puthex32(bi->untypedList[i].isDevice);
             puts("\n");
-            fail("is_device mismatch");
+            puts("is_device mismatch");
+            return false;
         }
     }
 
     puts("MON|INFO: bootinfo untyped list matches expected list\n");
+
+    return true;
 }
 
 static unsigned perform_invocation(seL4_Word *invocation_data, unsigned offset, unsigned idx)
@@ -812,7 +922,7 @@ static void monitor(void)
         tag = seL4_Recv(fault_ep, &badge, reply);
         label = seL4_MessageInfo_get_label(tag);
 
-        seL4_Word tcb_cap = tcbs[badge];
+        seL4_Word tcb_cap = pd_tcbs[badge];
 
         if (label == seL4_Fault_NullFault && badge < MAX_PDS) {
             /* This is a request from our PD to become passive */
@@ -925,10 +1035,39 @@ static void monitor(void)
 #error "Unknown architecture to print a VM fault for"
 #endif
 
+            seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr);
+            seL4_Word stack_addr = pd_stack_addrs[badge];
+            if (fault_addr < stack_addr && fault_addr >= stack_addr - 0x1000) {
+                puts("MON|ERROR: potential stack overflow, fault address within one page outside of stack region\n");
+            }
+
             break;
         }
+#ifdef CONFIG_ARM_HYPERVISOR_SUPPORT
+        case seL4_Fault_VCPUFault: {
+            seL4_Word esr = seL4_GetMR(seL4_VCPUFault_HSR);
+            seL4_Word ec = esr >> 26;
+
+            puts("MON|ERROR: received vCPU fault with ESR: ");
+            puthex64(esr);
+            puts("\n");
+
+            seL4_Word esr_comment = esr & ESR_COMMENT_MASK;
+            if (ec == ARM64_BRK_EC && ((esr_comment & ~UBSAN_ARM64_BRK_MASK) == UBSAN_ARM64_BRK_IMM)) {
+                /* We likely have a UBSAN check going off from a brk instruction */
+                seL4_Word ubsan_code = esr_comment & UBSAN_ARM64_BRK_MASK;
+                puts("MON|ERROR: potential undefined behaviour detected by UBSAN for: '");
+                puts(usban_code_to_string(ubsan_code));
+                puts("'\n");
+            } else {
+                puts("MON|ERROR: Unknown vCPU fault\n");
+            }
+            break;
+        }
+#endif
         default:
-            puts("Unknown fault\n");
+            puts("MON|ERROR: Unknown fault\n");
+            puthex64(label);
             break;
         }
     }
@@ -938,6 +1077,17 @@ void main(seL4_BootInfo *bi)
 {
     __sel4_ipc_buffer = bi->ipcBuffer;
     puts("MON|INFO: Microkit Bootstrap\n");
+
+#if 0
+    if (!check_untypeds_match(bi)) {
+        /* This can be useful to enable during new platform bring up
+         * if there are problems
+         */
+        dump_bootinfo(bi);
+        dump_untyped_info();
+        fail("MON|ERROR: found mismatch between boot info and untyped info");
+    }
+#endif
 
     // send to CPU 2 only, not 1.
     seL4_Error err = seL4_IRQControl_IssueSGISignal(seL4_CapIRQControl, 0, 1, seL4_CapInitThreadCNode, 0xf00, 64);
@@ -1012,7 +1162,7 @@ void main(seL4_BootInfo *bi)
 
 #if CONFIG_DEBUG_BUILD
     /*
-     * Assign PD names to each TCB with seL4, this helps debugging when an error
+     * Assign PD/VM names to each TCB with seL4, this helps debugging when an error
      * message is printed by seL4 or if we dump the scheduler state.
      * This is done specifically in the monitor rather than being prepared as an
      * invocation like everything else because it is technically a separate system
@@ -1021,7 +1171,10 @@ void main(seL4_BootInfo *bi)
      * support in the tooling and make the monitor generic.
      */
     for (unsigned idx = 1; idx < pd_names_len + 1; idx++) {
-        seL4_DebugNameThread(tcbs[idx], pd_names[idx]);
+        seL4_DebugNameThread(pd_tcbs[idx], pd_names[idx]);
+    }
+    for (unsigned idx = 1; idx < vm_names_len + 1; idx++) {
+        seL4_DebugNameThread(vm_tcbs[idx], vm_names[idx]);
     }
 #endif
 

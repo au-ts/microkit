@@ -10,17 +10,18 @@
 use elf::ElfFile;
 use loader::Loader;
 use microkit_tool::{
-    elf, kernel_phys_mem, loader, sdf, sel4, util, DisjointMemoryRegion, MemoryRegion,
-    ObjectAllocator, Region, UntypedObject, MAX_PDS, PD_MAX_NAME_LENGTH,
+    elf, kernel_phys_mem, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError,
+    MemoryRegion, ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH,
+    VM_MAX_NAME_LENGTH,
 };
 use sdf::{
-    parse, ProtectionDomain, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription,
-    VirtualMachine,
+    parse, Channel, ProtectionDomain, SysMap, SysMapPerms, SysMemoryRegion, SysMemoryRegionKind,
+    SystemDescription, VirtualMachine,
 };
 use sel4::{
     default_vm_attr, Aarch64Regs, Arch, ArmVmAttributes, BootInfo, Config, Invocation,
-    InvocationArgs, Object, ObjectType, PageSize, Rights, Riscv64Regs, RiscvVirtualMemory,
-    RiscvVmAttributes,
+    InvocationArgs, Object, ObjectType, PageSize, PlatformConfig, Rights, Riscv64Regs,
+    RiscvVirtualMemory, RiscvVmAttributes,
 };
 use std::cmp::{max, min};
 use std::collections::{HashMap, HashSet};
@@ -30,8 +31,8 @@ use std::iter::zip;
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use util::{
-    bytes_to_struct, comma_sep_u64, comma_sep_usize, json_str, json_str_as_bool, json_str_as_u64,
-    struct_to_bytes,
+    comma_sep_u64, comma_sep_usize, human_size_strict, json_str, json_str_as_bool, json_str_as_u64,
+    monitor_serialise_names, monitor_serialise_u64_vec, struct_to_bytes, bytes_to_struct,
 };
 
 // Corresponds to the IPC buffer symbol in libmicrokit and the monitor
@@ -116,35 +117,15 @@ impl MonitorConfig {
     }
 }
 
-#[derive(Debug)]
-struct FixedUntypedAlloc {
-    ut: UntypedObject,
-    watermark: u64,
-}
-
-impl FixedUntypedAlloc {
-    pub fn new(ut: UntypedObject) -> FixedUntypedAlloc {
-        FixedUntypedAlloc {
-            ut,
-            watermark: ut.base(),
-        }
-    }
-
-    pub fn contains(&self, addr: u64) -> bool {
-        self.ut.base() <= addr && addr < self.ut.end()
-    }
-}
-
 struct InitSystem<'a> {
     config: &'a Config,
     cnode_cap: u64,
     cnode_mask: u64,
-    kao: &'a mut ObjectAllocator,
     invocations: &'a mut Vec<Invocation>,
     cap_slot: u64,
     last_fixed_address: u64,
-    normal_untyped: Vec<FixedUntypedAlloc>,
-    device_untyped: Vec<FixedUntypedAlloc>,
+    normal_untyped: &'a mut ObjectAllocator,
+    device_untyped: &'a mut ObjectAllocator,
     cap_address_names: &'a mut HashMap<u64, String>,
     objects: Vec<Object>,
 }
@@ -156,42 +137,15 @@ impl<'a> InitSystem<'a> {
         cnode_cap: u64,
         cnode_mask: u64,
         first_available_cap_slot: u64,
-        kernel_object_allocator: &'a mut ObjectAllocator,
-        kernel_boot_info: &'a BootInfo,
+        normal_untyped: &'a mut ObjectAllocator,
+        device_untyped: &'a mut ObjectAllocator,
         invocations: &'a mut Vec<Invocation>,
         cap_address_names: &'a mut HashMap<u64, String>,
     ) -> InitSystem<'a> {
-        let mut device_untyped: Vec<FixedUntypedAlloc> = kernel_boot_info
-            .untyped_objects
-            .iter()
-            .filter_map(|ut| {
-                if ut.is_device {
-                    Some(FixedUntypedAlloc::new(*ut))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        device_untyped.sort_by(|a, b| a.ut.base().cmp(&b.ut.base()));
-
-        let mut normal_untyped: Vec<FixedUntypedAlloc> = kernel_boot_info
-            .untyped_objects
-            .iter()
-            .filter_map(|ut| {
-                if !ut.is_device {
-                    Some(FixedUntypedAlloc::new(*ut))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        normal_untyped.sort_by(|a, b| a.ut.base().cmp(&b.ut.base()));
-
         InitSystem {
             config,
             cnode_cap,
             cnode_mask,
-            kao: kernel_object_allocator,
             invocations,
             cap_slot: first_available_cap_slot,
             last_fixed_address: 0,
@@ -203,29 +157,8 @@ impl<'a> InitSystem<'a> {
     }
 
     pub fn reserve(&mut self, allocations: Vec<(&UntypedObject, u64)>) {
-        for (alloc_ut, alloc_phys_addr) in allocations {
-            let mut found = false;
-            for fut in &mut self.device_untyped {
-                if *alloc_ut == fut.ut {
-                    if fut.ut.base() <= alloc_phys_addr && alloc_phys_addr <= fut.ut.end() {
-                        fut.watermark = alloc_phys_addr;
-                        found = true;
-                        break;
-                    } else {
-                        panic!(
-                            "Allocation {:?} ({:x}) not in untyped region {:?}",
-                            alloc_ut, alloc_phys_addr, fut.ut.region
-                        );
-                    }
-                }
-            }
-
-            if !found {
-                panic!(
-                    "Allocation {:?} ({:x}) not in any device untyped",
-                    alloc_ut, alloc_phys_addr
-                );
-            }
+        for alloc in allocations {
+            self.device_untyped.reserve(alloc);
         }
     }
 
@@ -240,86 +173,54 @@ impl<'a> InitSystem<'a> {
         assert!(object_type.fixed_size(self.config).is_some());
 
         let alloc_size = object_type.fixed_size(self.config).unwrap();
-        // Find an untyped that contains the given address, it may be in device
-        // memory
-        let device_fut: Option<&mut FixedUntypedAlloc> = self
-            .device_untyped
-            .iter_mut()
-            .find(|fut| fut.contains(phys_address));
 
-        let normal_fut: Option<&mut FixedUntypedAlloc> = self
-            .normal_untyped
-            .iter_mut()
-            .find(|fut| fut.contains(phys_address));
+        // Find an untyped that contains the given address, it could either be
+        // in device memory or normal memory.
+        let device_ut = self.device_untyped.find_fixed(phys_address, alloc_size).unwrap_or_else(|err| {
+            match err {
+                FindFixedError::AlreadyAllocated => eprintln!("ERROR: attempted to allocate object '{name}' at 0x{phys_address:x} from reserved region, pick another physical address"),
+                FindFixedError::TooLarge => eprintln!("ERROR: attempted too allocate too large of an object '{name}' for this physical address 0x{phys_address:x}"),
+            }
+            std::process::exit(1);
+        });
+        let normal_ut = self.normal_untyped.find_fixed(phys_address, alloc_size).unwrap_or_else(|err| {
+            match err {
+                FindFixedError::AlreadyAllocated => eprintln!("ERROR: attempted to allocate object '{name}' at 0x{phys_address:x} from reserved region, pick another physical address"),
+                FindFixedError::TooLarge => eprintln!("ERROR: attempted too allocate too large of an object '{name}' for this physical address 0x{phys_address:x}"),
+            }
+            std::process::exit(1);
+        });
 
         // We should never have found the physical address in both device and normal untyped
-        assert!(!(device_fut.is_some() && normal_fut.is_some()));
+        assert!(!(device_ut.is_some() && normal_ut.is_some()));
 
-        let fut = if let Some(fut) = device_fut {
-            fut
-        } else if let Some(fut) = normal_fut {
-            fut
+        let (padding, ut) = if let Some(x) = device_ut {
+            x
+        } else if let Some(x) = normal_ut {
+            x
         } else {
-            panic!(
-                "Error: physical address {:x} not in any device untyped",
-                phys_address
-            )
+            eprintln!(
+                "ERROR: physical address 0x{phys_address:x} not in any valid region, below are the valid ranges of memory to be allocated from:"
+            );
+            eprintln!("valid ranges outside of main memory:");
+            for ut in &self.device_untyped.untyped {
+                eprintln!("     [0x{:0>12x}..0x{:0>12x})", ut.base(), ut.end());
+            }
+            eprintln!("valid ranges within main memory:");
+            for ut in &self.normal_untyped.untyped {
+                eprintln!("     [0x{:0>12x}..0x{:0>12x})", ut.base(), ut.end());
+            }
+            std::process::exit(1);
         };
 
-        let space_left = fut.ut.region.end - fut.watermark;
-        if space_left < alloc_size {
-            for ut in &self.device_untyped {
-                let space_left = ut.ut.region.end - ut.watermark;
-                println!(
-                    "ut [0x{:x}..0x{:x}], space left: 0x{:x}",
-                    ut.ut.region.base, ut.ut.region.end, space_left
-                );
-            }
-            panic!(
-                "Error: allocation for physical address {:x} is too large ({:x}) for untyped",
-                phys_address, alloc_size
-            );
-        }
-
-        if phys_address < fut.watermark {
-            panic!(
-                "Error: physical address {:x} is below watermark",
-                phys_address
-            );
-        }
-
-        if fut.watermark != phys_address {
-            // If the watermark isn't at the right spot, then we need to
-            // create padding objects until it is.
-            let mut padding_required = phys_address - fut.watermark;
-            // We are restricted in how much we can pad:
-            // 1: Untyped objects must be power-of-two sized.
-            // 2: Untyped objects must be aligned to their size.
-            let mut padding_sizes = Vec::new();
-            // We have two potential approaches for how we pad.
-            // 1: Use largest objects possible respecting alignment
-            // and size restrictions.
-            // 2: Use a fixed size object multiple times. This will
-            // create more objects, but as same sized objects can be
-            // create in a batch, required fewer invocations.
-            // For now we choose #1
-            let mut wm = fut.watermark;
-            while padding_required > 0 {
-                let wm_lsb = util::lsb(wm);
-                let sz_msb = util::msb(padding_required);
-                let pad_obejct_size = 1 << min(wm_lsb, sz_msb);
-                padding_sizes.push(pad_obejct_size);
-                wm += pad_obejct_size;
-                padding_required -= pad_obejct_size;
-            }
-
-            for sz in padding_sizes {
+        if let Some(padding_unwrapped) = padding {
+            for pad_ut in padding_unwrapped {
                 self.invocations.push(Invocation::new(
                     self.config,
                     InvocationArgs::UntypedRetype {
-                        untyped: fut.ut.cap,
+                        untyped: pad_ut.untyped_cap_address,
                         object_type: ObjectType::Untyped,
-                        size_bits: sz.ilog2() as u64,
+                        size_bits: pad_ut.size.ilog2() as u64,
                         root: self.cnode_cap,
                         node_index: 1,
                         node_depth: 1,
@@ -336,7 +237,7 @@ impl<'a> InitSystem<'a> {
         self.invocations.push(Invocation::new(
             self.config,
             InvocationArgs::UntypedRetype {
-                untyped: fut.ut.cap,
+                untyped: ut.untyped_cap_address,
                 object_type,
                 size_bits: 0,
                 root: self.cnode_cap,
@@ -347,7 +248,6 @@ impl<'a> InitSystem<'a> {
             },
         ));
 
-        fut.watermark = phys_address + alloc_size;
         self.last_fixed_address = phys_address + alloc_size;
         let cap_addr = self.cnode_mask | object_cap;
         let kernel_object = Object {
@@ -385,12 +285,27 @@ impl<'a> InitSystem<'a> {
             let sz = size.unwrap();
             assert!(util::is_power_of_two(sz));
             api_size = sz.ilog2() as u64;
-            alloc_size = sz * SLOT_SIZE;
+            if object_type == ObjectType::CNode {
+                alloc_size = sz * SLOT_SIZE;
+            } else {
+                alloc_size = sz;
+            }
         } else {
-            panic!("Internal error: invalid object type: {:?}", object_type);
+            panic!("Internal error: invalid object type: {object_type:?}");
         }
 
-        let allocation = self.kao.alloc_n(alloc_size, count);
+        let allocation = self.normal_untyped
+                             .alloc_n(alloc_size, count)
+                             .unwrap_or_else(|| {
+                                    let (human_size, human_size_label) = human_size_strict(alloc_size * count);
+                                    let (human_max_alloc, human_max_alloc_label) = human_size_strict(self.normal_untyped.max_alloc_size());
+                                    eprintln!("ERROR: failed to allocate objects for '{}' of object type '{}'", names[0], object_type.to_str());
+                                    if alloc_size * count > self.normal_untyped.max_alloc_size() {
+                                        eprintln!("ERROR: allocation size ({human_size} {human_size_label}) is greater than current maximum size for a single allocation ({human_max_alloc} {human_max_alloc_label})");
+                                    }
+                                    std::process::exit(1);
+                                }
+                             );
         let base_cap_slot = self.cap_slot;
         self.cap_slot += count;
 
@@ -448,11 +363,13 @@ struct BuiltSystem {
     fault_ep_cap_address: u64,
     reply_cap_address: u64,
     cap_lookup: HashMap<u64, String>,
-    tcb_caps: Vec<u64>,
+    pd_tcb_caps: Vec<u64>,
+    vm_tcb_caps: Vec<u64>,
     sched_caps: Vec<u64>,
     ntfn_caps: Vec<u64>,
     pd_elf_regions: Vec<Vec<Region>>,
     pd_setvar_values: Vec<Vec<u64>>,
+    pd_stack_addrs: Vec<u64>,
     kernel_objects: Vec<Object>,
     initial_task_virt_region: MemoryRegion,
     initial_task_phys_region: MemoryRegion,
@@ -460,6 +377,7 @@ struct BuiltSystem {
 
 pub fn pd_write_symbols(
     pds: &[ProtectionDomain],
+    channels: &[Channel],
     pd_elf_files: &mut [ElfFile],
     pd_setvar_values: &[Vec<u64>],
 ) -> Result<(), String> {
@@ -469,6 +387,31 @@ pub fn pd_write_symbols(
         let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
         elf.write_symbol("microkit_name", &name[..name_length])?;
         elf.write_symbol("microkit_passive", &[pd.passive as u8])?;
+
+        let mut notification_bits: u64 = 0;
+        let mut pp_bits: u64 = 0;
+        for channel in channels {
+            if channel.end_a.pd == i {
+                if channel.end_a.notify {
+                    notification_bits |= 1 << channel.end_a.id;
+                }
+                if channel.end_a.pp {
+                    pp_bits |= 1 << channel.end_a.id;
+                }
+            }
+            if channel.end_b.pd == i {
+                if channel.end_b.notify {
+                    notification_bits |= 1 << channel.end_b.id;
+                }
+                if channel.end_b.pp {
+                    pp_bits |= 1 << channel.end_b.id;
+                }
+            }
+        }
+
+        elf.write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
+        elf.write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
+        elf.write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
 
         for (setvar_idx, setvar) in pd.setvars.iter().enumerate() {
             let value = pd_setvar_values[i][setvar_idx];
@@ -657,24 +600,11 @@ fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile) -> KernelPa
     let mut device_memory = DisjointMemoryRegion::default();
     let mut normal_memory = DisjointMemoryRegion::default();
 
-    // Start by allocating the entire physical address space
-    // as device memory.
-    device_memory.insert_region(0, kernel_config.paddr_user_device_top);
-
-    // Next, remove all the kernel devices.
-    // NOTE: There is an assumption each kernel device is one frame
-    // in size only. It's possible this assumption could break in the
-    // future.
-    for paddr in kernel_device_addrs(kernel_config, kernel_elf) {
-        device_memory.remove_region(paddr, paddr + kernel_config.kernel_frame_size);
+    for r in &kernel_config.device_regions {
+        device_memory.insert_region(r.start, r.end);
     }
-
-    // Remove all the actual physical memory from the device regions
-    // but add it all to the actual normal memory regions
-    let avail_phys_mem = kernel_phys_mem(kernel_config, kernel_elf);
-    for (start, end) in &avail_phys_mem {
-        device_memory.remove_region(*start, *end);
-        normal_memory.insert_region(*start, *end);
+    for r in &kernel_config.normal_regions {
+        normal_memory.insert_region(r.start, r.end);
     }
 
     // ============= Multikernel: calculate where we want to load the kernel ======================
@@ -685,7 +615,7 @@ fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile) -> KernelPa
         .virt_addr;
 
     // CHOICE!
-    let kernel_first_paddr = avail_phys_mem[0].0;
+    let kernel_first_paddr = kernel_config.normal_regions[0].start;
     let kernel_p_v_offset = kernel_first_vaddr - kernel_first_paddr;
 
     println!("Kernel First Paddr: {:x}", kernel_first_paddr);
@@ -736,7 +666,14 @@ fn get_arch_n_paging(config: &Config, region: MemoryRegion) -> u64 {
             const PD_INDEX_OFFSET: u64 = PT_INDEX_OFFSET + 9;
             const PUD_INDEX_OFFSET: u64 = PD_INDEX_OFFSET + 9;
 
-            get_n_paging(region, PUD_INDEX_OFFSET) + get_n_paging(region, PD_INDEX_OFFSET)
+            if config.aarch64_vspace_s2_start_l1() {
+                get_n_paging(region, PUD_INDEX_OFFSET) + get_n_paging(region, PD_INDEX_OFFSET)
+            } else {
+                const PGD_INDEX_OFFSET: u64 = PUD_INDEX_OFFSET + 9;
+                get_n_paging(region, PGD_INDEX_OFFSET)
+                    + get_n_paging(region, PUD_INDEX_OFFSET)
+                    + get_n_paging(region, PD_INDEX_OFFSET)
+            }
         }
         Arch::Riscv64 => match config.riscv_pt_levels.unwrap() {
             RiscvVirtualMemory::Sv39 => {
@@ -809,7 +746,7 @@ fn emulate_kernel_boot(
     // Find an appropriate region of normal memory to allocate the objects
     // from; this follows the same algorithm used within the kernel boot code
     // (or at least we hope it does!)
-    // TOOD: this loop could be done better in a functional way?
+    // TODO: this loop could be done better in a functional way?
     let mut region_to_remove: Option<u64> = None;
     for region in normal_memory.regions.iter().rev() {
         let start = util::round_down(
@@ -840,13 +777,13 @@ fn emulate_kernel_boot(
         Arch::Riscv64 => 38,
     };
     let device_regions: Vec<MemoryRegion> = [
-        reserved_region.aligned_power_of_two_regions(max_bits),
-        device_memory.aligned_power_of_two_regions(max_bits),
+        reserved_region.aligned_power_of_two_regions(config, max_bits),
+        device_memory.aligned_power_of_two_regions(config, max_bits),
     ]
     .concat();
     let normal_regions: Vec<MemoryRegion> = [
-        boot_region.aligned_power_of_two_regions(max_bits),
-        normal_memory.aligned_power_of_two_regions(max_bits),
+        boot_region.aligned_power_of_two_regions(config, max_bits),
+        normal_memory.aligned_power_of_two_regions(config, max_bits),
     ]
     .concat();
     let mut untyped_objects = Vec::new();
@@ -970,7 +907,21 @@ fn build_system(
     }
 
     // The kernel boot info allows us to create an allocator for kernel objects
-    let mut kao = ObjectAllocator::new(&kernel_boot_info);
+    let mut kao = ObjectAllocator::new(
+        kernel_boot_info
+            .untyped_objects
+            .iter()
+            .filter(|ut| !ut.is_device)
+            .collect::<Vec<_>>(),
+    );
+
+    let mut kad = ObjectAllocator::new(
+        kernel_boot_info
+            .untyped_objects
+            .iter()
+            .filter(|ut| ut.is_device)
+            .collect::<Vec<_>>(),
+    );
 
     // 2. Now that the available resources are known it is possible to proceed with the
     // monitor task boot strap.
@@ -989,7 +940,7 @@ fn build_system(
     // on how `system_cnode_size` is iteratively determined).
     //
     // The system CNode is not available at startup and must be created (by retyping
-    // memory from an untyped object). Once created the two CNodes must be aranged
+    // memory from an untyped object). Once created the two CNodes must be arranged
     // as a tree such that the slots in both CNodes are addressable.
     //
     // The system CNode shall become the root of the CSpace. The initial CNode shall
@@ -1008,13 +959,17 @@ fn build_system(
     //  slot 0: the existing init cnode
     //  slot 1: our main system cnode
     let root_cnode_bits = 1;
-    let root_cnode_allocation = kao.alloc((1 << root_cnode_bits) * (1 << SLOT_BITS));
+    let root_cnode_allocation = kao
+        .alloc((1 << root_cnode_bits) * (1 << SLOT_BITS))
+        .unwrap_or_else(|| panic!("Internal error: failed to allocate root CNode"));
     let root_cnode_cap = kernel_boot_info.first_available_cap;
     cap_address_names.insert(root_cnode_cap, "CNode: root".to_string());
 
     // 2.1.2: Allocate the *system* CNode. It is the cnodes that
     // will have enough slots for all required caps.
-    let system_cnode_allocation = kao.alloc(system_cnode_size * (1 << SLOT_BITS));
+    let system_cnode_allocation = kao
+        .alloc(system_cnode_size * (1 << SLOT_BITS))
+        .unwrap_or_else(|| panic!("Internal error: failed to allocate system CNode"));
     let system_cnode_cap = kernel_boot_info.first_available_cap + 1;
     cap_address_names.insert(system_cnode_cap, "CNode: system".to_string());
 
@@ -1193,7 +1148,9 @@ fn build_system(
     let page_table_size = ObjectType::PageTable.fixed_size(config).unwrap();
     let page_tables_required =
         util::round_up(invocation_table_size, large_page_size) / large_page_size;
-    let page_table_allocation = kao.alloc_n(page_table_size, page_tables_required);
+    let page_table_allocation = kao
+        .alloc_n(page_table_size, page_tables_required)
+        .unwrap_or_else(|| panic!("Internal error: failed to allocate page tables"));
     let base_page_table_cap = cap_slot;
 
     for pta in base_page_table_cap..base_page_table_cap + page_tables_required {
@@ -1335,6 +1292,7 @@ fn build_system(
                 page_count: aligned_size / PageSize::Small as u64,
                 phys_addr: Some(phys_addr_next),
                 text_pos: None,
+                kind: SysMemoryRegionKind::Elf,
             };
             phys_addr_next += aligned_size;
 
@@ -1362,6 +1320,7 @@ fn build_system(
     // Here we create a memory region/mapping for the stack for each PD.
     // We allocate the stack at the highest possible virtual address that the
     // kernel allows us.
+    let mut pd_stack_addrs = Vec::with_capacity(system.protection_domains.len());
     for pd in &system.protection_domains {
         let stack_mr = SysMemoryRegion {
             name: format!("STACK:{}", pd.name),
@@ -1370,6 +1329,7 @@ fn build_system(
             page_count: pd.stack_size / PageSize::Small as u64,
             phys_addr: None,
             text_pos: None,
+            kind: SysMemoryRegionKind::Stack,
         };
 
         let stack_map = SysMap {
@@ -1379,6 +1339,8 @@ fn build_system(
             cached: true,
             text_pos: None,
         };
+
+        pd_stack_addrs.push(stack_map.vaddr);
 
         extra_mrs.push(stack_mr);
         pd_extra_maps.get_mut(pd).unwrap().push(stack_map);
@@ -1401,14 +1363,49 @@ fn build_system(
         system_cap_address_mask,
         cap_slot,
         &mut kao,
-        &kernel_boot_info,
+        &mut kad,
         &mut system_invocations,
         &mut cap_address_names,
     );
 
     init_system.reserve(invocation_table_allocations);
+    let mut mr_pages: HashMap<&SysMemoryRegion, Vec<Object>> = HashMap::new();
 
-    // 3.1 Work out how many regular (non-fixed) page objects are required
+    // 3.1 Work out how many fixed page objects are required
+
+    // First we need to find all the requested pages and sorted them
+    let mut fixed_pages = Vec::new();
+    for mr in &all_mrs {
+        if let Some(mut phys_addr) = mr.phys_addr {
+            mr_pages.insert(mr, vec![]);
+            for _ in 0..mr.page_count {
+                fixed_pages.push((phys_addr, mr));
+                phys_addr += mr.page_size_bytes();
+            }
+        }
+    }
+
+    // Sort based on the starting physical address
+    fixed_pages.sort_by_key(|p| p.0);
+
+    // FIXME: At this point we can recombine them into
+    // groups to optimize allocation
+    for (phys_addr, mr) in fixed_pages {
+        let obj_type = match mr.page_size {
+            PageSize::Small => ObjectType::SmallPage,
+            PageSize::Large => ObjectType::LargePage,
+        };
+
+        let (page_size_human, page_size_label) = util::human_size_strict(mr.page_size as u64);
+        let name = format!(
+            "Page({} {}): MR={} @ {:x}",
+            page_size_human, page_size_label, mr.name, phys_addr
+        );
+        let page = init_system.allocate_fixed_object(phys_addr, obj_type, name);
+        mr_pages.get_mut(mr).unwrap().push(page);
+    }
+
+    // 3.2 Work out how many regular (non-fixed) page objects are required
     let mut small_page_names = Vec::new();
     let mut large_page_names = Vec::new();
 
@@ -1447,16 +1444,14 @@ fn build_system(
     // All the IPC buffers are the first to be allocated which is why this works
     let ipc_buffer_objs = &small_page_objs[..system.protection_domains.len()];
 
-    let mut mr_pages: HashMap<&SysMemoryRegion, Vec<Object>> = HashMap::new();
-
     let mut page_small_idx = ipc_buffer_objs.len();
     let mut page_large_idx = 0;
 
     for mr in &all_mrs {
         if mr.phys_addr.is_some() {
-            mr_pages.insert(mr, vec![]);
             continue;
         }
+
         let idx = match mr.page_size {
             PageSize::Small => page_small_idx,
             PageSize::Large => page_large_idx,
@@ -1470,39 +1465,6 @@ fn build_system(
             PageSize::Small => page_small_idx += mr.page_count as usize,
             PageSize::Large => page_large_idx += mr.page_count as usize,
         }
-    }
-
-    // 3.2 Now allocate all the fixed MRs
-
-    // First we need to find all the requested pages and sorted them
-    let mut fixed_pages = Vec::new();
-    for mr in &all_mrs {
-        if let Some(mut phys_addr) = mr.phys_addr {
-            for _ in 0..mr.page_count {
-                fixed_pages.push((phys_addr, mr));
-                phys_addr += mr.page_size_bytes();
-            }
-        }
-    }
-
-    // Sort based on the starting physical address
-    fixed_pages.sort_by_key(|p| p.0);
-
-    // FIXME: At this point we can recombine them into
-    // groups to optimize allocation
-    for (phys_addr, mr) in fixed_pages {
-        let obj_type = match mr.page_size {
-            PageSize::Small => ObjectType::SmallPage,
-            PageSize::Large => ObjectType::LargePage,
-        };
-
-        let (page_size_human, page_size_label) = util::human_size_strict(mr.page_size as u64);
-        let name = format!(
-            "Page({} {}): MR={} @ {:x}",
-            page_size_human, page_size_label, mr.name, phys_addr
-        );
-        let page = init_system.allocate_fixed_object(phys_addr, obj_type, name);
-        mr_pages.get_mut(mr).unwrap().push(page);
     }
 
     let virtual_machines: Vec<&VirtualMachine> = system
@@ -1632,7 +1594,7 @@ fn build_system(
     for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
         let (ipc_buffer_vaddr, _) = pd_elf_files[pd_idx]
             .find_symbol(SYMBOL_IPC_BUFFER)
-            .unwrap_or_else(|_| panic!("Could not find {}", SYMBOL_IPC_BUFFER));
+            .unwrap_or_else(|_| panic!("Could not find {SYMBOL_IPC_BUFFER}"));
         let mut upper_directory_vaddrs = HashSet::new();
         let mut directory_vaddrs = HashSet::new();
         let mut page_table_vaddrs = HashSet::new();
@@ -1655,7 +1617,7 @@ fn build_system(
         for (vaddr, page_size) in vaddrs {
             match config.arch {
                 Arch::Aarch64 => {
-                    if !config.hypervisor && config.arm_pa_size_bits.unwrap() != 40 {
+                    if !config.aarch64_vspace_s2_start_l1() {
                         upper_directory_vaddrs.insert(util::mask_bits(vaddr, 12 + 9 + 9 + 9));
                     }
                 }
@@ -1713,7 +1675,7 @@ fn build_system(
 
         for (vaddr, page_size) in vaddrs {
             assert!(config.hypervisor);
-            if config.arm_pa_size_bits.unwrap() != 40 {
+            if !config.aarch64_vspace_s2_start_l1() {
                 upper_directory_vaddrs.insert(util::mask_bits(vaddr, 12 + 9 + 9 + 9));
             }
             directory_vaddrs.insert(util::mask_bits(vaddr, 12 + 9 + 9));
@@ -1874,9 +1836,48 @@ fn build_system(
     );
     system_invocations.push(asid_invocation);
 
+    // Check that the user has not created any maps that clash with our extra maps
+    for pd in &system.protection_domains {
+        let curr_pd_extra_maps = &pd_extra_maps[pd];
+        for pd_map in &pd.maps {
+            for extra_map in curr_pd_extra_maps {
+                let mr = all_mr_by_name[pd_map.mr.as_str()];
+                let base = pd_map.vaddr;
+                let end = base + mr.size;
+                let extra_mr = all_mr_by_name[extra_map.mr.as_str()];
+                let extra_map_base = extra_map.vaddr;
+                let extra_map_end = extra_map_base + extra_mr.size;
+                if !(base >= extra_map_end || end <= extra_map_base) {
+                    eprintln!("ERROR: PD '{}' contains overlapping map, mapping for '{}' [0x{:x}..0x{:x}) overlaps with mapping for '{}' [0x{:x}..0x{:x})",
+                              pd.name, pd_map.mr, base, end, extra_map.mr, extra_map_base, extra_map_end);
+                    match extra_mr.kind {
+                        SysMemoryRegionKind::Elf => {
+                            eprintln!(
+                                "ERROR: mapping for '{}' would overlap with the ELF for PD '{}'",
+                                pd_map.mr, pd.name
+                            );
+                        }
+                        SysMemoryRegionKind::Stack => {
+                            eprintln!(
+                                "ERROR: mapping for '{}' would overlap with stack region or PD '{}'",
+                                pd_map.mr, pd.name
+                            );
+                        }
+                        SysMemoryRegionKind::User => {
+                            // This is not expected because there should not be any 'User' kind of MRs
+                            // in the extra maps list.
+                            panic!("internal error: did not expect to encounter user defined MR in this case");
+                        }
+                    }
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+
     // Create copies of all caps required via minting.
 
-    // Mint copies of required pages, while also determing what's required
+    // Mint copies of required pages, while also determining what's required
     // for later mapping
     let mut pd_page_descriptors = Vec::new();
     for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
@@ -2557,7 +2558,7 @@ fn build_system(
     for pd_idx in 0..system.protection_domains.len() {
         let (vaddr, _) = pd_elf_files[pd_idx]
             .find_symbol(SYMBOL_IPC_BUFFER)
-            .unwrap_or_else(|_| panic!("Could not find {}", SYMBOL_IPC_BUFFER));
+            .unwrap_or_else(|_| panic!("Could not find {SYMBOL_IPC_BUFFER}"));
         system_invocations.push(Invocation::new(
             config,
             InvocationArgs::PageMap {
@@ -2722,7 +2723,7 @@ fn build_system(
     for pd_idx in 0..system.protection_domains.len() {
         let (ipc_buffer_vaddr, _) = pd_elf_files[pd_idx]
             .find_symbol(SYMBOL_IPC_BUFFER)
-            .unwrap_or_else(|_| panic!("Could not find {}", SYMBOL_IPC_BUFFER));
+            .unwrap_or_else(|_| panic!("Could not find {SYMBOL_IPC_BUFFER}"));
         system_invocations.push(Invocation::new(
             config,
             InvocationArgs::TcbSetIpcBuffer {
@@ -2763,6 +2764,8 @@ fn build_system(
             },
         ));
     }
+    // AArch64 and RISC-V expect the stack pointer to be 16-byte aligned
+    assert!(config.pd_stack_top() % 16 == 0);
 
     // Bind the notification object
     let mut bind_ntfn_invocation = Invocation::new(
@@ -2834,13 +2837,21 @@ fn build_system(
             pd.setvars
                 .iter()
                 .map(|setvar| match &setvar.kind {
+                    sdf::SysSetVarKind::Size { mr } => {
+                        system
+                            .memory_regions
+                            .iter()
+                            .find(|m| m.name == *mr)
+                            .unwrap()
+                            .size
+                    }
                     sdf::SysSetVarKind::Vaddr { address } => *address,
                     sdf::SysSetVarKind::Paddr { region } => {
                         let mr = system
                             .memory_regions
                             .iter()
                             .find(|mr| mr.name == *region)
-                            .unwrap_or_else(|| panic!("Cannot find region: {}", region));
+                            .unwrap_or_else(|| panic!("Cannot find region: {region}"));
 
                         mr_pages[mr][0].phys_addr
                     }
@@ -2860,11 +2871,13 @@ fn build_system(
         fault_ep_cap_address: fault_ep_endpoint_object.cap_addr,
         reply_cap_address: reply_obj.cap_addr,
         cap_lookup: cap_address_names,
-        tcb_caps: tcb_caps[..system.protection_domains.len()].to_vec(),
+        pd_tcb_caps: tcb_caps[..system.protection_domains.len()].to_vec(),
+        vm_tcb_caps: tcb_caps[system.protection_domains.len()..].to_vec(),
         sched_caps: sched_context_caps,
         ntfn_caps: notification_caps,
         pd_elf_regions,
         pd_setvar_values,
+        pd_stack_addrs,
         kernel_objects,
         initial_task_phys_region,
         initial_task_virt_region,
@@ -2902,7 +2915,7 @@ fn write_report<W: std::io::Write>(
     writeln!(buf, "\n# Loader Regions\n")?;
     for regions in &built_system.pd_elf_regions {
         for region in regions {
-            writeln!(buf, "       {}", region)?;
+            writeln!(buf, "       {region}")?;
         }
     }
     writeln!(buf, "\n# Monitor (Initial Task) Info\n")?;
@@ -2959,31 +2972,31 @@ fn write_report<W: std::io::Write>(
     }
     writeln!(buf, "\n# Bootstrap Kernel Invocations Detail\n")?;
     for (i, invocation) in built_system.bootstrap_invocations.iter().enumerate() {
-        write!(buf, "    0x{:04x} ", i)?;
+        write!(buf, "    0x{i:04x} ")?;
         invocation.report_fmt(buf, config, &built_system.cap_lookup);
     }
     writeln!(buf, "\n# System Kernel Invocations Detail\n")?;
     for (i, invocation) in built_system.system_invocations.iter().enumerate() {
-        write!(buf, "    0x{:04x} ", i)?;
+        write!(buf, "    0x{i:04x} ")?;
         invocation.report_fmt(buf, config, &built_system.cap_lookup);
     }
 
     Ok(())
 }
 
-fn print_usage(available_boards: &[String]) {
-    println!("usage: microkit [-h] [-o OUTPUT] [-r REPORT] --board {{{}}} --config CONFIG [--search-path [SEARCH_PATH ...]] system", available_boards.join(","))
+fn print_usage() {
+    println!("usage: microkit [-h] [-o OUTPUT] [-r REPORT] --board BOARD --config CONFIG [--search-path [SEARCH_PATH ...]] system")
 }
 
 fn print_help(available_boards: &[String]) {
-    print_usage(available_boards);
+    print_usage();
     println!("\npositional arguments:");
     println!("  system");
     println!("\noptions:");
     println!("  -h, --help, show this help message and exit");
     println!("  -o, --output OUTPUT");
     println!("  -r, --report REPORT");
-    println!("  --board {{{}}}", available_boards.join(","));
+    println!("  --board {}", available_boards.join("\n          "));
     println!("  --config CONFIG");
     println!("  --search-path [SEARCH_PATH ...]");
 }
@@ -3009,7 +3022,7 @@ impl<'a> Args<'a> {
         let mut config = None;
 
         if args.len() <= 1 {
-            print_usage(available_boards);
+            print_usage();
             std::process::exit(1);
         }
 
@@ -3082,7 +3095,7 @@ impl<'a> Args<'a> {
         }
 
         if !unknown.is_empty() {
-            print_usage(available_boards);
+            print_usage();
             eprintln!(
                 "microkit: error: unrecognised arguments: {}",
                 unknown.join(" ")
@@ -3102,7 +3115,7 @@ impl<'a> Args<'a> {
         }
 
         if !missing_args.is_empty() {
-            print_usage(available_boards);
+            print_usage();
             eprintln!(
                 "microkit: error: the following arguments are required: {}",
                 missing_args.join(", ")
@@ -3133,8 +3146,7 @@ fn main() -> Result<(), String> {
             std::env::VarError::NotPresent => exe_path.parent().unwrap().parent().unwrap(),
             _ => {
                 return Err(format!(
-                    "Could not read MICROKIT_SDK environment variable: {}",
-                    err
+                    "Could not read MICROKIT_SDK environment variable: {err}"
                 ))
             }
         },
@@ -3165,6 +3177,7 @@ fn main() -> Result<(), String> {
             available_boards.push(path.file_name().unwrap().to_str().unwrap().to_string());
         }
     }
+    available_boards.sort();
 
     let env_args: Vec<_> = std::env::args().collect();
     let args = Args::parse(&env_args, &available_boards);
@@ -3216,6 +3229,12 @@ fn main() -> Result<(), String> {
         .join(args.config)
         .join("include/kernel/gen_config.json");
 
+    let kernel_platform_config_path = sdk_dir
+        .join("board")
+        .join(args.board)
+        .join(args.config)
+        .join("platform_gen.json");
+
     let invocations_all_path = sdk_dir
         .join("board")
         .join(args.board)
@@ -3257,6 +3276,13 @@ fn main() -> Result<(), String> {
         );
         std::process::exit(1);
     }
+    if !kernel_platform_config_path.exists() {
+        eprintln!(
+            "Error: kernel platform configuration file '{}' does not exist",
+            kernel_platform_config_path.display()
+        );
+        std::process::exit(1);
+    }
     if !invocations_all_path.exists() {
         eprintln!(
             "Error: invocations JSON file '{}' does not exist",
@@ -3278,6 +3304,9 @@ fn main() -> Result<(), String> {
 
     let kernel_config_json: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(kernel_config_path).unwrap()).unwrap();
+
+    let kernel_platform_config: PlatformConfig =
+        serde_json::from_str(&fs::read_to_string(kernel_platform_config_path).unwrap()).unwrap();
 
     let invocations_labels: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(invocations_all_path).unwrap()).unwrap();
@@ -3333,16 +3362,14 @@ fn main() -> Result<(), String> {
         arm_smc,
         riscv_pt_levels: Some(RiscvVirtualMemory::Sv39),
         invocations_labels,
+        device_regions: kernel_platform_config.devices,
+        normal_regions: kernel_platform_config.memory,
     };
 
     if let Arch::Aarch64 = kernel_config.arch {
         assert!(
             kernel_config.hypervisor,
             "Microkit tool expects a kernel with hypervisor mode enabled on AArch64."
-        );
-        assert!(
-            kernel_config.arm_pa_size_bits.unwrap() == 40,
-            "Microkit tool has assumptions about the ARM physical address size bits"
         );
     }
 
@@ -3444,7 +3471,7 @@ fn main() -> Result<(), String> {
     // A: The monitor
 
     // A.1: As part of emulated boot we determined exactly how the kernel would
-    // create untyped objects. Throught testing we know that this matches, but
+    // create untyped objects. Through testing we know that this matches, but
     // we could have a bug, or the kernel could change. It that happens we are
     // in a bad spot! Things will break. So we write out this information so that
     // the monitor can double check this at run time.
@@ -3502,10 +3529,7 @@ fn main() -> Result<(), String> {
     let (_, bootstrap_invocation_data_size) =
         monitor_elf.find_symbol(monitor_config.bootstrap_invocation_data_symbol_name)?;
     if bootstrap_invocation_data.len() as u64 > bootstrap_invocation_data_size {
-        eprintln!(
-            "bootstrap invocation array size   : {}",
-            bootstrap_invocation_data_size
-        );
+        eprintln!("bootstrap invocation array size   : {bootstrap_invocation_data_size}");
         eprintln!(
             "bootstrap invocation required size: {}",
             bootstrap_invocation_data.len()
@@ -3532,55 +3556,47 @@ fn main() -> Result<(), String> {
         &bootstrap_invocation_data,
     )?;
 
-    let mut tcb_cap_bytes = vec![0; (1 + built_system.tcb_caps.len()) * 8];
-    for (i, cap) in built_system.tcb_caps.iter().enumerate() {
-        let start = (i + 1) * 8;
-        let end = start + 8;
-        tcb_cap_bytes[start..end].copy_from_slice(&cap.to_le_bytes());
-    }
-    let mut sched_cap_bytes = vec![0; (1 + built_system.sched_caps.len()) * 8];
-    for (i, cap) in built_system.sched_caps.iter().enumerate() {
-        let start = (i + 1) * 8;
-        let end = start + 8;
-        sched_cap_bytes[start..end].copy_from_slice(&cap.to_le_bytes());
-    }
-    let mut ntfn_cap_bytes = vec![0; (1 + built_system.ntfn_caps.len()) * 8];
-    for (i, cap) in built_system.ntfn_caps.iter().enumerate() {
-        let start = (i + 1) * 8;
-        let end = start + 8;
-        ntfn_cap_bytes[start..end].copy_from_slice(&cap.to_le_bytes());
-    }
+    let pd_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.pd_tcb_caps);
+    let vm_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.vm_tcb_caps);
+    let sched_cap_bytes = monitor_serialise_u64_vec(&built_system.sched_caps);
+    let ntfn_cap_bytes = monitor_serialise_u64_vec(&built_system.ntfn_caps);
+    let pd_stack_addrs_bytes = monitor_serialise_u64_vec(&built_system.pd_stack_addrs);
 
     monitor_elf.write_symbol("fault_ep", &built_system.fault_ep_cap_address.to_le_bytes())?;
     monitor_elf.write_symbol("reply", &built_system.reply_cap_address.to_le_bytes())?;
-    monitor_elf.write_symbol("tcbs", &tcb_cap_bytes)?;
+    monitor_elf.write_symbol("pd_tcbs", &pd_tcb_cap_bytes)?;
+    monitor_elf.write_symbol("vm_tcbs", &vm_tcb_cap_bytes)?;
     monitor_elf.write_symbol("scheduling_contexts", &sched_cap_bytes)?;
     monitor_elf.write_symbol("notification_caps", &ntfn_cap_bytes)?;
-    // We do MAX_PDS + 1 due to the index that the monitor uses (the badge) starting at 1.
-    let mut pd_names_bytes = vec![0; (MAX_PDS + 1) * PD_MAX_NAME_LENGTH];
-    for (i, pd) in system.protection_domains.iter().enumerate() {
-        // The monitor will index into the array of PD names based on the badge, which
-        // starts at 1 and hence we cannot use the 0th entry in the array.
-        let name = pd.name.as_bytes();
-        let start = (i + 1) * PD_MAX_NAME_LENGTH;
-        // Here instead of giving an error we simply take the minimum of the PD's name
-        // and how large of a name we can encode
-        let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
-        let end = start + name_length;
-        pd_names_bytes[start..end].copy_from_slice(&name[..name_length]);
-        // These bytes will be interpreted as a C string, so we must include
-        // a null-terminator.
-        pd_names_bytes[start + PD_MAX_NAME_LENGTH - 1] = 0;
-    }
-    monitor_elf.write_symbol("pd_names", &pd_names_bytes)?;
+    monitor_elf.write_symbol("pd_stack_addrs", &pd_stack_addrs_bytes)?;
+    let pd_names = system
+        .protection_domains
+        .iter()
+        .map(|pd| &pd.name)
+        .collect();
+    monitor_elf.write_symbol(
+        "pd_names",
+        &monitor_serialise_names(pd_names, MAX_PDS, PD_MAX_NAME_LENGTH),
+    )?;
     monitor_elf.write_symbol(
         "pd_names_len",
         &system.protection_domains.len().to_le_bytes(),
+    )?;
+    let vm_names: Vec<&String> = system
+        .protection_domains
+        .iter()
+        .filter_map(|pd| pd.virtual_machine.as_ref().map(|vm| &vm.name))
+        .collect();
+    monitor_elf.write_symbol("vm_names_len", &vm_names.len().to_le_bytes())?;
+    monitor_elf.write_symbol(
+        "vm_names",
+        &monitor_serialise_names(vm_names, MAX_VMS, VM_MAX_NAME_LENGTH),
     )?;
 
     // Write out all the symbols for each PD
     pd_write_symbols(
         &system.protection_domains,
+        &system.channels,
         &mut pd_elf_files,
         &built_system.pd_setvar_values,
     )?;

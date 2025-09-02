@@ -89,10 +89,7 @@ fn check_non_overlapping(regions: &Vec<(u64, &[u8])>) {
         // Check that this does not overlap with any checked regions
         for (b, e) in &checked {
             if !(end <= *b || *base >= *e) {
-                panic!(
-                    "Overlapping regions: [{:x}..{:x}) overlaps [{:x}..{:x})",
-                    base, end, b, e
-                );
+                panic!("Overlapping regions: [{base:x}..{end:x}) overlaps [{b:x}..{e:x})");
             }
         }
 
@@ -122,6 +119,7 @@ struct LoaderKernelInfo64 {
 #[repr(C)]
 struct LoaderHeader64 {
     magic: u64,
+    size: u64,
     flags: u64,
     num_multikernels: u64,
     num_regions: u64,
@@ -420,8 +418,14 @@ impl<'a> Loader<'a> {
         assert!(kernel_data.len() == num_multikernels as usize);
         // Copy header info to it like 4 times lmbao
 
+        let size = std::mem::size_of::<LoaderHeader64>() as u64
+            + region_metadata.iter().fold(0_u64, |acc, x| {
+                acc + x.size + std::mem::size_of::<LoaderRegion64>() as u64
+            });
+
         let header = LoaderHeader64 {
             magic,
+            size,
             flags,
             num_multikernels,
             num_regions: region_metadata.len() as u64,
@@ -430,6 +434,7 @@ impl<'a> Loader<'a> {
         let mut additional_headers: Vec<LoaderHeader64> = Vec::new();
         additional_headers.push(LoaderHeader64 {
             magic,
+            size,
             flags,
             num_multikernels,
             num_regions: region_metadata.len() as u64,
