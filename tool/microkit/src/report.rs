@@ -264,35 +264,49 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
         .unwrap();
     for (id, named_object) in spec.objects.iter().enumerate() {
         if named_object.object.physical_size_bits(&kernel_config) > 0 {
-            match &named_object.expected_alloc {
-                Some(allocation_details) => {
-                    report_file
-                        .write_all(
-                            format!(
-                                "\t{} - {}: '{}' @ 0x{:0>12x}\n",
-                                id,
-                                named_object.object.human_name(kernel_config),
-                                named_object.name,
-                                allocation_details.paddr
-                            )
-                            .as_bytes(),
+            if kernel_config.arch == Arch::X86_64 {
+                report_file
+                    .write_all(
+                        format!(
+                            "\t{} - {}: '{}'\n",
+                            id,
+                            named_object.object.human_name(kernel_config),
+                            named_object.name,
                         )
-                        .unwrap();
-                }
-                None => {
-                    report_file
-                        .write_all(
-                            format!(
-                                "\t{} - {}: '{}'\n",
-                                id,
-                                named_object.object.human_name(kernel_config),
-                                named_object.name,
+                        .as_bytes(),
+                    )
+                    .unwrap();
+            } else {
+                match &named_object.expected_alloc {
+                    Some(allocation_details) => {
+                        report_file
+                            .write_all(
+                                format!(
+                                    "\t{} - {}: '{}' @ 0x{:0>12x}\n",
+                                    id,
+                                    named_object.object.human_name(kernel_config),
+                                    named_object.name,
+                                    allocation_details.paddr
+                                )
+                                .as_bytes(),
                             )
-                            .as_bytes(),
-                        )
-                        .unwrap();
+                            .unwrap();
+                    }
+                    None => {
+                        report_file
+                            .write_all(
+                                format!(
+                                    "\t{} - {}: '{}' @ <Out of untyped>\n",
+                                    id,
+                                    named_object.object.human_name(kernel_config),
+                                    named_object.name
+                                )
+                                .as_bytes(),
+                            )
+                            .unwrap();
+                    }
                 }
-            };
+            }
         }
     }
 }
