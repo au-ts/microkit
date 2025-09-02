@@ -42,12 +42,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
 
 [[package]]
-name = "log"
-version = "0.4.27"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
-
-[[package]]
 name = "microkit-tool"
 version = "2.0.1-dev"
 dependencies = [
@@ -114,7 +108,6 @@ name = "sel4-capdl-initializer-types"
 version = "0.1.0"
 dependencies = [
  "cfg-if",
- "log",
  "miniz_oxide",
  "sel4-capdl-initializer-types-derive",
  "serde",
