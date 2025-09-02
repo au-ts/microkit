@@ -115,6 +115,7 @@ struct LoaderKernelInfo64 {
     v_entry: u64,
     extra_device_addr_p: u64,
     extra_device_size: u64,
+    kernel_pv_offset: u64,
 }
 
 #[repr(C)]
@@ -409,6 +410,7 @@ impl<'a> Loader<'a> {
                 v_entry: v_entry,
                 extra_device_addr_p: extra_device_addr_p,
                 extra_device_size: extra_device_size,
+                kernel_pv_offset: kernel_elf_p_v_offset,
             });
         }
         println!(

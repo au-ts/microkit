@@ -66,6 +66,7 @@ struct kernel_data {
     uintptr_t v_entry;
     uintptr_t extra_device_addr_p;
     uintptr_t extra_device_size;
+    uintptr_t kernel_pv_offset;
 };
 
 // Changing this structure is precarious, maybe better to wrap in NUM_MULTIKERNELS IFDEF
@@ -692,7 +693,9 @@ static void start_kernel(int id)
         loader_data->kernel_data[id].ui_p_reg_end,
         loader_data->kernel_data[id].pv_offset,
         loader_data->kernel_data[id].v_entry,
-        0,
+        // HACK HACK
+        loader_data->kernel_data[id].kernel_pv_offset,
+        // 0,
         0,
         loader_data->kernel_data[id].extra_device_addr_p,
         loader_data->kernel_data[id].extra_device_size
