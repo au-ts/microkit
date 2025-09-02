@@ -10,8 +10,8 @@
 use elf::ElfFile;
 use loader::Loader;
 use microkit_tool::{
-    elf, kernel_phys_mem, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError,
-    MemoryRegion, ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH,
+    elf, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError, MemoryRegion,
+    ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH,
     VM_MAX_NAME_LENGTH,
 };
 use sdf::{
@@ -32,7 +32,7 @@ use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use util::{
     comma_sep_u64, comma_sep_usize, human_size_strict, json_str, json_str_as_bool, json_str_as_u64,
-    monitor_serialise_names, monitor_serialise_u64_vec, struct_to_bytes, bytes_to_struct,
+    monitor_serialise_names, monitor_serialise_u64_vec, struct_to_bytes,
 };
 
 // Corresponds to the IPC buffer symbol in libmicrokit and the monitor
@@ -507,85 +507,6 @@ struct KernelPartialBootInfo {
     kernel_p_v_offset: u64,
     boot_region: MemoryRegion,
 }
-
-// Corresponds to kernel_frame_t in the kernel
-#[repr(C)]
-struct KernelFrameRiscv64 {
-    pub paddr: u64,
-    pub pptr: u64,
-    pub user_accessible: i32,
-}
-
-#[repr(C)]
-struct KernelFrameAarch64 {
-    pub paddr: u64,
-    pub pptr: u64,
-    pub execute_never: i32,
-    pub user_accessible: i32,
-}
-
-fn kernel_device_addrs(config: &Config, kernel_elf: &ElfFile) -> Vec<u64> {
-    assert!(config.word_size == 64, "Unsupported word-size");
-
-    let mut kernel_devices = Vec::new();
-    let (vaddr, size) = kernel_elf
-        .find_symbol("kernel_device_frames")
-        .expect("Could not find 'kernel_device_frames' symbol");
-    let kernel_frame_bytes = kernel_elf.get_data(vaddr, size).unwrap();
-    let kernel_frame_size = match config.arch {
-        Arch::Aarch64 => size_of::<KernelFrameAarch64>(),
-        Arch::Riscv64 => size_of::<KernelFrameRiscv64>(),
-    };
-    let mut offset: usize = 0;
-    while offset < size as usize {
-        let (user_accessible, paddr) = unsafe {
-            match config.arch {
-                Arch::Aarch64 => {
-                    let frame = bytes_to_struct::<KernelFrameAarch64>(
-                        &kernel_frame_bytes[offset..offset + kernel_frame_size],
-                    );
-                    (frame.user_accessible, frame.paddr)
-                }
-                Arch::Riscv64 => {
-                    let frame = bytes_to_struct::<KernelFrameRiscv64>(
-                        &kernel_frame_bytes[offset..offset + kernel_frame_size],
-                    );
-                    (frame.user_accessible, frame.paddr)
-                }
-            }
-        };
-        if user_accessible == 0 {
-            kernel_devices.push(paddr);
-        }
-        offset += kernel_frame_size;
-    }
-
-    kernel_devices
-}
-
-// TODO: Both of the below are broken for multikernel changes....
-
-// fn kernel_self_mem(kernel_elf: &ElfFile) -> MemoryRegion {
-//     let segments = kernel_elf.loadable_segments();
-//     let base = 0x0;
-//     let (ki_end_v, _) = kernel_elf
-//         .find_symbol("ki_end")
-//         .expect("Could not find 'ki_end' symbol");
-//     let ki_end_p = ki_end_v - segments[0].virt_addr + base;
-
-//     MemoryRegion::new(base, ki_end_p)
-// }
-
-// fn kernel_boot_mem(kernel_elf: &ElfFile) -> MemoryRegion {
-//     let segments = kernel_elf.loadable_segments();
-//     let base = 0x0;
-//     let (ki_boot_end_v, _) = kernel_elf
-//         .find_symbol("ki_boot_end")
-//         .expect("Could not find 'ki_boot_end' symbol");
-//     let ki_boot_end_p = ki_boot_end_v - segments[0].virt_addr + base;
-
-//     MemoryRegion::new(base, ki_boot_end_p)
-// }
 
 ///
 /// Emulate what happens during a kernel boot, up to the point
