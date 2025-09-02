@@ -6,7 +6,7 @@
 
 use crate::elf::ElfFile;
 use crate::sel4::{Arch, Config};
-use crate::util::{kb, mask, mb, round_up, struct_to_bytes};
+use crate::util::{kb, mask, round_up, struct_to_bytes};
 use crate::MemoryRegion;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -98,6 +98,7 @@ fn check_non_overlapping(regions: &Vec<(u64, &[u8])>) {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 struct LoaderRegion64 {
     load_addr: u64,
     size: u64,
@@ -439,6 +440,18 @@ impl<'a> Loader<'a> {
             num_multikernels,
             num_regions: region_metadata.len() as u64,
         });
+
+        // Final Step: Check non-overlapping (non-optimally, just checking start address)
+        for (i_a, region_a) in region_metadata.iter().enumerate() {
+            for (i_b, region_b) in region_metadata.iter().enumerate() {
+                if i_a == i_b { continue };
+
+                if region_a.load_addr == region_b.load_addr {
+                    panic!("region {} {:x?} overlaps with region {} {:x?}", i_a, region_a, i_b, region_b);
+                }
+
+            }
+        }
 
         Loader {
             image,
