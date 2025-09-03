@@ -759,7 +759,7 @@ def main() -> None:
         build_doc(root_dir)
 
     build_dir = Path("build")
-    shutil.rmtree(build_dir)
+    shutil.rmtree(build_dir, ignore_errors=True)
     for board in selected_boards:
         for config in selected_configs:
             if not args.skip_sel4:
