@@ -106,7 +106,7 @@ const PD_SCHEDCONTEXT_EXTRA_SIZE_BITS: u64 = PD_SCHEDCONTEXT_EXTRA_SIZE.ilog2() 
 pub const SLOT_BITS: u64 = 5;
 pub const SLOT_SIZE: u64 = 1 << SLOT_BITS;
 
-#[derive(Serialize, Clone, Eq, PartialEq)]
+#[derive(Serialize)]
 pub struct CapDLSpec {
     pub objects: Vec<NamedObject>,
     pub irqs: Vec<IrqEntry>,
