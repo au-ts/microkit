@@ -1077,7 +1077,7 @@ void main(seL4_BootInfo *bi)
 {
     __sel4_ipc_buffer = bi->ipcBuffer;
     puts("MON|INFO: Microkit Bootstrap\n");
-
+    while (1);
 #if 0
     if (!check_untypeds_match(bi)) {
         /* This can be useful to enable during new platform bring up

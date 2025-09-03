@@ -162,21 +162,62 @@ impl<'a> Loader<'a> {
             ),
         };
 
-        let mut regions = Vec::new();
+        // Determine how many multikernels to load from the #defined value in loader.c
+        println!("Extracting multikernel address");
+        let (num_multikernels_addr, num_multikernels_size) = elf
+            .find_symbol("num_multikernels")
+            .expect("Could not find 'num_multikernels' symbol");
+
+        println!("Reading multikernel number at {:x}", num_multikernels_addr);
+        let num_multikernels: usize = (*(elf
+            .get_data(num_multikernels_addr, num_multikernels_size)
+            .expect("Could not extract number of multikernels to boot"))
+            .first()
+            .expect("Failed to copy in number of multikernels to boot"))
+            .into();
+        println!("Recieved number {}", num_multikernels);
+        assert!(num_multikernels > 0);
+
+        // Debugging, delete later
+        if num_multikernels > 1 {
+            println!("MULTIKERNEL MODE ACTIVATED, number is {}", num_multikernels);
+        } else {
+            println!("MULTIKERNEL INACTIVE");
+        }
+
+        let mut kernel_regions = Vec::new();
+        let mut regions: Vec<(u64, &'a [u8])> = Vec::new();
+
+        const OFFSET_SIZE: u64 = 0x1000000;
+        // TODO: Hack, this should be done in the system construction.
+        let kernel_pv_offsets: Vec<_> = (0..num_multikernels)
+            .into_iter()
+            .map(|i| kernel_elf_p_v_offset - OFFSET_SIZE * (i as u64))
+            .collect();
+
+        // Delete it.
+        let kernel_elf_p_v_offset = ();
 
         let loadable_kernel_segments: Vec<_> = kernel_elf.loadable_segments();
-
         let kernel_first_vaddr = loadable_kernel_segments
             .first()
             .expect("kernel has at least one loadable segment")
             .virt_addr;
 
-        let kernel_first_paddr = kernel_first_vaddr - kernel_elf_p_v_offset;
+        let mut kernel_first_paddrs = vec![];
+        for kernel_p_v_offset in &kernel_pv_offsets {
+            let kernel_first_paddr = kernel_first_vaddr - kernel_p_v_offset;
+            kernel_first_paddrs.push(kernel_first_paddr);
 
-        for segment in loadable_kernel_segments {
-            let region_paddr = segment.virt_addr - kernel_elf_p_v_offset;
-            regions.push((region_paddr, segment.data.as_slice()));
+            for segment in &loadable_kernel_segments {
+                let region_paddr = segment.virt_addr - kernel_p_v_offset;
+                kernel_regions.push((region_paddr, segment.data.as_slice()));
+            }
         }
+
+        // Remove mut.
+        let kernel_first_paddrs = kernel_first_paddrs;
+        println!("{:x?}", kernel_first_paddrs);
 
         // Note: This could be extended to support multi-segment ELF files
         // (and indeed initial did support multi-segment ELF files). However
@@ -203,45 +244,25 @@ impl<'a> Loader<'a> {
         // Note: For now we include any zeroes. We could optimize in the future
         regions.push((inittask_first_paddr, &segment.data));
 
-        // Determine how many multikernels to load from the #defined value in loader.c
-        println!("Extracting multikernel address");
-        let (num_multikernels_addr, num_multikernels_size) = elf
-            .find_symbol("num_multikernels")
-            .expect("Could not find 'num_multikernels' symbol");
-
-        println!("Reading multikernel number at {:x}", num_multikernels_addr);
-        let num_multikernels: u64 = (*(elf
-            .get_data(num_multikernels_addr, num_multikernels_size)
-            .expect("Could not extract number of multikernels to boot"))
-        .first()
-        .expect("Failed to copy in number of multikernels to boot"))
-        .into();
-        println!("Recieved number {}", num_multikernels);
-        assert!(num_multikernels > 0);
-
-        // Debugging, delete later
-        if num_multikernels > 1 {
-            println!("MULTIKERNEL MODE ACTIVATED, number is {}", num_multikernels);
-        } else {
-            println!("MULTIKERNEL INACTIVE");
-        }
-
         println!("Making pagetables");
-        let pagetable_vars = match config.arch {
-            Arch::Aarch64 => Loader::aarch64_setup_pagetables(
-                &elf,
-                kernel_first_vaddr,
-                kernel_first_paddr,
-                num_multikernels.try_into().unwrap(),
-            ),
-            Arch::Riscv64 => Loader::riscv64_setup_pagetables(
-                config,
-                &elf,
-                kernel_first_vaddr,
-                kernel_first_paddr,
-                num_multikernels.try_into().unwrap(),
-            ),
-        };
+        let pagetable_vars: Vec<_> = kernel_first_paddrs
+            .iter()
+            .enumerate()
+            .map(|(i, paddr)| match config.arch {
+                    Arch::Aarch64 => Loader::aarch64_setup_pagetables(
+                        &elf,
+                        kernel_first_vaddr,
+                        *paddr,
+                        (i * PAGE_TABLE_SIZE) as u64,
+                    ),
+                    Arch::Riscv64 => Loader::riscv64_setup_pagetables(
+                        config,
+                        &elf,
+                        kernel_first_vaddr,
+                        *paddr,
+                    ),
+                })
+            .collect();
         println!("Made pagetables");
 
         let image_segment = elf
@@ -260,24 +281,22 @@ impl<'a> Loader<'a> {
 
         // Copy in all the page tables, for each level of the pagetable and then for each kernel
         println!("Writing pagetables to image..");
-        let mut id: usize = 0;
-        while id < num_multikernels as usize {
-            for (var_addr, var_size, var_data) in &pagetable_vars {
+        for id in 0..num_multikernels {
+            for (var_addr, var_size, var_data) in &pagetable_vars[id] {
                 //println!("Pagetable id {} var_size is {} and var_data.len() is {}", id, var_size / (num_multikernels as u64), (var_data[id].len() as u64));
                 let offset = var_addr - image_vaddr;
-                assert!(var_size / (num_multikernels) == var_data[id].len() as u64);
+                let var_size = var_size / (num_multikernels as u64);
+                assert!(var_size == var_data.len() as u64);
                 assert!(offset > 0);
                 assert!(offset <= image.len() as u64);
                 println!(
                     "Copying into the image at {:x} til {:x}",
-                    offset as usize + (id * PAGE_TABLE_SIZE),
-                    (offset + (var_size / (num_multikernels))) as usize + (id * PAGE_TABLE_SIZE)
+                    offset,
+                    (offset + var_size) as usize
                 );
-                image[offset as usize + (id * PAGE_TABLE_SIZE)
-                    ..(offset + (var_size / (num_multikernels))) as usize + (id * PAGE_TABLE_SIZE)]
-                    .copy_from_slice(&var_data[id]);
+                println!("sum: {}", var_data.iter().map(|v| *v as u64).sum::<u64>());
+                image[offset as usize..(offset + var_size) as usize].copy_from_slice(var_data);
             }
-            id += 1;
         }
 
         let mut kernel_entries = vec![kernel_elf.entry];
@@ -297,15 +316,17 @@ impl<'a> Loader<'a> {
         let extra_device_size = reserved_region.size();
 
         println!(
-            "There are {} regions and {} system regions",
+            "There are {} regions and {} kernel regions and {} system regions",
             regions.len(),
+            kernel_regions.len(),
             system_regions.len()
         );
         let mut all_regions = Vec::with_capacity(regions.len() + system_regions.len());
-        for i in 0..num_multikernels {
+        all_regions.extend(kernel_regions);
+        for i in 0..(num_multikernels as u64) {
             for region_set in [&regions, &system_regions] {
                 for r in region_set {
-                    all_regions.push((r.0 + 0x1000000 * i, r.1));
+                    all_regions.push((r.0 + OFFSET_SIZE * i, r.1));
                 }
             }
         }
@@ -346,7 +367,6 @@ impl<'a> Loader<'a> {
         }
         // Assuming regions are packed together and start at load addr 0x0......
         //let offset_size: u64 = ((last_addr + last_size) + 0xFFF) & !(0xFFF);
-        const OFFSET_SIZE: u64 = 0x1000000;
         println!(
             "We can start adding from {:x} ({:x} + {:x} = {:x})",
             OFFSET_SIZE,
@@ -411,8 +431,8 @@ impl<'a> Loader<'a> {
                 v_entry: v_entry,
                 extra_device_addr_p: extra_device_addr_p,
                 extra_device_size: extra_device_size,
-                // XXXXXXXXX: Nah instead this should be the paddr directly
-                kernel_pv_offset: kernel_elf_p_v_offset - OFFSET_SIZE * i,
+                // XXXXXXXXX: Nah we should pass the paddr directly to the kernel
+                kernel_pv_offset: kernel_pv_offsets[i],
             });
         }
         println!(
@@ -432,7 +452,7 @@ impl<'a> Loader<'a> {
             magic,
             size,
             flags,
-            num_multikernels,
+            num_multikernels: num_multikernels as u64,
             num_regions: region_metadata.len() as u64,
         };
 
@@ -441,21 +461,21 @@ impl<'a> Loader<'a> {
             magic,
             size,
             flags,
-            num_multikernels,
+            num_multikernels: num_multikernels as u64,
             num_regions: region_metadata.len() as u64,
         });
 
         // Final Step: Check non-overlapping (non-optimally, just checking start address)
-        for (i_a, region_a) in region_metadata.iter().enumerate() {
-            for (i_b, region_b) in region_metadata.iter().enumerate() {
-                if i_a == i_b { continue };
+        // for (i_a, region_a) in region_metadata.iter().enumerate() {
+        //     for (i_b, region_b) in region_metadata.iter().enumerate() {
+        //         if i_a == i_b { continue };
 
-                if region_a.load_addr == region_b.load_addr {
-                    panic!("region {} {:x?} overlaps with region {} {:x?}", i_a, region_a, i_b, region_b);
-                }
+        //         if region_a.load_addr == region_b.load_addr {
+        //             panic!("region {} {:x?} overlaps with region {} {:x?}", i_a, region_a, i_b, region_b);
+        //         }
 
-            }
-        }
+        //     }
+        // }
 
         Loader {
             image,
@@ -521,13 +541,7 @@ impl<'a> Loader<'a> {
         elf: &ElfFile,
         first_vaddr: u64,
         first_paddr: u64,
-        num_multikernels: usize,
-    ) -> Vec<(u64, u64, Vec<[u8; PAGE_TABLE_SIZE]>)> {
-        assert!(
-            num_multikernels == 1,
-            "Multikernel support for risc-v is not implemented."
-        );
-
+    ) -> Vec<(u64, u64, [u8; PAGE_TABLE_SIZE])> {
         let (text_addr, _) = elf
             .find_symbol("_text")
             .expect("Could not find 'text' symbol");
@@ -543,18 +557,16 @@ impl<'a> Loader<'a> {
 
         let num_pt_levels = config.riscv_pt_levels.unwrap().levels();
 
-        let mut boot_lvl1_pt: Vec<[u8; PAGE_TABLE_SIZE]> =
-            vec![[0; PAGE_TABLE_SIZE]; num_multikernels];
+        let mut boot_lvl1_pt: [u8; PAGE_TABLE_SIZE] = [0; PAGE_TABLE_SIZE];
         {
             let text_index_lvl1 = Riscv64::pt_index(num_pt_levels, text_addr, 1);
             let pt_entry = Riscv64::pte_next(boot_lvl2_pt_elf_addr);
             let start = 8 * text_index_lvl1;
             let end = start + 8;
-            boot_lvl1_pt[0][start..end].copy_from_slice(&pt_entry.to_le_bytes());
+            boot_lvl1_pt[start..end].copy_from_slice(&pt_entry.to_le_bytes());
         }
 
-        let mut boot_lvl2_pt_elf: Vec<[u8; PAGE_TABLE_SIZE]> =
-            vec![[0; PAGE_TABLE_SIZE]; num_multikernels];
+        let mut boot_lvl2_pt_elf: [u8; PAGE_TABLE_SIZE] = [0; PAGE_TABLE_SIZE];
         {
             let text_index_lvl2 = Riscv64::pt_index(num_pt_levels, text_addr, 2);
             for (page, i) in (text_index_lvl2..512).enumerate() {
@@ -562,7 +574,7 @@ impl<'a> Loader<'a> {
                 let end = start + 8;
                 let addr = text_addr + ((page as u64) << Riscv64::BLOCK_BITS_2MB);
                 let pt_entry = Riscv64::pte_leaf(addr);
-                boot_lvl2_pt_elf[0][start..end].copy_from_slice(&pt_entry.to_le_bytes());
+                boot_lvl2_pt_elf[start..end].copy_from_slice(&pt_entry.to_le_bytes());
             }
         }
 
@@ -570,12 +582,11 @@ impl<'a> Loader<'a> {
             let index = Riscv64::pt_index(num_pt_levels, first_vaddr, 1);
             let start = 8 * index;
             let end = start + 8;
-            boot_lvl1_pt[0][start..end]
+            boot_lvl1_pt[start..end]
                 .copy_from_slice(&Riscv64::pte_next(boot_lvl2_pt_addr).to_le_bytes());
         }
 
-        let mut boot_lvl2_pt: Vec<[u8; PAGE_TABLE_SIZE]> =
-            vec![[0; PAGE_TABLE_SIZE]; num_multikernels];
+        let mut boot_lvl2_pt: [u8; PAGE_TABLE_SIZE] = [0; PAGE_TABLE_SIZE];
 
         {
             let index = Riscv64::pt_index(num_pt_levels, first_vaddr, 2);
@@ -584,7 +595,7 @@ impl<'a> Loader<'a> {
                 let end = start + 8;
                 let addr = first_paddr + ((page as u64) << Riscv64::BLOCK_BITS_2MB);
                 let pt_entry = Riscv64::pte_leaf(addr);
-                boot_lvl2_pt[0][start..end].copy_from_slice(&pt_entry.to_le_bytes());
+                boot_lvl2_pt[start..end].copy_from_slice(&pt_entry.to_le_bytes());
             }
         }
 
@@ -603,8 +614,8 @@ impl<'a> Loader<'a> {
         elf: &ElfFile,
         first_vaddr: u64,
         first_paddr: u64,
-        num_multikernels: usize,
-    ) -> Vec<(u64, u64, Vec<[u8; PAGE_TABLE_SIZE]>)> {
+        offset: u64,
+    ) -> Vec<(u64, u64, [u8; PAGE_TABLE_SIZE])> {
         let (boot_lvl1_lower_addr, boot_lvl1_lower_size) = elf
             .find_symbol("boot_lvl1_lower")
             .expect("Could not find 'boot_lvl1_lower' symbol");
@@ -621,64 +632,54 @@ impl<'a> Loader<'a> {
             .find_symbol("boot_lvl0_upper")
             .expect("Could not find 'boot_lvl0_upper' symbol");
 
-        // Make table vectors
-        let mut boot_lvl0_lower: Vec<[u8; PAGE_TABLE_SIZE]> =
-            vec![[0; PAGE_TABLE_SIZE]; num_multikernels];
-        let mut boot_lvl1_lower: Vec<[u8; PAGE_TABLE_SIZE]> =
-            vec![[0; PAGE_TABLE_SIZE]; num_multikernels];
-        let boot_lvl0_upper: Vec<[u8; PAGE_TABLE_SIZE]> =
-            vec![[0; PAGE_TABLE_SIZE]; num_multikernels];
-        let mut boot_lvl1_upper: Vec<[u8; PAGE_TABLE_SIZE]> =
-            vec![[0; PAGE_TABLE_SIZE]; num_multikernels];
-        let mut boot_lvl2_upper: Vec<[u8; PAGE_TABLE_SIZE]> =
-            vec![[0; PAGE_TABLE_SIZE]; num_multikernels];
+        let boot_lvl1_lower_addr = boot_lvl1_lower_addr + offset;
+        let boot_lvl1_upper_addr = boot_lvl1_upper_addr + offset;
+        let boot_lvl2_upper_addr = boot_lvl2_upper_addr + offset;
+        let boot_lvl0_lower_addr = boot_lvl0_lower_addr + offset;
+        let boot_lvl0_upper_addr = boot_lvl0_upper_addr + offset;
 
-        // Populate all the page tables the same
-        let mut id: usize = 0;
-        while id < num_multikernels {
-            //println!("Initing id {}", id);
+        let mut boot_lvl0_lower: [u8; PAGE_TABLE_SIZE] = [0; PAGE_TABLE_SIZE];
+        boot_lvl0_lower[..8].copy_from_slice(&(boot_lvl1_lower_addr | 3).to_le_bytes());
 
-            //println!("Making first level, size is {} with num kernels is {} and hence final size should be {}", PAGE_TABLE_SIZE, num_multikernels, PAGE_TABLE_SIZE * num_multikernels);
-            boot_lvl0_lower[id][..8].copy_from_slice(&(boot_lvl1_lower_addr | 3).to_le_bytes());
-            //println!("Made first level");
+        let mut boot_lvl1_lower: [u8; PAGE_TABLE_SIZE] = [0; PAGE_TABLE_SIZE];
+        for i in 0..512 {
+            #[allow(clippy::identity_op)] // keep the (0 << 2) for clarity
+            let pt_entry: u64 = ((i as u64) << AARCH64_1GB_BLOCK_BITS) |
+                (1 << 10) | // access flag
+                (0 << 2) | // strongly ordered memory
+                (1); // 1G block
+            let start = 8 * i;
+            let end = 8 * (i + 1);
+            boot_lvl1_lower[start..end].copy_from_slice(&pt_entry.to_le_bytes());
+        }
 
-            for i in 0..512 {
-                #[allow(clippy::identity_op)] // keep the (0 << 2) for clarity
-                let pt_entry: u64 = ((i as u64) << AARCH64_1GB_BLOCK_BITS) |
-                    (1 << 10) | // access flag
-                    (0 << 2) | // strongly ordered memory
-                    (1); // 1G block
-                let start = 8 * i;
-                let end = 8 * (i + 1);
-                boot_lvl1_lower[id][start..end].copy_from_slice(&pt_entry.to_le_bytes());
-            }
+        let boot_lvl0_upper: [u8; PAGE_TABLE_SIZE] = [0; PAGE_TABLE_SIZE];
+        {
+            let pt_entry = (boot_lvl1_upper_addr | 3).to_le_bytes();
+            let idx = Aarch64::lvl0_index(first_vaddr);
+            boot_lvl0_lower[8 * idx..8 * (idx + 1)].copy_from_slice(&pt_entry);
+        }
 
-            {
-                let pt_entry = (boot_lvl1_upper_addr | 3).to_le_bytes();
-                let idx = Aarch64::lvl0_index(first_vaddr);
-                boot_lvl0_lower[id][8 * idx..8 * (idx + 1)].copy_from_slice(&pt_entry);
-            }
+        let mut boot_lvl1_upper: [u8; PAGE_TABLE_SIZE] = [0; PAGE_TABLE_SIZE];
+        {
+            let pt_entry = (boot_lvl2_upper_addr | 3).to_le_bytes();
+            let idx = Aarch64::lvl1_index(first_vaddr);
+            boot_lvl1_upper[8 * idx..8 * (idx + 1)].copy_from_slice(&pt_entry);
+        }
 
-            {
-                let pt_entry = (boot_lvl2_upper_addr | 3).to_le_bytes();
-                let idx = Aarch64::lvl1_index(first_vaddr);
-                boot_lvl1_upper[id][8 * idx..8 * (idx + 1)].copy_from_slice(&pt_entry);
-            }
+        let mut boot_lvl2_upper: [u8; PAGE_TABLE_SIZE] = [0; PAGE_TABLE_SIZE];
 
-            let lvl2_idx = Aarch64::lvl2_index(first_vaddr);
-            for i in lvl2_idx..512 {
-                let entry_idx = (i - Aarch64::lvl2_index(first_vaddr)) << AARCH64_2MB_BLOCK_BITS;
-                let pt_entry: u64 = (entry_idx as u64 + first_paddr) |
-                    (1 << 10) | // Access flag
-                    (3 << 8) | // Make sure the shareability is the same as the kernel's
-                    (4 << 2) | // MT_NORMAL memory
-                    (1 << 0); // 2MB block
-                let start = 8 * i;
-                let end = 8 * (i + 1);
-                boot_lvl2_upper[id][start..end].copy_from_slice(&pt_entry.to_le_bytes());
-            }
-
-            id += 1;
+        let lvl2_idx = Aarch64::lvl2_index(first_vaddr);
+        for i in lvl2_idx..512 {
+            let entry_idx = (i - Aarch64::lvl2_index(first_vaddr)) << AARCH64_2MB_BLOCK_BITS;
+            let pt_entry: u64 = (entry_idx as u64 + first_paddr) |
+                (1 << 10) | // Access flag
+                (3 << 8) | // Make sure the shareability is the same as the kernel's
+                (4 << 2) | // MT_NORMAL memory
+                (1 << 0); // 2MB block
+            let start = 8 * i;
+            let end = 8 * (i + 1);
+            boot_lvl2_upper[start..end].copy_from_slice(&pt_entry.to_le_bytes());
         }
 
         vec![
