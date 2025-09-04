@@ -182,7 +182,6 @@ fn map_intermediary_level_helper(
         is_root: false, // because the VSpace has already been created separately
         level: Some(cur_level as u8 + 1),
         slots: [].to_vec(),
-        coverage: next_level_coverage.clone()
     };
     let next_level_object = NamedObject {
         name: format!(
@@ -218,7 +217,6 @@ pub fn create_vspace(spec: &mut CapDLSpec, sel4_config: &Config, pd_name: &str) 
             is_root: true,
             level: Some(top_pt_level_number(sel4_config) as u8),
             slots: [].to_vec(),
-            coverage: Range { start: 0, end: sel4_config.user_top() }
         }),
         expected_alloc: None,
     })
@@ -234,7 +232,6 @@ pub fn create_vspace_ept(spec: &mut CapDLSpec, sel4_config: &Config, vm_name: &s
             is_root: true,
             level: Some(top_pt_level_number(sel4_config) as u8),
             slots: [].to_vec(),
-            coverage: Range { start: 0, end: sel4_config.user_top() }
         }),
         expected_alloc: None,
     })

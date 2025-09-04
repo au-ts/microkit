@@ -46,7 +46,7 @@ pub struct NamedObject {
     pub object: CapDLObject,
 
     // Internal Microkit tool use only, to keep tabs of
-    // where objects should be allocated for the report.
+    // where objects will be allocated for the report.
     #[serde(skip_serializing)]
     pub expected_alloc: Option<ExpectedAllocation>,
 }
@@ -354,10 +354,6 @@ pub mod object {
         pub is_root: bool,
         pub level: Option<u8>,
         pub slots: Vec<CapTableEntry>,
-
-        // Internal Microkit tool use for debugging and report purpose only.
-        #[serde(skip_serializing)]
-        pub coverage: Range<u64>
     }
 
     #[derive(Serialize, Clone, Eq, PartialEq)]
