@@ -447,15 +447,7 @@ static bool check_untypeds_match(seL4_BootInfo *bi)
         puthex32(bi->untyped.end);
         puts("\n");
 
-        seL4_Word badge;
-        seL4_MessageInfo_t tag;
-
-        puts("waiting for the IRQ (long-ish delay)\n");
-        tag = seL4_Recv(0xf02, &badge, 0xfff);
-        puts("got IRQ reply\n");
-        (void)tag;
-
-        fail("stopping after success");
+        fail("TODO revert");
     }
 
     for (unsigned i = 0; i < untyped_info.cap_end - untyped_info.cap_start; i++) {
@@ -1077,7 +1069,6 @@ void main(seL4_BootInfo *bi)
 {
     __sel4_ipc_buffer = bi->ipcBuffer;
     puts("MON|INFO: Microkit Bootstrap\n");
-    while (1);
 #if 0
     if (!check_untypeds_match(bi)) {
         /* This can be useful to enable during new platform bring up
@@ -1089,6 +1080,11 @@ void main(seL4_BootInfo *bi)
     }
 #endif
 
+
+    puts("bootinfo untyped.end: ");
+    puthex64(bi->untyped.end);
+    puts("\n");
+
     // send to CPU 2 only, not 1.
     seL4_Error err = seL4_IRQControl_IssueSGISignal(seL4_CapIRQControl, 0, 1, seL4_CapInitThreadCNode, 0xf00, 64);
     if (err != seL4_NoError) {
@@ -1099,20 +1095,6 @@ void main(seL4_BootInfo *bi)
     if (err != seL4_NoError) {
         puthex64(err);
         fail("failed to make IRQ control\n");
-    }
-    // XXXX: Extremely hacky, 0x54 is past the last untyped for kernel 1, but not for kernel 2.
-    if (seL4_DebugCapIdentify(0x54) != 0) {
-        puts("making notification to receive IRQ\n");
-        err = seL4_Untyped_Retype(0x54, seL4_NotificationObject, 0, seL4_CapInitThreadCNode, seL4_CapInitThreadCNode, 64, 0xf02, 1);
-        if (err != seL4_NoError) {
-            puthex64(err);
-            fail("failed to make notification\n");
-        }
-        err = seL4_IRQHandler_SetNotification(0xf01, 0xf02);
-        if (err != seL4_NoError) {
-            puthex64(err);
-            fail("failed set IRQ notification\n");
-        }
     }
     seL4_Word cap_tag = seL4_DebugCapIdentify(0xf00);
     // cap_sgi_signal_cap = 27 = 0x1b
@@ -1130,6 +1112,44 @@ void main(seL4_BootInfo *bi)
     if (cap_tag != 16) {
         fail("WRONG CAP TAG\n");
     }
+
+    // XXX: Extremely HACKY.
+    if (bi->untyped.end == 0x0000000000000055) {
+
+        // Kernel 0.
+        puts("Kernel 0: waiting a while then signalling\n");
+
+        for (volatile uint64_t i = 0; i < 1000000000ULL; i++);
+
+        puts("\n\nKernel 0: Signalling...\n");
+        seL4_Signal(0xf00);
+
+    } else if (bi->untyped.end == 0x0000000000000060) {
+
+        // Kernel 1
+        puts("Kernel 1: making notification to receive IRQ\n");
+        err = seL4_Untyped_Retype(0x54, seL4_NotificationObject, 0, seL4_CapInitThreadCNode, seL4_CapInitThreadCNode, 64, 0xf02, 1);
+        if (err != seL4_NoError) {
+            puthex64(err);
+            fail("Kernel 1: failed to make notification\n");
+        }
+        err = seL4_IRQHandler_SetNotification(0xf01, 0xf02);
+        if (err != seL4_NoError) {
+            puthex64(err);
+            fail("Kernel 1: failed set IRQ notification\n");
+        }
+
+        seL4_Word badge;
+        seL4_MessageInfo_t tag;
+        puts("Kernel 1: waiting for the IRQ (long-ish delay)\n");
+        tag = seL4_Recv(0xf02, &badge, 0xfff);
+        puts("Kernel 1: got IRQ reply\n");
+        (void)tag;
+
+    } else {
+        puts("unknown kernel\n");
+    }
+
 
 #if 0
     /* This can be useful to enable during new platform bring up
@@ -1180,11 +1200,8 @@ void main(seL4_BootInfo *bi)
 
 //     puts("MON|INFO: completed system invocations\n");
 
-    for (volatile uint64_t i = 0; i < 5000000000ULL; i++);
 
-    puts("\n\nKernel 0: Signalling...\n");
-    seL4_Signal(0xf00);
 
-    for (volatile uint64_t i = 0; i < 10000000000ULL; i++);
-    monitor();
+    for (volatile uint64_t i = 0; i < 1000000000000ULL; i++);
+    // monitor();
 }
