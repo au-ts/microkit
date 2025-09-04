@@ -65,7 +65,7 @@ struct Args<'a> {
     board: &'a str,
     config: &'a str,
     report: &'a str,
-    capdl_spec: Option<&'a str>,
+    capdl_spec_out: Option<&'a str>,
     output: &'a str,
     search_paths: Vec<&'a String>,
     initialiser_heap_size_multiplier: f64,
@@ -76,7 +76,7 @@ impl<'a> Args<'a> {
         // Default arguments
         let mut output = "loader.img";
         let mut report = "report.txt";
-        let mut capdl_spec = None;
+        let mut capdl_spec_out = None;
         let mut search_paths = Vec::new();
         // Arguments expected to be provided by the user
         let mut system = None;
@@ -138,10 +138,10 @@ impl<'a> Args<'a> {
                         std::process::exit(1);
                     }
                 }
-                "--capdl-spec" => {
+                "--capdl-spec-out" => {
                     in_search_path = false;
                     if i < args.len() - 1 {
-                        capdl_spec = Some(args[i + 1].as_str());
+                        capdl_spec_out = Some(args[i + 1].as_str());
                         i += 1;
                     } else {
                         eprintln!("microkit: error: argument --config: expected one argument");
@@ -217,7 +217,7 @@ impl<'a> Args<'a> {
             board: board.unwrap(),
             config: config.unwrap(),
             report,
-            capdl_spec,
+            capdl_spec_out,
             output,
             search_paths,
             initialiser_heap_size_multiplier,
@@ -541,8 +541,8 @@ fn main() -> Result<(), String> {
     let spec_reserialised = {
         // Eagerly write out the spec so we can debug in case something crash later.
         let spec_as_json = serde_json::to_string_pretty(&spec).unwrap();
-        if args.capdl_spec.is_some() {
-            fs::write(args.capdl_spec.unwrap(), &spec_as_json).unwrap();
+        if args.capdl_spec_out.is_some() {
+            fs::write(args.capdl_spec_out.unwrap(), &spec_as_json).unwrap();
         }
 
         // The full type definition is `Spec<'a, N, D, M>` where:
