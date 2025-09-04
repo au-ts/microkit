@@ -7,30 +7,23 @@
 // we want our asserts, even if the compiler figures out they hold true already during compile-time
 #![allow(clippy::assertions_on_constants)]
 
+use microkit_tool::capdl::initialiser::{CapDLInitialiser, DEFAULT_INITIALISER_HEAP_MULTIPLIER};
 use microkit_tool::capdl::spec::{ElfContent, ExpectedAllocation};
-// use microkit_tool::capdl::untyped::InitSystem;
 use microkit_tool::capdl::{build_capdl_spec, reserialise_spec};
 use microkit_tool::elf::ElfFile;
 use microkit_tool::loader::Loader;
 use microkit_tool::report::write_report;
 use microkit_tool::sdf::parse;
 use microkit_tool::sel4::{
-    emulate_kernel_boot, emulate_kernel_boot_partial, Arch, Config, PageSize, PlatformConfig,
+    emulate_kernel_boot, emulate_kernel_boot_partial, Arch, Config, PlatformConfig,
     RiscvVirtualMemory,
 };
-use microkit_tool::util::{
-    human_size_strict, json_str, json_str_as_bool, json_str_as_u64, round_up,
-};
-use microkit_tool::{serialise_ut, MemoryRegion, UntypedObject};
+use microkit_tool::util::{human_size_strict, json_str, json_str_as_bool, json_str_as_u64};
+use microkit_tool::{MemoryRegion, UntypedObject};
 use sel4_capdl_initializer_types::{ObjectNamesLevel, Spec};
 use std::fs::{self, metadata};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-
-// The capDL initialiser heap size is calculated by:
-// (spec size * INITIALISER_HEAP_MULTIPLIER) + INITIALISER_HEAP_ADD_ON_CONSTANT
-const INITIALISER_HEAP_MULTIPLIER: f64 = 2.0;
-const INITIALISER_HEAP_ADD_ON_CONSTANT: u64 = 16 * 4096; // 64kb
 
 fn get_full_path(path: &Path, search_paths: &Vec<PathBuf>) -> Option<PathBuf> {
     for search_path in search_paths {
@@ -82,7 +75,7 @@ impl<'a> Args<'a> {
         let mut system = None;
         let mut board = None;
         let mut config = None;
-        let mut initialiser_heap_size_multiplier = INITIALISER_HEAP_MULTIPLIER;
+        let mut initialiser_heap_size_multiplier = DEFAULT_INITIALISER_HEAP_MULTIPLIER;
 
         if args.len() <= 1 {
             print_usage();
@@ -565,67 +558,31 @@ fn main() -> Result<(), String> {
     let capdl_spec_as_binary =
         reserialise_spec::reserialise_spec(&pd_elf_files, &spec_reserialised, &name_level);
 
-    let footprint = capdl_spec_as_binary.len();
-    let heap_size = round_up(
-        (footprint as f64 * args.initialiser_heap_size_multiplier) as u64
-            + INITIALISER_HEAP_ADD_ON_CONSTANT,
-        PageSize::Small as u64,
-    ) as usize;
-
-    // Patch the spec and heap into the ELF image. These symbol names must match
-    // rust-sel4/crates/sel4-capdl-initializer/src/main.rs
-    let mut initialiser_elf = ElfFile::from_path(&capdl_init_elf_path)?;
-    let spec_vaddr = initialiser_elf.next_vaddr(PageSize::Small);
-    initialiser_elf.add_segment(true, false, false, spec_vaddr, capdl_spec_as_binary);
-    initialiser_elf.write_symbol(
-        "sel4_capdl_initializer_serialized_spec_start",
-        &spec_vaddr.to_le_bytes(),
-    )?;
-    initialiser_elf.write_symbol(
-        "sel4_capdl_initializer_serialized_spec_size",
-        &footprint.to_le_bytes(),
-    )?;
-
-    let heap_vaddr = initialiser_elf.next_vaddr(PageSize::Small);
-    initialiser_elf.add_segment(true, true, false, heap_vaddr, vec![0; heap_size]);
-    initialiser_elf.write_symbol(
-        "sel4_capdl_initializer_heap_start",
-        &heap_vaddr.to_le_bytes(),
-    )?;
-    initialiser_elf.write_symbol(
-        "sel4_capdl_initializer_heap_size",
-        &(heap_vaddr + heap_size as u64).to_le_bytes(),
-    )?;
-
-    initialiser_elf.write_symbol(
-        "sel4_capdl_initializer_image_start",
-        &initialiser_elf.lowest_vaddr().to_le_bytes(),
-    )?;
-    initialiser_elf.write_symbol(
-        "sel4_capdl_initializer_image_end",
-        &initialiser_elf.highest_vaddr().to_le_bytes(),
-    )?;
+    // Patch the spec and heap into the ELF image.
+    let mut capdl_initialiser = CapDLInitialiser::new(
+        ElfFile::from_path(&capdl_init_elf_path)?,
+        args.initialiser_heap_size_multiplier,
+    );
+    capdl_initialiser.add_spec(capdl_spec_as_binary);
 
     println!(
         "CAPDL SPEC: number of root objects = {}, spec footprint = {}, initialiser heap size = {}",
         num_objects,
-        human_size_strict(footprint as u64),
-        human_size_strict(heap_size as u64)
+        human_size_strict(capdl_initialiser.spec_size.unwrap()),
+        human_size_strict(capdl_initialiser.heap_size.unwrap())
     );
-    let initialiser_highest_vaddr_rounded =
-        round_up(initialiser_elf.highest_vaddr(), PageSize::Small as u64);
-    let initialiser_vaddr_range = initialiser_elf.lowest_vaddr()..initialiser_highest_vaddr_rounded;
+    let initialiser_vaddr_range = capdl_initialiser.image_bound();
     println!(
         "INITIAL TASK: size = {}, vaddr = [0x{:x}..0x{:x}], entry = 0x{:x}",
         human_size_strict(initialiser_vaddr_range.end - initialiser_vaddr_range.start),
         initialiser_vaddr_range.start,
         initialiser_vaddr_range.end,
-        initialiser_elf.entry
+        capdl_initialiser.elf.entry
     );
 
     // For x86 we write out the initialiser ELF as is, but on ARM and RISC-V we build the bootloader image.
     if kernel_config.arch == Arch::X86_64 {
-        initialiser_elf.reserialise(Path::new(args.output))?;
+        capdl_initialiser.elf.reserialise(Path::new(args.output))?;
     } else {
         // Now that we have the entire spec and CapDL initialiser ELF with embedded spec,
         // we can determine exactly how much memory will be available statically when the kernel
@@ -659,8 +616,8 @@ fn main() -> Result<(), String> {
             initial_task_phys_base + initial_task_size,
         );
         let initial_task_virt_region = MemoryRegion::new(
-            initialiser_elf.lowest_vaddr(),
-            initialiser_highest_vaddr_rounded,
+            capdl_initialiser.elf.lowest_vaddr(),
+            initialiser_vaddr_range.end,
         );
 
         // With the initial task region determined the kernel boot can be emulated. This provides
@@ -874,23 +831,14 @@ fn main() -> Result<(), String> {
         // At runtime the intialiser will validate what we simulated against what the kernel gives it. If they deviate
         // we will have problems! For example, if we simulated with more memory than what's actually available, the initialiser
         // can crash.
-        let mut uts_desc: Vec<u8> = Vec::new();
-        for ut in kernel_boot_info.untyped_objects.iter() {
-            uts_desc.extend(serialise_ut(ut));
-        }
-
-        initialiser_elf.write_symbol(
-            "sel4_capdl_initializer_expected_untypeds_list_num_entries",
-            &(kernel_boot_info.untyped_objects.len() as u64).to_le_bytes(),
-        )?;
-        initialiser_elf.write_symbol("sel4_capdl_initializer_expected_untypeds_list", &uts_desc)?;
+        capdl_initialiser.add_expected_untypeds(&kernel_boot_info.untyped_objects);
 
         // Everything checks out, now build the bootloader!
         let loader = Loader::new(
             &kernel_config,
             Path::new(&loader_elf_path),
             &kernel_elf,
-            &initialiser_elf,
+            &capdl_initialiser.elf,
             initial_task_phys_base,
             initialiser_vaddr_range,
         );

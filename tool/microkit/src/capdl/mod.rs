@@ -5,11 +5,12 @@
 //
 
 pub mod builder;
-pub mod spec;
-mod memory;
-mod util;
+pub mod initialiser;
 mod irq;
+mod memory;
 pub mod reserialise_spec;
+pub mod spec;
+mod util;
 
 pub use self::builder::*;
 pub use self::reserialise_spec::*;
