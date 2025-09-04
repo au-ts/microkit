@@ -115,7 +115,7 @@ struct LoaderKernelInfo64 {
     v_entry: u64,
     extra_device_addr_p: u64,
     extra_device_size: u64,
-    kernel_pv_offset: u64,
+    kernel_elf_paddr_base: u64,
 }
 
 #[repr(C)]
@@ -196,6 +196,7 @@ impl<'a> Loader<'a> {
             .collect();
 
         // Delete it.
+        #[allow(unused_variables)]
         let kernel_elf_p_v_offset = ();
 
         let loadable_kernel_segments: Vec<_> = kernel_elf.loadable_segments();
@@ -431,8 +432,7 @@ impl<'a> Loader<'a> {
                 v_entry: v_entry,
                 extra_device_addr_p: extra_device_addr_p,
                 extra_device_size: extra_device_size,
-                // XXXXXXXXX: Nah we should pass the paddr directly to the kernel
-                kernel_pv_offset: kernel_pv_offsets[i],
+                kernel_elf_paddr_base: kernel_first_paddrs[i],
             });
         }
         println!(

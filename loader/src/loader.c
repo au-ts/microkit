@@ -66,7 +66,7 @@ struct kernel_data {
     uintptr_t v_entry;
     uintptr_t extra_device_addr_p;
     uintptr_t extra_device_size;
-    uintptr_t kernel_pv_offset;
+    uintptr_t kernel_elf_paddr_base;
 };
 
 // Changing this structure is precarious, maybe better to wrap in NUM_MULTIKERNELS IFDEF
@@ -583,12 +583,8 @@ static void print_loader_data(void)
         puts("LDR|INFO: Kernel:      entry:   ");
         puthex64(loader_data->kernel_data[i].kernel_entry);
         puts("\n");
-        puts("LDR|INFO: Kernel:      pv_offset:   ");
-        puthex64(loader_data->kernel_data[i].kernel_pv_offset);
-        puts("\n");
-        puts("LDR|INFO: Kernel:      paddr base:   ");
-        // UNDER assumption entry == base.
-        puthex64(loader_data->kernel_data[i].kernel_entry - loader_data->kernel_data[i].kernel_pv_offset);
+        puts("LDR|INFO: Kernel:      kernel_elf_paddr_base:   ");
+        puthex64(loader_data->kernel_data[i].kernel_elf_paddr_base);
         puts("\n");
 
         puts("LDR|INFO: Root server: physmem: ");
@@ -697,16 +693,11 @@ static void start_kernel(int id)
 
     puts("LDR|INFO: Kernel starting: ");
     putc(id + '0');
-    puts(" has offset of ");
-    puthex64(loader_data->kernel_data[id].kernel_pv_offset);
-    puts(" (-");
-    puthex64(-loader_data->kernel_data[id].kernel_pv_offset);
-    puts(")\n");
-    puts("entry point: ");
+    puts("\n\thas entry point: ");
     puthex64(loader_data->kernel_data[id].kernel_entry);
     puts("\n");
-    puts("paddr: ");
-    puthex64(loader_data->kernel_data[id].kernel_entry - loader_data->kernel_data[id].kernel_pv_offset);
+    puts("\thas paddr: ");
+    puthex64(loader_data->kernel_data[id].kernel_elf_paddr_base);
     puts("\n");
 
         
@@ -716,7 +707,7 @@ static void start_kernel(int id)
         loader_data->kernel_data[id].pv_offset,
         loader_data->kernel_data[id].v_entry,
         // HACK HACK
-        loader_data->kernel_data[id].kernel_pv_offset,
+        loader_data->kernel_data[id].kernel_elf_paddr_base,
         // 0,
         0,
         loader_data->kernel_data[id].extra_device_addr_p,
