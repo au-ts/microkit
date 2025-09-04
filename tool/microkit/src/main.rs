@@ -575,7 +575,7 @@ fn main() -> Result<(), String> {
     // Patch the spec and heap into the ELF image. These symbol names must match
     // rust-sel4/crates/sel4-capdl-initializer/src/main.rs
     let mut initialiser_elf = ElfFile::from_path(&capdl_init_elf_path)?;
-    let spec_vaddr = round_up(initialiser_elf.next_vaddr(), PageSize::Small as u64);
+    let spec_vaddr = initialiser_elf.next_vaddr(PageSize::Small);
     initialiser_elf.add_segment(true, false, false, spec_vaddr, capdl_spec_as_binary);
     initialiser_elf.write_symbol(
         "sel4_capdl_initializer_serialized_spec_start",
@@ -586,7 +586,7 @@ fn main() -> Result<(), String> {
         &footprint.to_le_bytes(),
     )?;
 
-    let heap_vaddr = round_up(initialiser_elf.next_vaddr(), PageSize::Small as u64);
+    let heap_vaddr = initialiser_elf.next_vaddr(PageSize::Small);
     initialiser_elf.add_segment(true, true, false, heap_vaddr, vec![0; heap_size]);
     initialiser_elf.write_symbol(
         "sel4_capdl_initializer_heap_start",

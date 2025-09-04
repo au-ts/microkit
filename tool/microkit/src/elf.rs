@@ -4,7 +4,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
-use crate::util::bytes_to_struct;
+use crate::sel4::PageSize;
+use crate::util::{bytes_to_struct, round_down};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Write;
@@ -393,9 +394,9 @@ impl ElfFile {
         *existing_vaddrs.iter().max().unwrap()
     }
 
-    /// Returns the next available unaligned virtual address for inserting a new segment.
-    pub fn next_vaddr(&self) -> u64 {
-        self.highest_vaddr() + 1
+    /// Returns the next available page aligned virtual address for inserting a new segment.
+    pub fn next_vaddr(&self, page_size: PageSize) -> u64 {
+        round_down(self.highest_vaddr() + page_size as u64, page_size as u64)
     }
 
     /// Segment will be added as loadable, though they won't have a valid p_offset
