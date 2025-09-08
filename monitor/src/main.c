@@ -1080,6 +1080,13 @@ void main(seL4_BootInfo *bi)
     }
 #endif
 
+    puts("current node: ");
+    puthex64(bi->nodeID);
+    puts("\n");
+
+    puts("num nodes: ");
+    puthex64(bi->numNodes);
+    puts("\n");
 
     puts("bootinfo untyped.end: ");
     puthex64(bi->untyped.end);
@@ -1113,8 +1120,7 @@ void main(seL4_BootInfo *bi)
         fail("WRONG CAP TAG\n");
     }
 
-    // XXX: Extremely HACKY.
-    if (bi->untyped.end == 0x0000000000000055) {
+    if (bi->nodeID == 0) {
 
         // Kernel 0.
         puts("Kernel 0: waiting a while then signalling\n");
@@ -1124,7 +1130,7 @@ void main(seL4_BootInfo *bi)
         puts("\n\nKernel 0: Signalling...\n");
         seL4_Signal(0xf00);
 
-    } else if (bi->untyped.end == 0x0000000000000060) {
+    } else if (bi->nodeID == 1) {
 
         // Kernel 1
         puts("Kernel 1: making notification to receive IRQ\n");

@@ -198,6 +198,9 @@ SUPPORTED_BOARDS = (
             "KernelArmExportPCNTUser": True,
             "KernelArmHypervisorSupport": True,
             "KernelArmVtimerUpdateVOffset": False,
+            "KernelEnableMultikernelSupport": True,
+            # XXX: Derive from devicetree?
+            "KernelMaxNumNodes": 4,
         },
         multikernels=2,
     ),
@@ -228,6 +231,8 @@ SUPPORTED_BOARDS = (
             "KernelArmExportPCNTUser": True,
             "KernelArmExportPTMRUser": True,
             "KernelArmVtimerUpdateVOffset": False,
+            "KernelMaxNumNodes": 4,
+            "KernelEnableMultikernelSupport": True,
         },
         multikernels=2,
     ),
