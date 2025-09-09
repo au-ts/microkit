@@ -1112,6 +1112,7 @@ void main(seL4_BootInfo *bi)
     puthex64(bi->untyped.end);
     puts("\n");
 
+#if 0
     // send to CPU 2 only, not 1.
     seL4_Error err = seL4_IRQControl_IssueSGISignal(seL4_CapIRQControl, 0, 1, seL4_CapInitThreadCNode, 0xf00, 64);
     if (err != seL4_NoError) {
@@ -1175,7 +1176,7 @@ void main(seL4_BootInfo *bi)
     } else {
         puts("unknown kernel\n");
     }
-
+#endif
 
 #if 0
     /* This can be useful to enable during new platform bring up

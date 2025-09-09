@@ -107,6 +107,7 @@ struct LoaderRegion64 {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 struct LoaderKernelInfo64 {
     kernel_entry: u64,
     ui_p_reg_start: u64,
@@ -328,6 +329,7 @@ impl<'a> Loader<'a> {
             for region_set in [&regions, &system_regions] {
                 for r in region_set {
                     all_regions.push((r.0 + OFFSET_SIZE * i, r.1));
+                    // all_regions.push(*r);
                 }
             }
         }
@@ -344,8 +346,6 @@ impl<'a> Loader<'a> {
 
         let mut region_metadata = Vec::new();
         let mut offset: u64 = 0;
-        let mut last_addr: u64 = 0;
-        let mut last_size: u64 = 0;
         for (addr, data) in &all_regions {
             println!(
                 "Adding region at {:x} size {:x} and offset {:x}",
@@ -360,65 +360,6 @@ impl<'a> Loader<'a> {
                 r#type: 1,
             });
             offset += data.len() as u64;
-
-            if *addr > last_addr {
-                last_addr = *addr;
-                last_size = data.len() as u64;
-            }
-        }
-        // Assuming regions are packed together and start at load addr 0x0......
-        //let offset_size: u64 = ((last_addr + last_size) + 0xFFF) & !(0xFFF);
-        println!(
-            "We can start adding from {:x} ({:x} + {:x} = {:x})",
-            OFFSET_SIZE,
-            last_addr,
-            last_size,
-            last_addr + last_size
-        );
-        // Once region meta data is finalised, add all regions again but with addresses that are offset by the last free addr
-        //
-        // So for each region in the list, add it 1..num_multikernel times
-        // Then same offset etc, but each load addr is now addr + total_size * i
-        // let original_num_regions = region_metadata.len();
-        // println!("We have (had) {} regions", original_num_regions);
-        // for i in 0..original_num_regions {
-        //     for j in 1..num_multikernels {
-        //         region_metadata.push(LoaderRegion64 {
-        //             load_addr: region_metadata[i].load_addr + OFFSET_SIZE * j,
-        //             size: region_metadata[i].size,
-        //             offset: region_metadata[i].offset,
-        //             r#type: region_metadata[i].r#type,
-        //         });
-        //     }
-        // }
-        // println!(
-        //     "We now have {} regions, expected {}",
-        //     region_metadata.len(),
-        //     original_num_regions * num_multikernels as usize
-        // );
-        // assert!(region_metadata.len() == original_num_regions * num_multikernels as usize);
-
-        for i in 0..num_multikernels {
-            println!("-------------------");
-            println!("    HEADER INFO    ");
-            println!("-------------------");
-            println!("kernel_entry: {:x}", kernel_entries[i as usize]);
-            println!(
-                "ui_p_reg_start: {:x} (user image physical start address)",
-                ui_p_reg_start
-            );
-            println!(
-                "ui_p_reg_end: {:x} (user image physical end address)",
-                ui_p_reg_end
-            );
-            println!("pv_offset: {:x} (physical/virtual offset)", pv_offset);
-            println!(
-                "initial_task_elf entry: {:x}  (user image virtual entry address)",
-                v_entry
-            );
-            println!("extra_device_addr_p: {:x}", extra_device_addr_p);
-            println!("extra_device_size: {:x}", extra_device_size);
-            println!("-------------------");
         }
 
         // Make new vector
@@ -426,15 +367,24 @@ impl<'a> Loader<'a> {
         for i in 0..num_multikernels {
             kernel_data.push(LoaderKernelInfo64 {
                 kernel_entry: kernel_entries[i as usize],
-                ui_p_reg_start: ui_p_reg_start,
-                ui_p_reg_end: ui_p_reg_end,
-                pv_offset: pv_offset,
+                ui_p_reg_start: ui_p_reg_start + OFFSET_SIZE * (i as u64),
+                ui_p_reg_end: ui_p_reg_end + OFFSET_SIZE * (i as u64),
+                pv_offset: pv_offset + OFFSET_SIZE * (i as u64),
                 v_entry: v_entry,
-                extra_device_addr_p: extra_device_addr_p,
+                extra_device_addr_p: extra_device_addr_p + OFFSET_SIZE * (i as u64),
                 extra_device_size: extra_device_size,
                 kernel_elf_paddr_base: kernel_first_paddrs[i],
             });
         }
+
+        for i in 0..num_multikernels as usize {
+            println!("-------------------");
+            println!("    HEADER INFO    ");
+            println!("-------------------");
+            println!("{:x?}", kernel_data[i]);
+            println!("-------------------");
+        }
+
         println!(
             "Kernel data was copied {} times (target {})",
             kernel_data.len(),
@@ -464,18 +414,6 @@ impl<'a> Loader<'a> {
             num_multikernels: num_multikernels as u64,
             num_regions: region_metadata.len() as u64,
         });
-
-        // Final Step: Check non-overlapping (non-optimally, just checking start address)
-        // for (i_a, region_a) in region_metadata.iter().enumerate() {
-        //     for (i_b, region_b) in region_metadata.iter().enumerate() {
-        //         if i_a == i_b { continue };
-
-        //         if region_a.load_addr == region_b.load_addr {
-        //             panic!("region {} {:x?} overlaps with region {} {:x?}", i_a, region_a, i_b, region_b);
-        //         }
-
-        //     }
-        // }
 
         Loader {
             image,

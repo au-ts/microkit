@@ -522,10 +522,68 @@ fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile, core: u64) 
     let mut normal_memory = DisjointMemoryRegion::default();
 
     for r in &kernel_config.device_regions {
+        println!("adding device memory {:x} {:x}", r.start, r.end);
         device_memory.insert_region(r.start, r.end);
     }
+
+// Very Hacky..
+/*
     for r in &kernel_config.normal_regions {
         normal_memory.insert_region(r.start, r.end);
+    }
+*/
+    assert!(kernel_config.normal_regions.len() == 1);
+    // See kernel init_coremem
+    let kernel_elf_sized_align = 0x1000000;
+    let start = kernel_config.normal_regions[0].start + (core) * kernel_elf_sized_align;
+    normal_memory.insert_region(start, start + kernel_elf_sized_align);
+    assert!(normal_memory.regions.len() == 1);
+
+    // resinert the rest back as device memory. TODO(kernel too) don't include other kernel as device mem.
+    if start != kernel_config.normal_regions[0].start {
+        // HACK: Because of the way the kernel does it these are joined together, but here it is...
+        let base = kernel_config.normal_regions[0].start;
+        let end = start;
+        let mut insert_idx = device_memory.regions.len();
+        for (idx, region) in device_memory.regions.iter().enumerate() {
+            if end <= region.base {
+                insert_idx = idx;
+                break;
+            }
+        }
+        if end == device_memory.regions[insert_idx].base {
+            // assert!(aligned right)
+            // extend up to new increased end
+            device_memory.regions[insert_idx].end = end;
+        } else {
+            device_memory.regions.insert(insert_idx, MemoryRegion::new(base, end));
+        }
+        // device_memory.check();
+    }
+
+    if normal_memory.regions[0].end != kernel_config.normal_regions[0].end {
+        // device_memory.insert_region(normal_memory.regions[0].end, kernel_config.normal_regions[0].end);
+
+        // HACK: Because of the way the kernel does it these are joined together, but here it is...
+        let base = normal_memory.regions[0].end;
+        let end = kernel_config.normal_regions[0].end;
+        let mut insert_idx = device_memory.regions.len();
+        for (idx, region) in device_memory.regions.iter().enumerate() {
+            if end <= region.base {
+                insert_idx = idx;
+                break;
+            }
+        }
+        if end == device_memory.regions[insert_idx].base {
+            // assert!(aligned right)
+            println!("overwriting {:x}..{:x} with {:x}, {:x}", device_memory.regions[insert_idx].base, device_memory.regions[insert_idx].end, base, end);
+            // extend down to new decreased base
+            device_memory.regions[insert_idx].base = base;
+        } else {
+            device_memory.regions.insert(insert_idx, MemoryRegion::new(base, end));
+        }
+        // device_memory.check();
+
     }
 
     // ============= Multikernel: calculate where we want to load the kernel ======================
@@ -538,10 +596,7 @@ fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile, core: u64) 
         .find_symbol("ki_end")
         .expect("Could not find 'ki_end' symbol");
 
-    // CHOICE!
-    // TODO: How to choose?
-    assert!(core == 0);
-    let kernel_first_paddr = kernel_config.normal_regions[0].start + (0x1000000 * core);
+    let kernel_first_paddr = normal_memory.regions[0].base;
     let kernel_p_v_offset = kernel_first_vaddr - kernel_first_paddr;
 
     println!("Kernel First Paddr: {:x}", kernel_first_paddr);
