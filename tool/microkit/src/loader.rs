@@ -134,7 +134,6 @@ pub struct Loader<'a> {
     kernel_data: Vec<LoaderKernelInfo64>,
     region_metadata: Vec<LoaderRegion64>,
     regions: Vec<(u64, &'a [u8])>,
-    _additional_headers: Vec<LoaderHeader64>,
 }
 
 impl<'a> Loader<'a> {
@@ -142,10 +141,10 @@ impl<'a> Loader<'a> {
         config: &Config,
         loader_elf_path: &Path,
         kernel_elf: &'a ElfFile,
-        kernel_elf_p_v_offset: u64,
-        initial_task_elf: &'a ElfFile,
-        initial_task_phys_base: Option<u64>,
-        reserved_region: MemoryRegion,
+        kernel_elf_pv_offsets: &[u64],
+        initial_task_elfs: &'a [ElfFile],
+        initial_task_phys_base: &[u64],
+        reserved_regions: &[MemoryRegion],
         system_regions: Vec<(u64, &'a [u8])>,
     ) -> Loader<'a> {
         // Note: If initial_task_phys_base is not None, then it just this address
@@ -189,13 +188,6 @@ impl<'a> Loader<'a> {
         let mut kernel_regions = Vec::new();
         let mut regions: Vec<(u64, &'a [u8])> = Vec::new();
 
-        const OFFSET_SIZE: u64 = 0x1000000;
-        // TODO: Hack, this should be done in the system construction.
-        let kernel_pv_offsets: Vec<_> = (0..num_multikernels)
-            .into_iter()
-            .map(|i| kernel_elf_p_v_offset - OFFSET_SIZE * (i as u64))
-            .collect();
-
         // Delete it.
         #[allow(unused_variables)]
         let kernel_elf_p_v_offset = ();
@@ -207,7 +199,7 @@ impl<'a> Loader<'a> {
             .virt_addr;
 
         let mut kernel_first_paddrs = vec![];
-        for kernel_p_v_offset in &kernel_pv_offsets {
+        for kernel_p_v_offset in kernel_elf_pv_offsets {
             let kernel_first_paddr = kernel_first_vaddr - kernel_p_v_offset;
             kernel_first_paddrs.push(kernel_first_paddr);
 
@@ -225,26 +217,37 @@ impl<'a> Loader<'a> {
         // (and indeed initial did support multi-segment ELF files). However
         // it adds significant complexity, and the calling functions enforce
         // only single-segment ELF files, so we keep things simple here.
-        let initial_task_segments: Vec<_> = initial_task_elf
-            .segments
-            .iter()
-            .filter(|s| s.loadable)
-            .collect();
-        assert!(initial_task_segments.len() == 1);
-        let segment = &initial_task_segments[0];
-        assert!(segment.loadable);
+        let mut initial_task_info = vec![];
+        for multikernel_idx in 0..num_multikernels {
+            let initial_task_elf = &initial_task_elfs[multikernel_idx];
+            let initial_task_segments: Vec<_> = initial_task_elf
+                .segments
+                .iter()
+                .filter(|s| s.loadable)
+                .collect();
+            assert!(initial_task_segments.len() == 1);
+            let segment = &initial_task_segments[0];
+            assert!(segment.loadable);
 
-        let inittask_first_vaddr = segment.virt_addr;
-        let inittask_last_vaddr = round_up(segment.virt_addr + segment.mem_size(), kb(4));
+            let inittask_first_vaddr = segment.virt_addr;
+            let inittask_last_vaddr = round_up(segment.virt_addr + segment.mem_size(), kb(4));
 
-        let inittask_first_paddr = match initial_task_phys_base {
-            Some(paddr) => paddr,
-            None => segment.phys_addr,
-        };
-        let inittask_p_v_offset = inittask_first_vaddr - inittask_first_paddr;
+            let inittask_first_paddr = initial_task_phys_base[multikernel_idx];
+            let inittask_p_v_offset = inittask_first_vaddr - inittask_first_paddr;
 
-        // Note: For now we include any zeroes. We could optimize in the future
-        regions.push((inittask_first_paddr, &segment.data));
+            // Note: For now we include any zeroes. We could optimize in the future
+            regions.push((inittask_first_paddr, &segment.data));
+
+            let pv_offset = inittask_first_paddr.wrapping_sub(inittask_first_vaddr);
+
+            let ui_p_reg_start = inittask_first_paddr;
+            let ui_p_reg_end = inittask_last_vaddr - inittask_p_v_offset;
+            assert!(ui_p_reg_end > ui_p_reg_start);
+
+            let v_entry = initial_task_elf.entry;
+
+            initial_task_info.push((pv_offset, ui_p_reg_start, ui_p_reg_end, v_entry))
+        }
 
         println!("Making pagetables");
         let pagetable_vars: Vec<_> = kernel_first_paddrs
@@ -306,17 +309,6 @@ impl<'a> Loader<'a> {
             kernel_entries.push(kernel_elf.entry);
         }
 
-        let pv_offset = inittask_first_paddr.wrapping_sub(inittask_first_vaddr);
-
-        let ui_p_reg_start = inittask_first_paddr;
-        let ui_p_reg_end = inittask_last_vaddr - inittask_p_v_offset;
-        assert!(ui_p_reg_end > ui_p_reg_start);
-
-        let v_entry = initial_task_elf.entry;
-
-        let extra_device_addr_p = reserved_region.base;
-        let extra_device_size = reserved_region.size();
-
         println!(
             "There are {} regions and {} kernel regions and {} system regions",
             regions.len(),
@@ -325,12 +317,9 @@ impl<'a> Loader<'a> {
         );
         let mut all_regions = Vec::with_capacity(regions.len() + system_regions.len());
         all_regions.extend(kernel_regions);
-        for i in 0..(num_multikernels as u64) {
-            for region_set in [&regions, &system_regions] {
-                for r in region_set {
-                    all_regions.push((r.0 + OFFSET_SIZE * i, r.1));
-                    // all_regions.push(*r);
-                }
+        for region_set in [&regions, &system_regions] {
+            for r in region_set {
+                all_regions.push(*r);
             }
         }
 
@@ -367,12 +356,12 @@ impl<'a> Loader<'a> {
         for i in 0..num_multikernels {
             kernel_data.push(LoaderKernelInfo64 {
                 kernel_entry: kernel_entries[i as usize],
-                ui_p_reg_start: ui_p_reg_start + OFFSET_SIZE * (i as u64),
-                ui_p_reg_end: ui_p_reg_end + OFFSET_SIZE * (i as u64),
-                pv_offset: pv_offset + OFFSET_SIZE * (i as u64),
-                v_entry: v_entry,
-                extra_device_addr_p: extra_device_addr_p + OFFSET_SIZE * (i as u64),
-                extra_device_size: extra_device_size,
+                ui_p_reg_start: initial_task_info[i].1,
+                ui_p_reg_end: initial_task_info[i].2,
+                pv_offset: initial_task_info[i].0,
+                v_entry: initial_task_info[i].3,
+                extra_device_addr_p: reserved_regions[i].base,
+                extra_device_size: reserved_regions[i].size(),
                 kernel_elf_paddr_base: kernel_first_paddrs[i],
             });
         }
@@ -406,22 +395,12 @@ impl<'a> Loader<'a> {
             num_regions: region_metadata.len() as u64,
         };
 
-        let mut additional_headers: Vec<LoaderHeader64> = Vec::new();
-        additional_headers.push(LoaderHeader64 {
-            magic,
-            size,
-            flags,
-            num_multikernels: num_multikernels as u64,
-            num_regions: region_metadata.len() as u64,
-        });
-
         Loader {
             image,
             header,
             kernel_data,
             region_metadata,
             regions: all_regions,
-            _additional_headers: additional_headers,
         }
     }
 

@@ -895,8 +895,8 @@ void secondary_cpu_entry() {
     dsb();
 
     // Temp: Hang all other kernels otherwise output becomes garbled
-    for (volatile int i = 0; i < cpu * 1000000000; i++);
-    // start_kernel(cpu);
+    for (volatile int i = 0; i < cpu * 100000000; i++);
+    start_kernel(cpu);
 
     puts("LDR|ERROR: seL4 Loader: Error - KERNEL RETURNED (CPU ");
     puthex32(cpu);

@@ -797,6 +797,7 @@ fn build_system(
     kernel_elf: &ElfFile,
     monitor_elf: &ElfFile,
     system: &SystemDescription,
+    core: u64,
     invocation_table_size: u64,
     system_cnode_size: u64,
 ) -> Result<BuiltSystem, String> {
@@ -837,7 +838,7 @@ fn build_system(
     // Now that the size is determined, find a free region in the physical memory
     // space.
     let (mut available_memory, kernel_boot_region) =
-        emulate_kernel_boot_partial(config, kernel_elf, /* core */ 0);
+        emulate_kernel_boot_partial(config, kernel_elf, core);
 
     // The kernel relies on the reserved region being allocated above the kernel
     // boot/ELF region, so we have the end of the kernel boot region as the lower
@@ -871,7 +872,7 @@ fn build_system(
     let kernel_boot_info = emulate_kernel_boot(
         config,
         kernel_elf,
-        /* core */ 0,
+        core,
         initial_task_phys_region,
         initial_task_virt_region,
         reserved_region,
@@ -3376,212 +3377,234 @@ fn main() -> Result<(), String> {
     };
 
     let kernel_elf = ElfFile::from_path(&kernel_elf_path)?;
-    let mut monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
-
-    if monitor_elf.segments.iter().filter(|s| s.loadable).count() > 1 {
-        eprintln!(
-            "Monitor ({}) has {} segments, it must only have one",
-            monitor_elf_path.display(),
-            monitor_elf.segments.len()
-        );
-        std::process::exit(1);
-    }
 
     let mut search_paths = vec![std::env::current_dir().unwrap()];
     for path in args.search_paths {
         search_paths.push(PathBuf::from(path));
     }
 
+    // TODO: From loader?
+    const NUM_MULTIKERNELS: usize = 2;
+
     // Get the elf files for each pd:
-    let mut pd_elf_files = Vec::with_capacity(system.protection_domains.len());
-    for pd in &system.protection_domains {
-        match get_full_path(&pd.program_image, &search_paths) {
-            Some(path) => {
-                let elf = ElfFile::from_path(&path).unwrap();
-                pd_elf_files.push(elf);
-            }
-            None => {
-                return Err(format!(
-                    "unable to find program image: '{}'",
-                    pd.program_image.display()
-                ))
-            }
-        }
-    }
+    let mut pd_elf_files_by_core = Vec::with_capacity(NUM_MULTIKERNELS);
+    let mut built_systems = vec![];
+    let mut monitor_elfs_by_core = Vec::with_capacity(NUM_MULTIKERNELS);
+    let mut bootstrap_invocation_datas = vec![];
 
-    let mut invocation_table_size = kernel_config.minimum_page_size;
-    let mut system_cnode_size = 2;
+    for multikernel_idx in 0..NUM_MULTIKERNELS {
+        let mut invocation_table_size = kernel_config.minimum_page_size;
+        let mut system_cnode_size = 2;
+        let mut built_system;
 
-    let mut built_system;
-    loop {
-        built_system = build_system(
-            &kernel_config,
-            &pd_elf_files,
-            &kernel_elf,
-            &monitor_elf,
-            &system,
-            invocation_table_size,
-            system_cnode_size,
-        )?;
-        println!("BUILT: system_cnode_size={} built_system.number_of_system_caps={} invocation_table_size={} built_system.invocation_data_size={}",
-                 system_cnode_size, built_system.number_of_system_caps, invocation_table_size, built_system.invocation_data_size);
+        let monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
+        monitor_elfs_by_core.push(monitor_elf);
+        let monitor_elf = &mut monitor_elfs_by_core[multikernel_idx];
 
-        if built_system.number_of_system_caps <= system_cnode_size
-            && built_system.invocation_data_size <= invocation_table_size
-        {
-            break;
+        if monitor_elf.segments.iter().filter(|s| s.loadable).count() > 1 {
+            eprintln!(
+                "Monitor ({}) has {} segments, it must only have one",
+                monitor_elf_path.display(),
+                monitor_elf.segments.len()
+            );
+            std::process::exit(1);
         }
 
-        // Recalculate the sizes for the next iteration
-        let new_invocation_table_size = util::round_up(
-            built_system.invocation_data_size,
-            kernel_config.minimum_page_size,
-        );
-        let new_system_cnode_size = 2_u64.pow(
-            built_system
-                .number_of_system_caps
-                .next_power_of_two()
-                .ilog2(),
-        );
+        pd_elf_files_by_core.push(Vec::with_capacity(system.protection_domains.len()));
+        let mut pd_elf_files = &mut pd_elf_files_by_core[multikernel_idx];
+        for pd in &system.protection_domains {
+            match get_full_path(&pd.program_image, &search_paths) {
+                Some(path) => {
+                    let elf = ElfFile::from_path(&path).unwrap();
+                    pd_elf_files.push(elf);
+                }
+                None => {
+                    return Err(format!(
+                        "unable to find program image: '{}'",
+                        pd.program_image.display()
+                    ))
+                }
+            }
+        }
 
-        invocation_table_size = max(invocation_table_size, new_invocation_table_size);
-        system_cnode_size = max(system_cnode_size, new_system_cnode_size);
-    }
+        let core = multikernel_idx as u64;
+        loop {
+            built_system = build_system(
+                &kernel_config,
+                &pd_elf_files,
+                &kernel_elf,
+                &monitor_elf,
+                &system,
+                core,
+                invocation_table_size,
+                system_cnode_size,
+            )?;
+            println!("BUILT(core={}): system_cnode_size={} built_system.number_of_system_caps={} invocation_table_size={} built_system.invocation_data_size={}",
+                     core, system_cnode_size, built_system.number_of_system_caps, invocation_table_size, built_system.invocation_data_size);
 
-    // At this point we just need to patch the files (in memory) and write out the final image.
+            if built_system.number_of_system_caps <= system_cnode_size
+                && built_system.invocation_data_size <= invocation_table_size
+            {
+                break;
+            }
 
-    // A: The monitor
+            // Recalculate the sizes for the next iteration
+            let new_invocation_table_size = util::round_up(
+                built_system.invocation_data_size,
+                kernel_config.minimum_page_size,
+            );
+            let new_system_cnode_size = 2_u64.pow(
+                built_system
+                    .number_of_system_caps
+                    .next_power_of_two()
+                    .ilog2(),
+            );
 
-    // A.1: As part of emulated boot we determined exactly how the kernel would
-    // create untyped objects. Through testing we know that this matches, but
-    // we could have a bug, or the kernel could change. It that happens we are
-    // in a bad spot! Things will break. So we write out this information so that
-    // the monitor can double check this at run time.
-    let (_, untyped_info_size) = monitor_elf
-        .find_symbol(monitor_config.untyped_info_symbol_name)
-        .unwrap_or_else(|_| {
-            panic!(
-                "Could not find '{}' symbol",
-                monitor_config.untyped_info_symbol_name
-            )
-        });
-    let max_untyped_objects = monitor_config.max_untyped_objects(untyped_info_size);
-    if built_system.kernel_boot_info.untyped_objects.len() as u64 > max_untyped_objects {
-        eprintln!(
-            "Too many untyped objects: monitor ({}) supports {} regions. System has {} objects.",
-            monitor_elf_path.display(),
-            max_untyped_objects,
-            built_system.kernel_boot_info.untyped_objects.len()
-        );
-        std::process::exit(1);
-    }
+            invocation_table_size = max(invocation_table_size, new_invocation_table_size);
+            system_cnode_size = max(system_cnode_size, new_system_cnode_size);
+        }
 
-    let untyped_info_header = MonitorUntypedInfoHeader64 {
-        cap_start: built_system.kernel_boot_info.untyped_objects[0].cap,
-        cap_end: built_system
+        built_systems.push(built_system);
+        let built_system = &built_systems[multikernel_idx];
+
+        // At this point we just need to patch the files (in memory) and write out the final image.
+
+        // A: The monitor
+
+        // A.1: As part of emulated boot we determined exactly how the kernel would
+        // create untyped objects. Through testing we know that this matches, but
+        // we could have a bug, or the kernel could change. It that happens we are
+        // in a bad spot! Things will break. So we write out this information so that
+        // the monitor can double check this at run time.
+        let (_, untyped_info_size) = monitor_elf
+            .find_symbol(monitor_config.untyped_info_symbol_name)
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Could not find '{}' symbol",
+                    monitor_config.untyped_info_symbol_name
+                )
+            });
+        let max_untyped_objects = monitor_config.max_untyped_objects(untyped_info_size);
+        if built_system.kernel_boot_info.untyped_objects.len() as u64 > max_untyped_objects {
+            eprintln!(
+                "Too many untyped objects: monitor ({}) supports {} regions. System has {} objects.",
+                monitor_elf_path.display(),
+                max_untyped_objects,
+                built_system.kernel_boot_info.untyped_objects.len()
+            );
+            std::process::exit(1);
+        }
+
+        let untyped_info_header = MonitorUntypedInfoHeader64 {
+            cap_start: built_system.kernel_boot_info.untyped_objects[0].cap,
+            cap_end: built_system
+                .kernel_boot_info
+                .untyped_objects
+                .last()
+                .unwrap()
+                .cap
+                + 1,
+        };
+        let untyped_info_object_data: Vec<MonitorRegion64> = built_system
             .kernel_boot_info
             .untyped_objects
-            .last()
-            .unwrap()
-            .cap
-            + 1,
-    };
-    let untyped_info_object_data: Vec<MonitorRegion64> = built_system
-        .kernel_boot_info
-        .untyped_objects
-        .iter()
-        .map(|ut| MonitorRegion64 {
-            paddr: ut.base(),
-            size_bits: ut.size_bits(),
-            is_device: ut.is_device as u64,
-        })
-        .collect();
-    let mut untyped_info_data: Vec<u8> =
-        Vec::from(unsafe { struct_to_bytes(&untyped_info_header) });
-    for o in &untyped_info_object_data {
-        untyped_info_data.extend(unsafe { struct_to_bytes(o) });
-    }
-    monitor_elf.write_symbol(monitor_config.untyped_info_symbol_name, &untyped_info_data)?;
-
-    let mut bootstrap_invocation_data: Vec<u8> = Vec::new();
-    for invocation in &built_system.bootstrap_invocations {
-        invocation.add_raw_invocation(&kernel_config, &mut bootstrap_invocation_data);
-    }
-
-    let (_, bootstrap_invocation_data_size) =
-        monitor_elf.find_symbol(monitor_config.bootstrap_invocation_data_symbol_name)?;
-    if bootstrap_invocation_data.len() as u64 > bootstrap_invocation_data_size {
-        eprintln!("bootstrap invocation array size   : {bootstrap_invocation_data_size}");
-        eprintln!(
-            "bootstrap invocation required size: {}",
-            bootstrap_invocation_data.len()
-        );
-        let mut stderr = BufWriter::new(std::io::stderr());
-        for bootstrap_invocation in &built_system.bootstrap_invocations {
-            bootstrap_invocation.report_fmt(&mut stderr, &kernel_config, &built_system.cap_lookup);
+            .iter()
+            .map(|ut| MonitorRegion64 {
+                paddr: ut.base(),
+                size_bits: ut.size_bits(),
+                is_device: ut.is_device as u64,
+            })
+            .collect();
+        let mut untyped_info_data: Vec<u8> =
+            Vec::from(unsafe { struct_to_bytes(&untyped_info_header) });
+        for o in &untyped_info_object_data {
+            untyped_info_data.extend(unsafe { struct_to_bytes(o) });
         }
-        stderr.flush().unwrap();
+        monitor_elf.write_symbol(monitor_config.untyped_info_symbol_name, &untyped_info_data)?;
 
-        eprintln!("Internal error: bootstrap invocations too large");
+        let mut bootstrap_invocation_data: Vec<u8> = Vec::new();
+        for invocation in &built_system.bootstrap_invocations {
+            invocation.add_raw_invocation(&kernel_config, &mut bootstrap_invocation_data);
+        }
+
+        let (_, bootstrap_invocation_data_size) =
+            monitor_elf.find_symbol(monitor_config.bootstrap_invocation_data_symbol_name)?;
+        if bootstrap_invocation_data.len() as u64 > bootstrap_invocation_data_size {
+            eprintln!("bootstrap invocation array size   : {bootstrap_invocation_data_size}");
+            eprintln!(
+                "bootstrap invocation required size: {}",
+                bootstrap_invocation_data.len()
+            );
+            let mut stderr = BufWriter::new(std::io::stderr());
+            for bootstrap_invocation in &built_system.bootstrap_invocations {
+                bootstrap_invocation.report_fmt(&mut stderr, &kernel_config, &built_system.cap_lookup);
+            }
+            stderr.flush().unwrap();
+
+            eprintln!("Internal error: bootstrap invocations too large");
+        }
+
+        bootstrap_invocation_datas.push(bootstrap_invocation_data);
+        let bootstrap_invocation_data = &bootstrap_invocation_datas[multikernel_idx];
+
+        monitor_elf.write_symbol(
+            monitor_config.bootstrap_invocation_count_symbol_name,
+            &built_system.bootstrap_invocations.len().to_le_bytes(),
+        )?;
+        monitor_elf.write_symbol(
+            monitor_config.system_invocation_count_symbol_name,
+            &built_system.system_invocations.len().to_le_bytes(),
+        )?;
+        monitor_elf.write_symbol(
+            monitor_config.bootstrap_invocation_data_symbol_name,
+            &bootstrap_invocation_data,
+        )?;
+
+        let pd_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.pd_tcb_caps);
+        let vm_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.vm_tcb_caps);
+        let sched_cap_bytes = monitor_serialise_u64_vec(&built_system.sched_caps);
+        let ntfn_cap_bytes = monitor_serialise_u64_vec(&built_system.ntfn_caps);
+        let pd_stack_addrs_bytes = monitor_serialise_u64_vec(&built_system.pd_stack_addrs);
+
+        monitor_elf.write_symbol("fault_ep", &built_system.fault_ep_cap_address.to_le_bytes())?;
+        monitor_elf.write_symbol("reply", &built_system.reply_cap_address.to_le_bytes())?;
+        monitor_elf.write_symbol("pd_tcbs", &pd_tcb_cap_bytes)?;
+        monitor_elf.write_symbol("vm_tcbs", &vm_tcb_cap_bytes)?;
+        monitor_elf.write_symbol("scheduling_contexts", &sched_cap_bytes)?;
+        monitor_elf.write_symbol("notification_caps", &ntfn_cap_bytes)?;
+        monitor_elf.write_symbol("pd_stack_addrs", &pd_stack_addrs_bytes)?;
+        let pd_names = system
+            .protection_domains
+            .iter()
+            .map(|pd| &pd.name)
+            .collect();
+        monitor_elf.write_symbol(
+            "pd_names",
+            &monitor_serialise_names(pd_names, MAX_PDS, PD_MAX_NAME_LENGTH),
+        )?;
+        monitor_elf.write_symbol(
+            "pd_names_len",
+            &system.protection_domains.len().to_le_bytes(),
+        )?;
+        let vm_names: Vec<&String> = system
+            .protection_domains
+            .iter()
+            .filter_map(|pd| pd.virtual_machine.as_ref().map(|vm| &vm.name))
+            .collect();
+        monitor_elf.write_symbol("vm_names_len", &vm_names.len().to_le_bytes())?;
+        monitor_elf.write_symbol(
+            "vm_names",
+            &monitor_serialise_names(vm_names, MAX_VMS, VM_MAX_NAME_LENGTH),
+        )?;
+
+        // Write out all the symbols for each PD
+        pd_write_symbols(
+            &system.protection_domains,
+            &system.channels,
+            &mut pd_elf_files,
+            &built_system.pd_setvar_values,
+        )?;
     }
-
-    monitor_elf.write_symbol(
-        monitor_config.bootstrap_invocation_count_symbol_name,
-        &built_system.bootstrap_invocations.len().to_le_bytes(),
-    )?;
-    monitor_elf.write_symbol(
-        monitor_config.system_invocation_count_symbol_name,
-        &built_system.system_invocations.len().to_le_bytes(),
-    )?;
-    monitor_elf.write_symbol(
-        monitor_config.bootstrap_invocation_data_symbol_name,
-        &bootstrap_invocation_data,
-    )?;
-
-    let pd_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.pd_tcb_caps);
-    let vm_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.vm_tcb_caps);
-    let sched_cap_bytes = monitor_serialise_u64_vec(&built_system.sched_caps);
-    let ntfn_cap_bytes = monitor_serialise_u64_vec(&built_system.ntfn_caps);
-    let pd_stack_addrs_bytes = monitor_serialise_u64_vec(&built_system.pd_stack_addrs);
-
-    monitor_elf.write_symbol("fault_ep", &built_system.fault_ep_cap_address.to_le_bytes())?;
-    monitor_elf.write_symbol("reply", &built_system.reply_cap_address.to_le_bytes())?;
-    monitor_elf.write_symbol("pd_tcbs", &pd_tcb_cap_bytes)?;
-    monitor_elf.write_symbol("vm_tcbs", &vm_tcb_cap_bytes)?;
-    monitor_elf.write_symbol("scheduling_contexts", &sched_cap_bytes)?;
-    monitor_elf.write_symbol("notification_caps", &ntfn_cap_bytes)?;
-    monitor_elf.write_symbol("pd_stack_addrs", &pd_stack_addrs_bytes)?;
-    let pd_names = system
-        .protection_domains
-        .iter()
-        .map(|pd| &pd.name)
-        .collect();
-    monitor_elf.write_symbol(
-        "pd_names",
-        &monitor_serialise_names(pd_names, MAX_PDS, PD_MAX_NAME_LENGTH),
-    )?;
-    monitor_elf.write_symbol(
-        "pd_names_len",
-        &system.protection_domains.len().to_le_bytes(),
-    )?;
-    let vm_names: Vec<&String> = system
-        .protection_domains
-        .iter()
-        .filter_map(|pd| pd.virtual_machine.as_ref().map(|vm| &vm.name))
-        .collect();
-    monitor_elf.write_symbol("vm_names_len", &vm_names.len().to_le_bytes())?;
-    monitor_elf.write_symbol(
-        "vm_names",
-        &monitor_serialise_names(vm_names, MAX_VMS, VM_MAX_NAME_LENGTH),
-    )?;
-
-    // Write out all the symbols for each PD
-    pd_write_symbols(
-        &system.protection_domains,
-        &system.channels,
-        &mut pd_elf_files,
-        &built_system.pd_setvar_values,
-    )?;
 
     // Generate the report
     let report = match std::fs::File::create(args.report) {
@@ -3598,8 +3621,9 @@ fn main() -> Result<(), String> {
     match write_report(
         &mut report_buf,
         &kernel_config,
-        &built_system,
-        &bootstrap_invocation_data,
+        // TEMP!
+        &built_systems[0],
+        &bootstrap_invocation_datas[0],
     ) {
         Ok(()) => report_buf.flush().unwrap(),
         Err(err) => {
@@ -3611,13 +3635,13 @@ fn main() -> Result<(), String> {
     }
     report_buf.flush().unwrap();
 
-    let mut loader_regions: Vec<(u64, &[u8])> = vec![(
-        built_system.reserved_region.base,
-        &built_system.invocation_data,
-    )];
-    for (i, regions) in built_system.pd_elf_regions.iter().enumerate() {
-        for r in regions {
-            loader_regions.push((r.addr, r.data(&pd_elf_files[i])));
+    let mut loader_regions: Vec<(u64, &[u8])> = vec![];
+    for (multikernel_idx, built_system) in built_systems.iter().enumerate() {
+        loader_regions.push((built_system.reserved_region.base, &built_system.invocation_data));
+        for (i, regions) in built_system.pd_elf_regions.iter().enumerate() {
+            for r in regions {
+                loader_regions.push((r.addr, r.data(&pd_elf_files_by_core[multikernel_idx][i])));
+            }
         }
     }
 
@@ -3626,10 +3650,11 @@ fn main() -> Result<(), String> {
         &kernel_config,
         Path::new(&loader_elf_path),
         &kernel_elf,
-        built_system.kernel_boot_info.p_v_offset,
-        &monitor_elf,
-        Some(built_system.initial_task_phys_region.base),
-        built_system.reserved_region,
+        &built_systems.iter().map(|bs| bs.kernel_boot_info.p_v_offset).collect::<Vec<_>>(),
+        // XXX: Part of built system. Like everything TBH.
+        &monitor_elfs_by_core,
+        &built_systems.iter().map(|bs| bs.initial_task_phys_region.base).collect::<Vec<_>>(),
+        &built_systems.iter().map(|bs| bs.reserved_region).collect::<Vec<_>>(),
         loader_regions,
     );
     println!("Made image");
