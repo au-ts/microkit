@@ -122,6 +122,26 @@ struct untyped_info untyped_info;
 
 void dump_untyped_info()
 {
+#if 1
+    puts("\nUntyped Info Untyped Details\n");
+    for (int i = 0; i < untyped_info.cap_end - untyped_info.cap_start; i++) {
+        puts("untypedList[");
+        puthex32(i);
+        puts("]        = slot: ");
+        puthex32(untyped_info.cap_start + i);
+        puts(", paddr: ");
+        puthex64(untyped_info.regions[i].paddr);
+        puts(" - ");
+        puthex64(untyped_info.regions[i].paddr + (1UL << untyped_info.regions[i].size_bits));
+        puts(" (");
+        puts(untyped_info.regions[i].is_device ? "device" : "normal");
+        puts(") bits: ");
+        puthex32(untyped_info.regions[i].size_bits);
+        puts("\n");
+    }
+#endif
+
+#if 1
     puts("\nUntyped Info Expected Memory Ranges\n");
     seL4_Word start = untyped_info.regions[0].paddr;
     seL4_Word end = start + (1ULL << untyped_info.regions[0].size_bits);
@@ -149,6 +169,7 @@ void dump_untyped_info()
     puts(" (");
     puts(is_device ? "device" : "normal");
     puts(")\n");
+#endif
 }
 
 /*
@@ -436,7 +457,7 @@ static bool check_untypeds_match(seL4_BootInfo *bi)
         puts("  boot info cap start: ");
         puthex32(bi->untyped.start);
         puts("\n");
-        puts("cap start mismatch");
+        puts("cap start mismatch\n");
         return false;
     }
 
@@ -446,8 +467,8 @@ static bool check_untypeds_match(seL4_BootInfo *bi)
         puts("  boot info cap end: ");
         puthex32(bi->untyped.end);
         puts("\n");
-
-        fail("TODO revert");
+        puts("cap end mismatch");
+        return false;
     }
 
     for (unsigned i = 0; i < untyped_info.cap_end - untyped_info.cap_start; i++) {
@@ -1069,7 +1090,7 @@ void main(seL4_BootInfo *bi)
 {
     __sel4_ipc_buffer = bi->ipcBuffer;
     puts("MON|INFO: Microkit Bootstrap\n");
-#if 0
+
     if (!check_untypeds_match(bi)) {
         /* This can be useful to enable during new platform bring up
          * if there are problems
@@ -1078,7 +1099,6 @@ void main(seL4_BootInfo *bi)
         dump_untyped_info();
         fail("MON|ERROR: found mismatch between boot info and untyped info");
     }
-#endif
 
     puts("current node: ");
     puthex64(bi->nodeID);
@@ -1165,49 +1185,46 @@ void main(seL4_BootInfo *bi)
     dump_untyped_info();
 #endif
 
-//     check_untypeds_match(bi);
+    check_untypeds_match(bi);
 
-//     puts("MON|INFO: Number of bootstrap invocations: ");
-//     puthex32(bootstrap_invocation_count);
-//     puts("\n");
+    puts("MON|INFO: Number of bootstrap invocations: ");
+    puthex32(bootstrap_invocation_count);
+    puts("\n");
 
-//     puts("MON|INFO: Number of system invocations:    ");
-//     puthex32(system_invocation_count);
-//     puts("\n");
+    puts("MON|INFO: Number of system invocations:    ");
+    puthex32(system_invocation_count);
+    puts("\n");
 
-//     unsigned offset = 0;
-//     for (unsigned idx = 0; idx < bootstrap_invocation_count; idx++) {
-//         offset = perform_invocation(bootstrap_invocation_data, offset, idx);
-//     }
-//     puts("MON|INFO: completed bootstrap invocations\n");
+    unsigned offset = 0;
+    for (unsigned idx = 0; idx < bootstrap_invocation_count; idx++) {
+        offset = perform_invocation(bootstrap_invocation_data, offset, idx);
+    }
+    puts("MON|INFO: completed bootstrap invocations\n");
 
-//     offset = 0;
-//     for (unsigned idx = 0; idx < system_invocation_count; idx++) {
-//         offset = perform_invocation(system_invocation_data, offset, idx);
-//     }
+    offset = 0;
+    for (unsigned idx = 0; idx < system_invocation_count; idx++) {
+        offset = perform_invocation(system_invocation_data, offset, idx);
+    }
 
-// #if CONFIG_DEBUG_BUILD
-//     /*
-//      * Assign PD/VM names to each TCB with seL4, this helps debugging when an error
-//      * message is printed by seL4 or if we dump the scheduler state.
-//      * This is done specifically in the monitor rather than being prepared as an
-//      * invocation like everything else because it is technically a separate system
-//      * call and not an invocation.
-//      * If we end up doing various different kinds of system calls we should add
-//      * support in the tooling and make the monitor generic.
-//      */
-//     for (unsigned idx = 1; idx < pd_names_len + 1; idx++) {
-//         seL4_DebugNameThread(pd_tcbs[idx], pd_names[idx]);
-//     }
-//     for (unsigned idx = 1; idx < vm_names_len + 1; idx++) {
-//         seL4_DebugNameThread(vm_tcbs[idx], vm_names[idx]);
-//     }
-// #endif
+#if CONFIG_DEBUG_BUILD
+    /*
+     * Assign PD/VM names to each TCB with seL4, this helps debugging when an error
+     * message is printed by seL4 or if we dump the scheduler state.
+     * This is done specifically in the monitor rather than being prepared as an
+     * invocation like everything else because it is technically a separate system
+     * call and not an invocation.
+     * If we end up doing various different kinds of system calls we should add
+     * support in the tooling and make the monitor generic.
+     */
+    for (unsigned idx = 1; idx < pd_names_len + 1; idx++) {
+        seL4_DebugNameThread(pd_tcbs[idx], pd_names[idx]);
+    }
+    for (unsigned idx = 1; idx < vm_names_len + 1; idx++) {
+        seL4_DebugNameThread(vm_tcbs[idx], vm_names[idx]);
+    }
+#endif
 
-//     puts("MON|INFO: completed system invocations\n");
+    puts("MON|INFO: completed system invocations\n");
 
-
-
-    for (volatile uint64_t i = 0; i < 1000000000000ULL; i++);
-    // monitor();
+    monitor();
 }
