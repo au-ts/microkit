@@ -172,9 +172,9 @@ impl<'a> Loader<'a> {
         let num_multikernels: usize = (*(elf
             .get_data(num_multikernels_addr, num_multikernels_size)
             .expect("Could not extract number of multikernels to boot"))
-            .first()
-            .expect("Failed to copy in number of multikernels to boot"))
-            .into();
+        .first()
+        .expect("Failed to copy in number of multikernels to boot"))
+        .into();
         println!("Recieved number {}", num_multikernels);
         assert!(num_multikernels > 0);
 
@@ -254,19 +254,16 @@ impl<'a> Loader<'a> {
             .iter()
             .enumerate()
             .map(|(i, paddr)| match config.arch {
-                    Arch::Aarch64 => Loader::aarch64_setup_pagetables(
-                        &elf,
-                        kernel_first_vaddr,
-                        *paddr,
-                        (i * PAGE_TABLE_SIZE) as u64,
-                    ),
-                    Arch::Riscv64 => Loader::riscv64_setup_pagetables(
-                        config,
-                        &elf,
-                        kernel_first_vaddr,
-                        *paddr,
-                    ),
-                })
+                Arch::Aarch64 => Loader::aarch64_setup_pagetables(
+                    &elf,
+                    kernel_first_vaddr,
+                    *paddr,
+                    (i * PAGE_TABLE_SIZE) as u64,
+                ),
+                Arch::Riscv64 => {
+                    Loader::riscv64_setup_pagetables(config, &elf, kernel_first_vaddr, *paddr)
+                }
+            })
             .collect();
         println!("Made pagetables");
 

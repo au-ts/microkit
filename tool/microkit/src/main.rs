@@ -16,7 +16,7 @@ use microkit_tool::{
 };
 use sdf::{
     parse, Channel, ProtectionDomain, SysMap, SysMapPerms, SysMemoryRegion, SysMemoryRegionKind,
-    SystemDescription, VirtualMachine,
+    VirtualMachine,
 };
 use sel4::{
     default_vm_attr, Aarch64Regs, Arch, ArmVmAttributes, BootInfo, Config, Invocation,
@@ -515,7 +515,11 @@ struct KernelPartialBootInfo {
 /// This factors the common parts of 'emulate_kernel_boot' and
 /// 'emulate_kernel_boot_partial' to avoid code duplication.
 ///
-fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile, core: u64) -> KernelPartialBootInfo {
+fn kernel_partial_boot(
+    kernel_config: &Config,
+    kernel_elf: &ElfFile,
+    core: u64,
+) -> KernelPartialBootInfo {
     // Determine the untyped caps of the system
     // This lets allocations happen correctly.
     let mut device_memory = DisjointMemoryRegion::default();
@@ -526,12 +530,12 @@ fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile, core: u64) 
         device_memory.insert_region(r.start, r.end);
     }
 
-// Very Hacky..
-/*
-    for r in &kernel_config.normal_regions {
-        normal_memory.insert_region(r.start, r.end);
-    }
-*/
+    // Very Hacky..
+    /*
+        for r in &kernel_config.normal_regions {
+            normal_memory.insert_region(r.start, r.end);
+        }
+    */
     assert!(kernel_config.normal_regions.len() == 1);
     // See kernel init_coremem
     let kernel_elf_sized_align = 0x1000000;
@@ -556,7 +560,9 @@ fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile, core: u64) 
             // extend up to new increased end
             device_memory.regions[insert_idx].end = end;
         } else {
-            device_memory.regions.insert(insert_idx, MemoryRegion::new(base, end));
+            device_memory
+                .regions
+                .insert(insert_idx, MemoryRegion::new(base, end));
         }
         // device_memory.check();
     }
@@ -576,14 +582,21 @@ fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile, core: u64) 
         }
         if end == device_memory.regions[insert_idx].base {
             // assert!(aligned right)
-            println!("overwriting {:x}..{:x} with {:x}, {:x}", device_memory.regions[insert_idx].base, device_memory.regions[insert_idx].end, base, end);
+            println!(
+                "overwriting {:x}..{:x} with {:x}, {:x}",
+                device_memory.regions[insert_idx].base,
+                device_memory.regions[insert_idx].end,
+                base,
+                end
+            );
             // extend down to new decreased base
             device_memory.regions[insert_idx].base = base;
         } else {
-            device_memory.regions.insert(insert_idx, MemoryRegion::new(base, end));
+            device_memory
+                .regions
+                .insert(insert_idx, MemoryRegion::new(base, end));
         }
         // device_memory.check();
-
     }
 
     // ============= Multikernel: calculate where we want to load the kernel ======================
@@ -796,7 +809,9 @@ fn build_system(
     pd_elf_files: &Vec<ElfFile>,
     kernel_elf: &ElfFile,
     monitor_elf: &ElfFile,
-    system: &SystemDescription,
+    protection_domains: &[ProtectionDomain],
+    memory_regions: &[SysMemoryRegion],
+    channels: &[Channel],
     core: u64,
     invocation_table_size: u64,
     system_cnode_size: u64,
@@ -1232,10 +1247,10 @@ fn build_system(
     //     as needed by protection domains based on mappings required
     let mut phys_addr_next = reserved_base + invocation_table_size;
     // Now we create additional MRs (and mappings) for the ELF files.
-    let mut pd_elf_regions: Vec<Vec<Region>> = Vec::with_capacity(system.protection_domains.len());
+    let mut pd_elf_regions: Vec<Vec<Region>> = Vec::with_capacity(protection_domains.len());
     let mut extra_mrs = Vec::new();
     let mut pd_extra_maps: HashMap<&ProtectionDomain, Vec<SysMap>> = HashMap::new();
-    for (i, pd) in system.protection_domains.iter().enumerate() {
+    for (i, pd) in protection_domains.iter().enumerate() {
         pd_elf_regions.push(Vec::with_capacity(pd_elf_files[i].segments.len()));
         for (seg_idx, segment) in pd_elf_files[i].segments.iter().enumerate() {
             if !segment.loadable {
@@ -1303,8 +1318,8 @@ fn build_system(
     // Here we create a memory region/mapping for the stack for each PD.
     // We allocate the stack at the highest possible virtual address that the
     // kernel allows us.
-    let mut pd_stack_addrs = Vec::with_capacity(system.protection_domains.len());
-    for pd in &system.protection_domains {
+    let mut pd_stack_addrs = Vec::with_capacity(protection_domains.len());
+    for pd in protection_domains {
         let stack_mr = SysMemoryRegion {
             name: format!("STACK:{}", pd.name),
             size: pd.stack_size,
@@ -1330,8 +1345,8 @@ fn build_system(
     }
 
     let mut all_mrs: Vec<&SysMemoryRegion> =
-        Vec::with_capacity(system.memory_regions.len() + extra_mrs.len());
-    for mr_set in [&system.memory_regions, &extra_mrs] {
+        Vec::with_capacity(memory_regions.len() + extra_mrs.len());
+    for mr_set in [memory_regions, &extra_mrs[..]] {
         for mr in mr_set {
             all_mrs.push(mr);
         }
@@ -1392,7 +1407,7 @@ fn build_system(
     let mut small_page_names = Vec::new();
     let mut large_page_names = Vec::new();
 
-    for pd in &system.protection_domains {
+    for pd in protection_domains {
         let (page_size_human, page_size_label) = util::human_size_strict(PageSize::Small as u64);
         let ipc_buffer_str = format!(
             "Page({} {}): IPC Buffer PD={}",
@@ -1425,7 +1440,7 @@ fn build_system(
         init_system.allocate_objects(ObjectType::SmallPage, small_page_names, None);
 
     // All the IPC buffers are the first to be allocated which is why this works
-    let ipc_buffer_objs = &small_page_objs[..system.protection_domains.len()];
+    let ipc_buffer_objs = &small_page_objs[..protection_domains.len()];
 
     let mut page_small_idx = ipc_buffer_objs.len();
     let mut page_large_idx = 0;
@@ -1450,8 +1465,7 @@ fn build_system(
         }
     }
 
-    let virtual_machines: Vec<&VirtualMachine> = system
-        .protection_domains
+    let virtual_machines: Vec<&VirtualMachine> = protection_domains
         .iter()
         .filter_map(|pd| match &pd.virtual_machine {
             Some(vm) => Some(vm),
@@ -1460,8 +1474,7 @@ fn build_system(
         .collect();
 
     // TCBs
-    let mut tcb_names: Vec<String> = system
-        .protection_domains
+    let mut tcb_names: Vec<String> = protection_domains
         .iter()
         .map(|pd| format!("TCB: PD={}", pd.name))
         .collect();
@@ -1475,8 +1488,8 @@ fn build_system(
     let tcb_objs = init_system.allocate_objects(ObjectType::Tcb, tcb_names, None);
     let tcb_caps: Vec<u64> = tcb_objs.iter().map(|tcb| tcb.cap_addr).collect();
 
-    let pd_tcb_objs = &tcb_objs[..system.protection_domains.len()];
-    let vcpu_tcb_objs = &tcb_objs[system.protection_domains.len()..];
+    let pd_tcb_objs = &tcb_objs[..protection_domains.len()];
+    let vcpu_tcb_objs = &tcb_objs[protection_domains.len()..];
     assert!(pd_tcb_objs.len() + vcpu_tcb_objs.len() == tcb_objs.len());
     // VCPUs
     let mut vcpu_names = vec![];
@@ -1487,8 +1500,7 @@ fn build_system(
     }
     let vcpu_objs = init_system.allocate_objects(ObjectType::Vcpu, vcpu_names, None);
     // Scheduling Contexts
-    let mut sched_context_names: Vec<String> = system
-        .protection_domains
+    let mut sched_context_names: Vec<String> = protection_domains
         .iter()
         .map(|pd| format!("SchedContext: PD={}", pd.name))
         .collect();
@@ -1506,21 +1518,19 @@ fn build_system(
     );
     let sched_context_caps: Vec<u64> = sched_context_objs.iter().map(|sc| sc.cap_addr).collect();
 
-    let pd_sched_context_objs = &sched_context_objs[..system.protection_domains.len()];
-    let vm_sched_context_objs = &sched_context_objs[system.protection_domains.len()..];
+    let pd_sched_context_objs = &sched_context_objs[..protection_domains.len()];
+    let vm_sched_context_objs = &sched_context_objs[protection_domains.len()..];
 
     // Endpoints
-    let pd_endpoint_names: Vec<String> = system
-        .protection_domains
+    let pd_endpoint_names: Vec<String> = protection_domains
         .iter()
         .enumerate()
-        .filter(|(idx, pd)| pd.needs_ep(*idx, &system.channels))
+        .filter(|(idx, pd)| pd.needs_ep(*idx, &channels))
         .map(|(_, pd)| format!("EP: PD={}", pd.name))
         .collect();
     let endpoint_names = [vec![format!("EP: Monitor Fault")], pd_endpoint_names].concat();
     // Reply objects
-    let pd_reply_names: Vec<String> = system
-        .protection_domains
+    let pd_reply_names: Vec<String> = protection_domains
         .iter()
         .map(|pd| format!("Reply: PD={}", pd.name))
         .collect();
@@ -1535,12 +1545,11 @@ fn build_system(
     // Because the first reply object is for the monitor, we map from index 1 of endpoint_objs
     let pd_endpoint_objs: Vec<Option<&Object>> = {
         let mut i = 0;
-        system
-            .protection_domains
+        protection_domains
             .iter()
             .enumerate()
             .map(|(idx, pd)| {
-                if pd.needs_ep(idx, &system.channels) {
+                if pd.needs_ep(idx, channels) {
                     let obj = &endpoint_objs[1..][i];
                     i += 1;
                     Some(obj)
@@ -1551,8 +1560,7 @@ fn build_system(
             .collect()
     };
 
-    let notification_names = system
-        .protection_domains
+    let notification_names = protection_domains
         .iter()
         .map(|pd| format!("Notification: PD={}", pd.name))
         .collect();
@@ -1574,7 +1582,7 @@ fn build_system(
     let mut all_pd_uds: Vec<(usize, u64)> = Vec::new();
     let mut all_pd_ds: Vec<(usize, u64)> = Vec::new();
     let mut all_pd_pts: Vec<(usize, u64)> = Vec::new();
-    for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+    for (pd_idx, pd) in protection_domains.iter().enumerate() {
         let (ipc_buffer_vaddr, _) = pd_elf_files[pd_idx]
             .find_symbol(SYMBOL_IPC_BUFFER)
             .unwrap_or_else(|_| panic!("Could not find {SYMBOL_IPC_BUFFER}"));
@@ -1692,15 +1700,13 @@ fn build_system(
     all_vm_ds.sort_by_key(|d| d.0);
     all_vm_pts.sort_by_key(|pt| pt.0);
 
-    let pd_names: Vec<&str> = system
-        .protection_domains
+    let pd_names: Vec<&str> = protection_domains
         .iter()
         .map(|pd| pd.name.as_str())
         .collect();
     let vm_names: Vec<&str> = virtual_machines.iter().map(|vm| vm.name.as_str()).collect();
 
-    let mut vspace_names: Vec<String> = system
-        .protection_domains
+    let mut vspace_names: Vec<String> = protection_domains
         .iter()
         .map(|pd| format!("VSpace: PD={}", pd.name))
         .collect();
@@ -1710,8 +1716,8 @@ fn build_system(
         .collect();
     vspace_names.extend(vm_vspace_names);
     let vspace_objs = init_system.allocate_objects(ObjectType::VSpace, vspace_names, None);
-    let pd_vspace_objs = &vspace_objs[..system.protection_domains.len()];
-    let vm_vspace_objs = &vspace_objs[system.protection_domains.len()..];
+    let pd_vspace_objs = &vspace_objs[..protection_domains.len()];
+    let vm_vspace_objs = &vspace_objs[protection_domains.len()..];
 
     let pd_ud_names: Vec<String> = all_pd_uds
         .iter()
@@ -1752,8 +1758,7 @@ fn build_system(
     let vm_pt_objs = init_system.allocate_objects(ObjectType::PageTable, vm_pt_names, None);
 
     // Create CNodes - all CNode objects are the same size: 128 slots.
-    let mut cnode_names: Vec<String> = system
-        .protection_domains
+    let mut cnode_names: Vec<String> = protection_domains
         .iter()
         .map(|pd| format!("CNode: PD={}", pd.name))
         .collect();
@@ -1766,12 +1771,12 @@ fn build_system(
     let cnode_objs =
         init_system.allocate_objects(ObjectType::CNode, cnode_names, Some(PD_CAP_SIZE));
     let mut cnode_objs_by_pd: HashMap<&ProtectionDomain, &Object> =
-        HashMap::with_capacity(system.protection_domains.len());
-    for (i, pd) in system.protection_domains.iter().enumerate() {
+        HashMap::with_capacity(protection_domains.len());
+    for (i, pd) in protection_domains.iter().enumerate() {
         cnode_objs_by_pd.insert(pd, &cnode_objs[i]);
     }
 
-    let vm_cnode_objs = &cnode_objs[system.protection_domains.len()..];
+    let vm_cnode_objs = &cnode_objs[protection_domains.len()..];
 
     let mut cap_slot = init_system.cap_slot;
     let kernel_objects = init_system.objects;
@@ -1779,7 +1784,7 @@ fn build_system(
     // Create all the necessary interrupt handler objects. These aren't
     // created through retype though!
     let mut irq_cap_addresses: HashMap<&ProtectionDomain, Vec<u64>> = HashMap::new();
-    for pd in &system.protection_domains {
+    for pd in protection_domains {
         irq_cap_addresses.insert(pd, vec![]);
         for sysirq in &pd.irqs {
             let cap_address = system_cap_address_mask | cap_slot;
@@ -1802,7 +1807,7 @@ fn build_system(
     }
 
     // This has to be done prior to minting!
-    let num_asid_invocations = system.protection_domains.len() + virtual_machines.len();
+    let num_asid_invocations = protection_domains.len() + virtual_machines.len();
     let mut asid_invocation = Invocation::new(
         config,
         InvocationArgs::AsidPoolAssign {
@@ -1820,7 +1825,7 @@ fn build_system(
     system_invocations.push(asid_invocation);
 
     // Check that the user has not created any maps that clash with our extra maps
-    for pd in &system.protection_domains {
+    for pd in protection_domains {
         let curr_pd_extra_maps = &pd_extra_maps[pd];
         for pd_map in &pd.maps {
             for extra_map in curr_pd_extra_maps {
@@ -1863,7 +1868,7 @@ fn build_system(
     // Mint copies of required pages, while also determining what's required
     // for later mapping
     let mut pd_page_descriptors = Vec::new();
-    for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+    for (pd_idx, pd) in protection_domains.iter().enumerate() {
         for map_set in [&pd.maps, &pd_extra_maps[pd]] {
             for mp in map_set {
                 let mr = all_mr_by_name[mp.mr.as_str()];
@@ -2035,7 +2040,7 @@ fn build_system(
     }
 
     let mut badged_irq_caps: HashMap<&ProtectionDomain, Vec<u64>> = HashMap::new();
-    for (notification_obj, pd) in zip(&notification_objs, &system.protection_domains) {
+    for (notification_obj, pd) in zip(&notification_objs, protection_domains) {
         badged_irq_caps.insert(pd, vec![]);
         for sysirq in &pd.irqs {
             let badge = 1 << sysirq.id;
@@ -2070,7 +2075,7 @@ fn build_system(
     // For root PDs, this shall be the system fault EP endpoint object.
     // For non-root PDs, this shall be the parent endpoint.
     let badged_fault_ep = system_cap_address_mask | cap_slot;
-    for (i, pd) in system.protection_domains.iter().enumerate() {
+    for (i, pd) in protection_domains.iter().enumerate() {
         let is_root = pd.parent.is_none();
         let fault_ep_cap;
         let badge: u64;
@@ -2105,7 +2110,7 @@ fn build_system(
     // This will be the endpoint for the parent protection domain of the virtual machine.
     for vm in &virtual_machines {
         let mut parent_pd = None;
-        for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+        for (pd_idx, pd) in protection_domains.iter().enumerate() {
             if let Some(virtual_machine) = &pd.virtual_machine {
                 if virtual_machine == *vm {
                     parent_pd = Some(pd_idx);
@@ -2141,8 +2146,8 @@ fn build_system(
     let final_cap_slot = cap_slot;
 
     // Minting in the address space
-    for (idx, pd) in system.protection_domains.iter().enumerate() {
-        let obj = if pd.needs_ep(idx, &system.channels) {
+    for (idx, pd) in protection_domains.iter().enumerate() {
+        let obj = if pd.needs_ep(idx, channels) {
             pd_endpoint_objs[idx].unwrap()
         } else {
             &notification_objs[idx]
@@ -2180,7 +2185,7 @@ fn build_system(
         },
     );
     reply_mint_invocation.repeat(
-        system.protection_domains.len() as u32,
+        protection_domains.len() as u32,
         InvocationArgs::CnodeMint {
             cnode: 1,
             dest_index: 0,
@@ -2196,7 +2201,7 @@ fn build_system(
 
     // Mint access to the VSpace cap
     assert!(VSPACE_CAP_IDX < PD_CAP_SIZE);
-    let num_vspace_mint_invocations = system.protection_domains.len() + virtual_machines.len();
+    let num_vspace_mint_invocations = protection_domains.len() + virtual_machines.len();
     let mut vspace_mint_invocation = Invocation::new(
         config,
         InvocationArgs::CnodeMint {
@@ -2226,7 +2231,7 @@ fn build_system(
     system_invocations.push(vspace_mint_invocation);
 
     // Mint access to interrupt handlers in the PD CSpace
-    for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+    for (pd_idx, pd) in protection_domains.iter().enumerate() {
         for (sysirq, irq_cap_address) in zip(&pd.irqs, &irq_cap_addresses[pd]) {
             let cap_idx = BASE_IRQ_CAP + sysirq.id;
             assert!(cap_idx < PD_CAP_SIZE);
@@ -2247,8 +2252,8 @@ fn build_system(
     }
 
     // Mint access to the child TCB in the CSpace of root PDs
-    for (pd_idx, _) in system.protection_domains.iter().enumerate() {
-        for (maybe_child_idx, maybe_child_pd) in system.protection_domains.iter().enumerate() {
+    for (pd_idx, _) in protection_domains.iter().enumerate() {
+        for (maybe_child_idx, maybe_child_pd) in protection_domains.iter().enumerate() {
             // Before doing anything, check if we are dealing with a child PD
             if let Some(parent_idx) = maybe_child_pd.parent {
                 // We are dealing with a child PD, now check if the index of its parent
@@ -2275,7 +2280,7 @@ fn build_system(
     }
 
     // Mint access to virtual machine TCBs in the CSpace of parent PDs
-    for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+    for (pd_idx, pd) in protection_domains.iter().enumerate() {
         if let Some(vm) = &pd.virtual_machine {
             // This PD that we are dealing with has a virtual machine, now we
             // need to find the TCB that corresponds to it.
@@ -2302,7 +2307,7 @@ fn build_system(
     }
 
     // Mint access to virtual machine vCPUs in the CSpace of the parent PDs
-    for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+    for (pd_idx, pd) in protection_domains.iter().enumerate() {
         if let Some(vm) = &pd.virtual_machine {
             // This PD that we are dealing with has a virtual machine, now we
             // need to find the vCPU that corresponds to it.
@@ -2328,9 +2333,9 @@ fn build_system(
         }
     }
 
-    for cc in &system.channels {
+    for cc in channels {
         for (send, recv) in [(&cc.end_a, &cc.end_b), (&cc.end_b, &cc.end_a)] {
-            let send_pd = &system.protection_domains[send.pd];
+            let send_pd = &protection_domains[send.pd];
             let send_cnode_obj = cnode_objs_by_pd[send_pd];
             let recv_notification_obj = &notification_objs[recv.pd];
 
@@ -2382,7 +2387,7 @@ fn build_system(
     }
 
     // Mint a cap between monitor and passive PDs.
-    for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+    for (pd_idx, pd) in protection_domains.iter().enumerate() {
         if pd.passive {
             let cnode_obj = &cnode_objs[pd_idx];
             system_invocations.push(Invocation::new(
@@ -2402,7 +2407,7 @@ fn build_system(
         }
     }
 
-    for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+    for (pd_idx, pd) in protection_domains.iter().enumerate() {
         if pd.smc {
             assert!(config.arm_smc.is_some() && config.arm_smc.unwrap());
             let cnode_obj = &cnode_objs[pd_idx];
@@ -2426,7 +2431,7 @@ fn build_system(
 
     // Associate badges
     // FIXME: This could use repeat
-    for pd in &system.protection_domains {
+    for pd in protection_domains {
         for (irq_cap_address, badged_notification_cap_address) in
             zip(&irq_cap_addresses[pd], &badged_irq_caps[pd])
         {
@@ -2538,7 +2543,7 @@ fn build_system(
         Arch::Aarch64 => ArmVmAttributes::default() | ArmVmAttributes::ExecuteNever as u64,
         Arch::Riscv64 => RiscvVmAttributes::default() | RiscvVmAttributes::ExecuteNever as u64,
     };
-    for pd_idx in 0..system.protection_domains.len() {
+    for pd_idx in 0..protection_domains.len() {
         let (vaddr, _) = pd_elf_files[pd_idx]
             .find_symbol(SYMBOL_IPC_BUFFER)
             .unwrap_or_else(|_| panic!("Could not find {SYMBOL_IPC_BUFFER}"));
@@ -2557,7 +2562,7 @@ fn build_system(
     // Initialise the TCBs
 
     // Set the scheduling parameters
-    for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+    for (pd_idx, pd) in protection_domains.iter().enumerate() {
         system_invocations.push(Invocation::new(
             config,
             InvocationArgs::SchedControlConfigureFlags {
@@ -2589,7 +2594,7 @@ fn build_system(
         }
     }
 
-    for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+    for (pd_idx, pd) in protection_domains.iter().enumerate() {
         system_invocations.push(Invocation::new(
             config,
             InvocationArgs::TcbSetSchedParams {
@@ -2636,7 +2641,7 @@ fn build_system(
             },
         );
         tcb_cap_copy_invocation.repeat(
-            system.protection_domains.len() as u32,
+            protection_domains.len() as u32,
             InvocationArgs::CnodeCopy {
                 cnode: 1,
                 dest_index: 0,
@@ -2663,7 +2668,7 @@ fn build_system(
         },
     );
     pd_set_space_invocation.repeat(
-        system.protection_domains.len() as u32,
+        protection_domains.len() as u32,
         InvocationArgs::TcbSetSpace {
             tcb: 1,
             fault_ep: 1,
@@ -2676,7 +2681,7 @@ fn build_system(
     system_invocations.push(pd_set_space_invocation);
 
     for (vm_idx, vm) in virtual_machines.iter().enumerate() {
-        let fault_ep_offset = system.protection_domains.len() + vm_idx;
+        let fault_ep_offset = protection_domains.len() + vm_idx;
         let mut vcpu_set_space_invocation = Invocation::new(
             config,
             InvocationArgs::TcbSetSpace {
@@ -2703,7 +2708,7 @@ fn build_system(
     }
 
     // Set IPC buffer
-    for pd_idx in 0..system.protection_domains.len() {
+    for pd_idx in 0..protection_domains.len() {
         let (ipc_buffer_vaddr, _) = pd_elf_files[pd_idx]
             .find_symbol(SYMBOL_IPC_BUFFER)
             .unwrap_or_else(|_| panic!("Could not find {SYMBOL_IPC_BUFFER}"));
@@ -2718,7 +2723,7 @@ fn build_system(
     }
 
     // Set TCB registers (we only set the entry point)
-    for pd_idx in 0..system.protection_domains.len() {
+    for pd_idx in 0..protection_domains.len() {
         let regs = match config.arch {
             Arch::Aarch64 => Aarch64Regs {
                 pc: pd_elf_files[pd_idx].entry,
@@ -2759,7 +2764,7 @@ fn build_system(
         },
     );
     bind_ntfn_invocation.repeat(
-        system.protection_domains.len() as u32,
+        protection_domains.len() as u32,
         InvocationArgs::TcbBindNotification {
             tcb: 1,
             notification: 1,
@@ -2798,7 +2803,7 @@ fn build_system(
         },
     );
     resume_invocation.repeat(
-        system.protection_domains.len() as u32,
+        protection_domains.len() as u32,
         InvocationArgs::TcbResume { tcb: 1 },
     );
     system_invocations.push(resume_invocation);
@@ -2813,25 +2818,18 @@ fn build_system(
         system_invocation.add_raw_invocation(config, &mut system_invocation_data);
     }
 
-    let pd_setvar_values: Vec<Vec<u64>> = system
-        .protection_domains
+    let pd_setvar_values: Vec<Vec<u64>> = protection_domains
         .iter()
         .map(|pd| {
             pd.setvars
                 .iter()
                 .map(|setvar| match &setvar.kind {
                     sdf::SysSetVarKind::Size { mr } => {
-                        system
-                            .memory_regions
-                            .iter()
-                            .find(|m| m.name == *mr)
-                            .unwrap()
-                            .size
+                        memory_regions.iter().find(|m| *m.name == *mr).unwrap().size
                     }
                     sdf::SysSetVarKind::Vaddr { address } => *address,
                     sdf::SysSetVarKind::Paddr { region } => {
-                        let mr = system
-                            .memory_regions
+                        let mr = memory_regions
                             .iter()
                             .find(|mr| mr.name == *region)
                             .unwrap_or_else(|| panic!("Cannot find region: {region}"));
@@ -2854,8 +2852,8 @@ fn build_system(
         fault_ep_cap_address: fault_ep_endpoint_object.cap_addr,
         reply_cap_address: reply_obj.cap_addr,
         cap_lookup: cap_address_names,
-        pd_tcb_caps: tcb_caps[..system.protection_domains.len()].to_vec(),
-        vm_tcb_caps: tcb_caps[system.protection_domains.len()..].to_vec(),
+        pd_tcb_caps: tcb_caps[..protection_domains.len()].to_vec(),
+        vm_tcb_caps: tcb_caps[protection_domains.len()..].to_vec(),
         sched_caps: sched_context_caps,
         ntfn_caps: notification_caps,
         pd_elf_regions,
@@ -3410,9 +3408,18 @@ fn main() -> Result<(), String> {
             std::process::exit(1);
         }
 
+        let core = multikernel_idx as u64;
+
+        let core_local_protection_domains = system
+            .protection_domains
+            .clone()
+            .into_iter()
+            .filter(|pd| pd.core == core)
+            .collect::<Vec<_>>();
+
         pd_elf_files_by_core.push(Vec::with_capacity(system.protection_domains.len()));
         let mut pd_elf_files = &mut pd_elf_files_by_core[multikernel_idx];
-        for pd in &system.protection_domains {
+        for pd in &core_local_protection_domains {
             match get_full_path(&pd.program_image, &search_paths) {
                 Some(path) => {
                     let elf = ElfFile::from_path(&path).unwrap();
@@ -3427,14 +3434,16 @@ fn main() -> Result<(), String> {
             }
         }
 
-        let core = multikernel_idx as u64;
         loop {
             built_system = build_system(
                 &kernel_config,
                 &pd_elf_files,
                 &kernel_elf,
                 &monitor_elf,
-                &system,
+                &core_local_protection_domains,
+                // TODO: per-core
+                &system.memory_regions[..],
+                &system.channels,
                 core,
                 invocation_table_size,
                 system_cnode_size,
@@ -3537,7 +3546,11 @@ fn main() -> Result<(), String> {
             );
             let mut stderr = BufWriter::new(std::io::stderr());
             for bootstrap_invocation in &built_system.bootstrap_invocations {
-                bootstrap_invocation.report_fmt(&mut stderr, &kernel_config, &built_system.cap_lookup);
+                bootstrap_invocation.report_fmt(
+                    &mut stderr,
+                    &kernel_config,
+                    &built_system.cap_lookup,
+                );
             }
             stderr.flush().unwrap();
 
@@ -3573,8 +3586,7 @@ fn main() -> Result<(), String> {
         monitor_elf.write_symbol("scheduling_contexts", &sched_cap_bytes)?;
         monitor_elf.write_symbol("notification_caps", &ntfn_cap_bytes)?;
         monitor_elf.write_symbol("pd_stack_addrs", &pd_stack_addrs_bytes)?;
-        let pd_names = system
-            .protection_domains
+        let pd_names = core_local_protection_domains
             .iter()
             .map(|pd| &pd.name)
             .collect();
@@ -3584,10 +3596,9 @@ fn main() -> Result<(), String> {
         )?;
         monitor_elf.write_symbol(
             "pd_names_len",
-            &system.protection_domains.len().to_le_bytes(),
+            &core_local_protection_domains.len().to_le_bytes(),
         )?;
-        let vm_names: Vec<&String> = system
-            .protection_domains
+        let vm_names: Vec<&String> = core_local_protection_domains
             .iter()
             .filter_map(|pd| pd.virtual_machine.as_ref().map(|vm| &vm.name))
             .collect();
@@ -3599,7 +3610,7 @@ fn main() -> Result<(), String> {
 
         // Write out all the symbols for each PD
         pd_write_symbols(
-            &system.protection_domains,
+            &core_local_protection_domains,
             &system.channels,
             &mut pd_elf_files,
             &built_system.pd_setvar_values,
@@ -3637,7 +3648,10 @@ fn main() -> Result<(), String> {
 
     let mut loader_regions: Vec<(u64, &[u8])> = vec![];
     for (multikernel_idx, built_system) in built_systems.iter().enumerate() {
-        loader_regions.push((built_system.reserved_region.base, &built_system.invocation_data));
+        loader_regions.push((
+            built_system.reserved_region.base,
+            &built_system.invocation_data,
+        ));
         for (i, regions) in built_system.pd_elf_regions.iter().enumerate() {
             for r in regions {
                 loader_regions.push((r.addr, r.data(&pd_elf_files_by_core[multikernel_idx][i])));
@@ -3650,11 +3664,20 @@ fn main() -> Result<(), String> {
         &kernel_config,
         Path::new(&loader_elf_path),
         &kernel_elf,
-        &built_systems.iter().map(|bs| bs.kernel_boot_info.p_v_offset).collect::<Vec<_>>(),
+        &built_systems
+            .iter()
+            .map(|bs| bs.kernel_boot_info.p_v_offset)
+            .collect::<Vec<_>>(),
         // XXX: Part of built system. Like everything TBH.
         &monitor_elfs_by_core,
-        &built_systems.iter().map(|bs| bs.initial_task_phys_region.base).collect::<Vec<_>>(),
-        &built_systems.iter().map(|bs| bs.reserved_region).collect::<Vec<_>>(),
+        &built_systems
+            .iter()
+            .map(|bs| bs.initial_task_phys_region.base)
+            .collect::<Vec<_>>(),
+        &built_systems
+            .iter()
+            .map(|bs| bs.reserved_region)
+            .collect::<Vec<_>>(),
         loader_regions,
     );
     println!("Made image");

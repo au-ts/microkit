@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright 2025, UNSW
+
+ SPDX-License-Identifier: BSD-2-Clause
+-->
+<system>
+    <!-- TODO: Shared memory. -->
+
+    <protection_domain name="core0" priority="254" core="0" >
+        <program_image path="core0.elf" />
+    </protection_domain>
+
+    <protection_domain name="core1" priority="254" core="1" >
+        <program_image path="core1.elf" />
+    </protection_domain>
+</system>

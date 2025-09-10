@@ -129,14 +129,14 @@ impl SysMemoryRegion {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct SysIrq {
     pub irq: u64,
     pub id: u64,
     pub trigger: IrqTrigger,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum SysSetVarKind {
     // For size we do not store the size since when we parse mappings
     // we do not have access to the memory region yet. The size is resolved
@@ -146,7 +146,7 @@ pub enum SysSetVarKind {
     Paddr { region: String },
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct SysSetVar {
     pub symbol: String,
     pub kind: SysSetVarKind,
@@ -166,7 +166,7 @@ pub struct Channel {
     pub end_b: ChannelEnd,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct ProtectionDomain {
     /// Only populated for child protection domains
     pub id: Option<u64>,
@@ -177,6 +177,7 @@ pub struct ProtectionDomain {
     pub passive: bool,
     pub stack_size: u64,
     pub smc: bool,
+    pub core: u64,
     pub program_image: PathBuf,
     pub maps: Vec<SysMap>,
     pub irqs: Vec<SysIrq>,
@@ -193,7 +194,7 @@ pub struct ProtectionDomain {
     text_pos: roxmltree::TextPos,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct VirtualMachine {
     pub vcpus: Vec<VirtualCpu>,
     pub name: String,
@@ -203,7 +204,7 @@ pub struct VirtualMachine {
     pub period: u64,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct VirtualCpu {
     pub id: u64,
 }
@@ -362,6 +363,7 @@ impl ProtectionDomain {
             // The SMC field is only available in certain configurations
             // but we do the error-checking further down.
             "smc",
+            "core",
         ];
         if is_child {
             attrs.push("id");
@@ -449,6 +451,17 @@ impl ProtectionDomain {
                 }
             }
         }
+
+        let core = match node.attribute("core") {
+            Some(attr) => sdf_parse_number(attr, node)?,
+            None => {
+                return Err(value_error(
+                    xml_sdf,
+                    node,
+                    "Missing core or invalid core".to_string(),
+                ))
+            }
+        };
 
         #[allow(clippy::manual_range_contains)]
         if stack_size < PD_MIN_STACK_SIZE || stack_size > PD_MAX_STACK_SIZE {
@@ -662,6 +675,7 @@ impl ProtectionDomain {
             passive,
             stack_size,
             smc,
+            core,
             program_image: program_image.unwrap(),
             maps,
             irqs,
