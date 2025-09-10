@@ -216,7 +216,7 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
                 > 0;
             if is_smc {
                 report_file
-                    .write_all(b"ARM SMC access is granted to userspace.")
+                    .write_all(b"ARM SMC access is granted to userspace.\n")
                     .unwrap();
             }
         }
@@ -296,7 +296,7 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
                         report_file
                             .write_all(
                                 format!(
-                                    "\t{} - {}: '{}' @ <Out of untyped>\n",
+                                    "\t{} - {}: '{}' @ <Cannot be allocated/Previous fatal error>\n",
                                     id,
                                     named_object.object.human_name(kernel_config),
                                     named_object.name
