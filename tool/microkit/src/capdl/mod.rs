@@ -11,6 +11,7 @@ mod memory;
 pub mod reserialise_spec;
 pub mod spec;
 mod util;
+pub mod allocation;
 
 pub use self::builder::*;
 pub use self::reserialise_spec::*;
