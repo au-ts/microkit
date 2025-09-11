@@ -5,7 +5,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
-// A reimplementation of https://github.com/seL4/rust-sel4/blob/6f8d1baaad3aaca6f20966a2acb40e4651546519/crates/sel4-capdl-initializer/add-spec/src/reserialize_spec.rs
+// A simple reimplementation of
+// https://github.com/seL4/rust-sel4/blob/6f8d1baaad3aaca6f20966a2acb40e4651546519/crates/sel4-capdl-initializer/add-spec/src/reserialize_spec.rs
 // We can't reuse the original code because it assumes that we are loading ELF frames from files.
 // Which isn't suitable for Microkit as we want to embed the frames' data directly into the spec for
 // easily patching ELF symbols.
@@ -15,6 +16,11 @@ use std::ops::Range;
 use sel4_capdl_initializer_types::*;
 
 use crate::{capdl::spec::ElfContent, elf::ElfFile};
+
+// @billn TODO: instead of doing this serialise our type -> deserialise into their type -> serialise business
+//              we can directly insert IndirectObjectName and IndirectDeflatedBytesContent into our spec type
+//              and one shot serialise at the cost of more complicated type definitions in spec.rs.
+//              But this is more of a performance concern rather than a bug.
 
 // Given a `Spec` data structure from sel4_capdl_initializer_types, "flatten" it into a vector of bytes
 // for encapsulating it into the CapDL initialiser ELF.

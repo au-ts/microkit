@@ -21,9 +21,7 @@ pub struct CapDLInitialiser {
     pub elf: ElfFile,
     pub heap_multiplier: f64,
     pub spec_size: Option<u64>,
-    pub spec_bound: Option<Range<u64>>,
     pub heap_size: Option<u64>,
-    pub heap_bound: Option<Range<u64>>,
 }
 
 impl CapDLInitialiser {
@@ -32,9 +30,7 @@ impl CapDLInitialiser {
             elf,
             heap_multiplier,
             spec_size: None,
-            spec_bound: None,
             heap_size: None,
-            heap_bound: None,
         }
     }
 
@@ -43,7 +39,7 @@ impl CapDLInitialiser {
     }
 
     pub fn add_spec(&mut self, payload: Vec<u8>) {
-        if self.spec_bound.is_some() || self.heap_bound.is_some() {
+        if self.spec_size.is_some() || self.heap_size.is_some() {
             unreachable!("internal bug: CapDLInitialiser::add_spec() called more than once");
         }
 
@@ -97,11 +93,7 @@ impl CapDLInitialiser {
             .unwrap();
 
         self.spec_size = Some(spec_size);
-        self.spec_bound =
-            Some(spec_vaddr..round_up(spec_vaddr + spec_size, INITIALISER_GRANULE_SIZE as u64));
         self.heap_size = Some(heap_size);
-        self.heap_bound =
-            Some(heap_vaddr..round_up(heap_vaddr + heap_size, INITIALISER_GRANULE_SIZE as u64));
     }
 
     pub fn add_expected_untypeds(&mut self, untypeds: &Vec<UntypedObject>) {

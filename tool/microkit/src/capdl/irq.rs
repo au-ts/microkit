@@ -20,10 +20,13 @@ pub fn create_irq_handler_cap(
     irq_desc: &SysIrq,
 ) -> Cap {
     // Create the IRQ object and add it to the special `irqs` vec in the spec.
+    // This is a pseudo object so we can bind a cap to the IRQ
     let irq_obj_id = create_irq_obj(spec, sel4_config, pd_name, irq_desc);
+
+    // Create the real IRQ in the separate IRQ vector.
     spec.add_irq(irq_desc.irq_num(), irq_obj_id);
 
-    // Bind IRQ into the PD's notification
+    // Bind IRQ into the PD's notification with the correct badge
     let pd_irq_ntfn_cap = capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 1 << irq_desc.id);
     bind_irq_to_ntfn(spec, irq_obj_id, pd_irq_ntfn_cap);
 

@@ -135,6 +135,7 @@ fn insert_cap_into_page_table_level(
     }
 }
 
+// Just this one time pinky promise
 #[allow(clippy::too_many_arguments)]
 fn map_intermediary_level_helper(
     spec: &mut CapDLSpec,
@@ -183,6 +184,7 @@ fn map_intermediary_level_helper(
         level: Some(cur_level as u8 + 1),
         slots: [].to_vec(),
     };
+    // We create name with this PT level coverage so that every object names are unique
     let next_level_object = NamedObject {
         name: format!(
             "{}_{}_vaddr_0x{:x}",

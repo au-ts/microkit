@@ -15,14 +15,18 @@ use crate::{
 
 /// For the given spec and list of untypeds, simulate the CapDL initialiser's
 /// object allocation algorithm. Record each object's paddr and UT's index in
-/// its `expected_alloc` struct field. Returns `true` if all objects can be
-/// allocated, `false` otherwise.
+/// its `expected_alloc` struct field. Assumes that the spec objects are sorted
+/// by paddr, then by size
+/// 
+/// Returns `true` if all objects can be allocated, `false` otherwise.
 pub fn simulate_capdl_object_alloc_algorithm(
     spec: &mut CapDLSpec,
     kernel_boot_info: &BootInfo,
     kernel_config: &Config,
 ) -> bool {
     // Step 1: sort untypeds by paddr.
+    // We don't want to mess with the original order in `kernel_boot_info` as we will patch
+    // them out to the initialiser later.
     let untypeds_clone = kernel_boot_info.untyped_objects.clone();
     let mut untypeds_by_paddr: Vec<(usize, &UntypedObject)> =
         untypeds_clone.iter().enumerate().collect();
