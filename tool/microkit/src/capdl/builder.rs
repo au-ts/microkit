@@ -25,14 +25,11 @@ use crate::{
     },
     elf::ElfFile,
     sdf::{
-        self, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription, BUDGET_DEFAULT,
-        MONITOR_PD_NAME, PD_DEFAULT_STACK_SIZE,
+        SysMap, SysMapPerms, SystemDescription, BUDGET_DEFAULT, MONITOR_PD_NAME,
+        PD_DEFAULT_STACK_SIZE,
     },
     sel4::{Arch, Config, PageSize},
-    util::{
-        monitor_serialise_names, monitor_serialise_u64_vec, ranges_overlap, round_down, round_up,
-    },
-    MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH, VM_MAX_NAME_LENGTH,
+    util::{ranges_overlap, round_down, round_up},
 };
 
 // Corresponds to the IPC buffer symbol in libmicrokit and the monitor
@@ -137,13 +134,6 @@ impl CapDLSpec {
         self.root_objects.end += 1;
         assert_eq!(self.objects.len(), self.root_objects.end);
         self.root_objects.end - 1
-    }
-
-    pub fn add_irq(&mut self, irq_num: u64, irq_obj_id: ObjectId) {
-        self.irqs.push(IrqEntry {
-            irq: irq_num,
-            handler: irq_obj_id,
-        });
     }
 
     pub fn get_root_object_mut(&mut self, obj_id: ObjectId) -> Option<&mut NamedObject> {
@@ -260,7 +250,7 @@ impl CapDLSpec {
                     pd_name,
                     vspace_obj_id,
                     frame_cap,
-                    page_size,
+                    page_size_bytes,
                     cur_vaddr,
                 ) {
                     Ok(_) => {
@@ -302,7 +292,7 @@ impl CapDLSpec {
             pd_name,
             vspace_obj_id,
             ipcbuf_frame_cap,
-            PageSize::Small,
+            PageSize::Small as u64,
             ipcbuf_vaddr,
         ) {
             Ok(_) => {}
@@ -356,7 +346,7 @@ fn map_memory_region(
     sel4_config: &Config,
     pd_name: &str,
     map: &SysMap,
-    page_sz: PageSize,
+    page_sz: u64,
     target_vspace: ObjectId,
     frames: &[ObjectId],
 ) {
@@ -379,7 +369,7 @@ fn map_memory_region(
             cur_vaddr,
         )
         .unwrap();
-        cur_vaddr += page_sz as u64;
+        cur_vaddr += page_sz;
     }
 }
 
@@ -454,7 +444,7 @@ pub fn build_capdl_spec(
         MONITOR_PD_NAME,
         mon_vspace_obj_id,
         mon_stack_frame_cap,
-        PageSize::Small,
+        PageSize::Small as u64,
         kernel_config.pd_stack_bottom(PD_DEFAULT_STACK_SIZE),
     )
     .unwrap();
@@ -488,7 +478,7 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 2. Create the memory regions' spec. Result is a hashmap keyed on MR name, value is (parsed XML obj, Vec of frame object IDs)
     // *********************************
-    let mut mr_name_to_frames: HashMap<String, (&SysMemoryRegion, Vec<ObjectId>)> = HashMap::new();
+    let mut mr_name_to_frames: HashMap<&String, Vec<ObjectId>> = HashMap::new();
     for mr in system.memory_regions.iter() {
         let mut frame_ids = Vec::new();
         let frame_size_bits = mr.page_size.fixed_size_bits(kernel_config);
@@ -508,7 +498,7 @@ pub fn build_capdl_spec(
             ));
         }
 
-        mr_name_to_frames.insert(mr.name.clone(), (mr, frame_ids));
+        mr_name_to_frames.insert(&mr.name, frame_ids);
     }
 
     // *********************************
@@ -570,25 +560,27 @@ pub fn build_capdl_spec(
         // Step 3-2: Map in all Memory Regions, keep tabs on what MR is mapped where so we can setvar later
         let mut mr_to_vaddr: HashMap<&String, u64> = HashMap::new();
         for map in pd.maps.iter() {
-            let (mr_description, frames) = mr_name_to_frames.get(&map.mr).unwrap();
-            let page_size = mr_description.page_size;
+            let frames = mr_name_to_frames.get(&map.mr).unwrap();
+            // MRs have frames of equal size so just use the first frame's page size.
+            let page_size_bytes =
+                1 << capdl_util_get_frame_size_bits(&spec, *frames.first().unwrap());
 
             // sdf.rs sanity checks that the memory regions doesn't overlap with each others, etc.
             // But it doesn't actually check for whether they overlap with a PD's stack or ELF segments.
             // We perform this check here, otherwise the tool will panic with quite cryptic page-table related errors.
-            let mr_vaddr_range = map.vaddr..(map.vaddr + (page_size as u64 * frames.len() as u64));
+            let mr_vaddr_range = map.vaddr..(map.vaddr + (page_size_bytes * frames.len() as u64));
 
             let pd_stack_range =
                 kernel_config.pd_stack_bottom(pd.stack_size)..kernel_config.pd_stack_top();
             if ranges_overlap(&mr_vaddr_range, &pd_stack_range) {
-                return Err(format!("Error: mapping MR '{}' to PD '{}' with vaddr 0x{:x}..0x{:x} will conflict with the stack at 0x{:x}..0x{:x}", mr_description.name, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, pd_stack_range.start, pd_stack_range.end));
+                return Err(format!("Error: mapping MR '{}' to PD '{}' with vaddr 0x{:x}..0x{:x} will conflict with the stack at 0x{:x}..0x{:x}", map.mr, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, pd_stack_range.start, pd_stack_range.end));
             }
 
             for elf_seg in elf_obj.loadable_segments().iter() {
                 let elf_seg_vaddr_range = elf_seg.virt_addr
                     ..elf_seg.virt_addr + round_up(elf_seg.mem_size(), PageSize::Small as u64);
                 if ranges_overlap(&mr_vaddr_range, &elf_seg_vaddr_range) {
-                    return Err(format!("Error: mapping MR '{}' to PD '{}' with vaddr 0x{:x}..0x{:x} will conflict with an ELF segment at 0x{:x}..0x{:x}", mr_description.name, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, elf_seg_vaddr_range.start, elf_seg_vaddr_range.end));
+                    return Err(format!("Error: mapping MR '{}' to PD '{}' with vaddr 0x{:x}..0x{:x} will conflict with an ELF segment at 0x{:x}..0x{:x}", map.mr, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, elf_seg_vaddr_range.start, elf_seg_vaddr_range.end));
                 }
             }
 
@@ -597,48 +589,14 @@ pub fn build_capdl_spec(
                 kernel_config,
                 &pd.name,
                 map,
-                page_size,
+                page_size_bytes,
                 pd_vspace_obj_id,
                 frames,
             );
             mr_to_vaddr.insert(&map.mr, map.vaddr);
         }
 
-        // Step 3-3: Write all symbols in this PD's ELF as required by any setvar elements and attributes.
-        let mut symbols_to_write: Vec<(&String, u64)> = Vec::new();
-        for setvar in pd.setvars.iter() {
-            // Check that the symbol exists in the ELF
-            match elf_obj.find_symbol(&setvar.symbol) {
-                Ok(sym_info) => {
-                    // Sanity check that the symbol is of word size so we dont overwrite anything.
-                    if sym_info.1 != (kernel_config.word_size / 8) {
-                        return Err(format!(
-                            "setvar to non word size symbol '{}', which is of size {} bytes",
-                            setvar.symbol, sym_info.1
-                        ));
-                    }
-                    let data = match &setvar.kind {
-                        sdf::SysSetVarKind::Size { mr } => {
-                            mr_name_to_frames.get(mr).unwrap().0.size
-                        }
-                        sdf::SysSetVarKind::Vaddr { address } => *address,
-                        sdf::SysSetVarKind::Paddr { region } => {
-                            mr_name_to_frames.get(region).unwrap().0.phys_addr.unwrap()
-                        }
-                    };
-                    symbols_to_write.push((&setvar.symbol, data));
-                }
-                Err(err) => return Err(err),
-            }
-        }
-        let elf_obj = pd_elf_files.get_mut(pd_global_idx).unwrap();
-        for (sym_name, value) in symbols_to_write.iter() {
-            elf_obj
-                .write_symbol(sym_name, &value.to_le_bytes())
-                .unwrap();
-        }
-
-        // Step 3-4: Create and map in the stack (bottom up)
+        // Step 3-3: Create and map in the stack (bottom up)
         let mut cur_stack_vaddr = kernel_config.pd_stack_bottom(pd.stack_size);
         pd_stack_bottoms.push(cur_stack_vaddr);
         let num_stack_frames = pd.stack_size / PageSize::Small as u64;
@@ -660,14 +618,14 @@ pub fn build_capdl_spec(
                 &pd.name,
                 pd_vspace_obj_id,
                 stack_frame_cap,
-                PageSize::Small,
+                PageSize::Small as u64,
                 cur_stack_vaddr,
             )
             .unwrap();
             cur_stack_vaddr += PageSize::Small as u64;
         }
 
-        // Step 3-5 Create Scheduling Context
+        // Step 3-4 Create Scheduling Context
         let pd_sc_obj_id = capdl_util_make_sc_obj(
             &mut spec,
             &pd.name,
@@ -679,7 +637,7 @@ pub fn build_capdl_spec(
         let pd_sc_cap = capdl_util_make_sc_cap(pd_sc_obj_id);
         caps_to_bind_to_tcb.push((TcbBoundSlot::SchedContext as usize, pd_sc_cap));
 
-        // Step 3-6 Create fault Endpoint cap to parent/monitor
+        // Step 3-5 Create fault Endpoint cap to parent/monitor
         let pd_fault_ep_cap = if pd.parent.is_none() {
             // badge = pd_idx + 1 because seL4 considers badge = 0 as no badge, which allows PD to mint this endpoint cap
             // with a different badge and impersonate another PD.
@@ -706,7 +664,7 @@ pub fn build_capdl_spec(
         caps_to_insert_to_pd_cspace.push((PD_FAULT_EP_CAP_IDX as usize, pd_fault_ep_cap.clone()));
         caps_to_bind_to_tcb.push((TcbBoundSlot::FaultEp as usize, pd_fault_ep_cap.clone()));
 
-        // Step 3-7 Create cap to Monitor's endpoint for passive PDs.
+        // Step 3-6 Create cap to Monitor's endpoint for passive PDs.
         if pd.passive {
             let pd_monitor_ep_cap = capdl_util_make_endpoint_cap(
                 mon_fault_ep_obj_id,
@@ -718,7 +676,7 @@ pub fn build_capdl_spec(
             caps_to_insert_to_pd_cspace.push((PD_MONITOR_EP_CAP_IDX as usize, pd_monitor_ep_cap));
         }
 
-        // Step 3-8 Create endpoint object for the PD if it have childrens/inwards PPC, else it will be a notification
+        // Step 3-7 Create endpoint object for the PD if it have childrens/inwards PPC, else it will be a notification
         let pd_ntfn_obj_id = capdl_util_make_ntfn_obj(&mut spec, &pd.name);
         let pd_ntfn_cap = capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0);
         let mut pd_ep_obj_id: Option<ObjectId> = None;
@@ -735,12 +693,12 @@ pub fn build_capdl_spec(
         }
         caps_to_bind_to_tcb.push((TcbBoundSlot::BoundNotification as usize, pd_ntfn_cap));
 
-        // Step 3-9 Create Reply obj + cap and insert into CSpace
+        // Step 3-8 Create Reply obj + cap and insert into CSpace
         let pd_reply_obj_id = capdl_util_make_reply_obj(&mut spec, &pd.name);
         let pd_reply_cap = capdl_util_make_reply_cap(pd_reply_obj_id);
         caps_to_insert_to_pd_cspace.push((PD_REPLY_CAP_IDX as usize, pd_reply_cap));
 
-        // Step 3-10 Create spec and caps to IRQs
+        // Step 3-9 Create spec and caps to IRQs
         for irq in pd.irqs.iter() {
             // Create a IRQ handler cap and insert into the requested CSpace's slot.
             let irq_handle_cap =
@@ -749,7 +707,7 @@ pub fn build_capdl_spec(
             caps_to_insert_to_pd_cspace.push((irq_cap_idx as usize, irq_handle_cap));
         }
 
-        // Step 3-11 Create I/O port objects on x86 platform.
+        // Step 3-10 Create I/O port objects on x86 platform.
         for ioport in pd.ioports.iter() {
             let ioport_obj_id =
                 capdl_util_make_ioport_obj(&mut spec, &pd.name, ioport.addr, ioport.size);
@@ -758,7 +716,7 @@ pub fn build_capdl_spec(
                 .push(((PD_BASE_IOPORT_CAP + ioport.id) as usize, ioport_cap));
         }
 
-        // Step 3-12 Create VM Spec.
+        // Step 3-11 Create VM Spec.
         if let Some(virtual_machine) = &pd.virtual_machine {
             // A VM really is just a collection of special threads, it have its own TCBs, Scheduling Contexts, etc...
             // The difference is that it have a vCPU for each TCB to store the virtual CPUs' states.
@@ -771,14 +729,15 @@ pub fn build_capdl_spec(
             };
             let vm_vspace_cap = capdl_util_make_page_table_cap(vm_vspace_obj_id);
             for map in virtual_machine.maps.iter() {
-                let (mr_description, frames) = mr_name_to_frames.get(&map.mr).unwrap();
-                let page_size = mr_description.page_size;
+                let frames = mr_name_to_frames.get(&map.mr).unwrap();
+                let page_size_bytes =
+                    1 << capdl_util_get_frame_size_bits(&spec, *frames.first().unwrap());
                 map_memory_region(
                     &mut spec,
                     kernel_config,
                     &virtual_machine.name,
                     map,
-                    page_size,
+                    page_size_bytes,
                     vm_vspace_obj_id,
                     frames,
                 );
@@ -914,7 +873,7 @@ pub fn build_capdl_spec(
             }
         }
 
-        // Step 3-13 Create ARM SMC cap if requested.
+        // Step 3-12 Create ARM SMC cap if requested.
         if pd.smc {
             caps_to_insert_to_pd_cspace.push((
                 PD_ARM_SMC_CAP_IDX as usize,
@@ -922,7 +881,7 @@ pub fn build_capdl_spec(
             ));
         }
 
-        // Step 3-14 Create CSpace and add all caps that the PD code and libmicrokit need to access.
+        // Step 3-13 Create CSpace and add all caps that the PD code and libmicrokit need to access.
         let pd_cnode_obj_id = capdl_util_make_cnode_obj(
             &mut spec,
             &pd.name,
@@ -934,7 +893,7 @@ pub fn build_capdl_spec(
         caps_to_bind_to_tcb.push((TcbBoundSlot::CSpace as usize, pd_cnode_cap));
         pd_id_to_cspace_id.insert(pd_global_idx, pd_cnode_obj_id);
 
-        // Step 3-15 Set the TCB parameters and all the various caps that we need to bind to this TCB.
+        // Step 3-14 Set the TCB parameters and all the various caps that we need to bind to this TCB.
         if let CapDLObject::Tcb(pc_tcb) =
             &mut spec.get_root_object_mut(pd_tcb_obj_id).unwrap().object
         {
@@ -951,42 +910,7 @@ pub fn build_capdl_spec(
             unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
         }
 
-        // Step 3-16 write libmicrokit symbols.
-        let name = pd.name.as_bytes();
-        let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
-        elf_obj
-            .write_symbol("microkit_name", &name[..name_length])
-            .unwrap();
-        elf_obj
-            .write_symbol("microkit_passive", &[pd.passive as u8])
-            .unwrap();
-
-        let mut notification_bits: u64 = 0;
-        let mut pp_bits: u64 = 0;
-        for channel in system.channels.iter() {
-            if channel.end_a.pd == pd_global_idx {
-                if channel.end_a.notify {
-                    notification_bits |= 1 << channel.end_a.id;
-                }
-                if channel.end_a.pp {
-                    pp_bits |= 1 << channel.end_a.id;
-                }
-            }
-            if channel.end_b.pd == pd_global_idx {
-                if channel.end_b.notify {
-                    notification_bits |= 1 << channel.end_b.id;
-                }
-                if channel.end_b.pp {
-                    pp_bits |= 1 << channel.end_b.id;
-                }
-            }
-        }
-        elf_obj.write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
-        elf_obj.write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
-        elf_obj.write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
-        elf_obj.write_symbol("microkit_ioports", &pd.ioport_bits().to_le_bytes())?;
-
-        // Step 3-17 bind this PD's TCB to the monitor, this accomplish two purposes:
+        // Step 3-15 bind this PD's TCB to the monitor, this accomplish two purposes:
         // 1. Allow PDs' TCBs to be named to their proper name in SDF in debug config.
         // 2. Allow passive PDs.
         capdl_util_insert_cap_into_cspace(
@@ -1075,62 +999,7 @@ pub fn build_capdl_spec(
     }
 
     // *********************************
-    // Step 5. Write ELF symbols in the monitor.
-    // *********************************
-    let monitor_elf = pd_elf_files.get_mut(mon_elf_id).unwrap();
-    let pd_names: Vec<String> = system
-        .protection_domains
-        .iter()
-        .map(|pd| pd.name.clone())
-        .collect();
-    monitor_elf
-        .write_symbol(
-            "pd_names_len",
-            &system.protection_domains.len().to_le_bytes(),
-        )
-        .unwrap();
-    monitor_elf
-        .write_symbol(
-            "pd_names",
-            &monitor_serialise_names(&pd_names, MAX_PDS, PD_MAX_NAME_LENGTH),
-        )
-        .unwrap();
-
-    let vm_names: Vec<String> = system
-        .protection_domains
-        .iter()
-        .filter(|pd| pd.virtual_machine.is_some())
-        .flat_map(|pd_with_vm| {
-            let vm = pd_with_vm.virtual_machine.as_ref().unwrap();
-            let num_vcpus = vm.vcpus.len();
-            std::iter::repeat_n(vm.name.clone(), num_vcpus)
-        })
-        .collect();
-
-    let vm_names_len = match kernel_config.arch {
-        Arch::Aarch64 | Arch::Riscv64 => vm_names.len(),
-        // VM on x86 doesn't have a separate TCB.
-        Arch::X86_64 => 0,
-    };
-    monitor_elf
-        .write_symbol("vm_names_len", &vm_names_len.to_le_bytes())
-        .unwrap();
-    monitor_elf
-        .write_symbol(
-            "vm_names",
-            &monitor_serialise_names(&vm_names, MAX_VMS, VM_MAX_NAME_LENGTH),
-        )
-        .unwrap();
-
-    monitor_elf
-        .write_symbol(
-            "pd_stack_bottom_addrs",
-            &monitor_serialise_u64_vec(&pd_stack_bottoms),
-        )
-        .unwrap();
-
-    // *********************************
-    // Step 6. Sort the root objects
+    // Step 5. Sort the root objects
     // *********************************
     // The CapDL initialiser expects objects with paddr to come first, then sorted by size so that the
     // allocation algorithm at run-time can run more efficiently.

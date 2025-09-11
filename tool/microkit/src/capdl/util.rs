@@ -59,7 +59,7 @@ pub fn capdl_util_make_frame_cap(
         cached,
         // This is ignored on x86 by seL4. As the NX/XD bit that marks page as non-executable
         // is unsupported on old hardware.
-        execute
+        execute,
     })
 }
 
@@ -87,10 +87,22 @@ pub fn capdl_util_get_vspace_id_from_tcb_id(spec: &CapDLSpec, tcb_obj_id: Object
             );
         }
     };
-    let vspace_cap = tcb.unwrap().slots.iter().find(|&cte| {
-        matches!(&cte.1, Cap::PageTable(_))
-    });
+    let vspace_cap = tcb
+        .unwrap()
+        .slots
+        .iter()
+        .find(|&cte| matches!(&cte.1, Cap::PageTable(_)));
     vspace_cap.unwrap().1.obj()
+}
+
+pub fn capdl_util_get_frame_size_bits(spec: &CapDLSpec, frame_obj_id: ObjectId) -> usize {
+    if let CapDLObject::Frame(frame) = &spec.get_root_object(frame_obj_id).unwrap().object {
+        frame.size_bits
+    } else {
+        unreachable!(
+            "internal bug: capdl_util_get_frame_size_bits() received a non Frame object ID"
+        );
+    }
 }
 
 pub fn capdl_util_make_endpoint_obj(

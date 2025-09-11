@@ -9,10 +9,11 @@
 
 use microkit_tool::capdl::allocation::simulate_capdl_object_alloc_algorithm;
 use microkit_tool::capdl::initialiser::{CapDLInitialiser, DEFAULT_INITIALISER_HEAP_MULTIPLIER};
-use microkit_tool::capdl::spec::{ElfContent};
+use microkit_tool::capdl::spec::ElfContent;
 use microkit_tool::capdl::{build_capdl_spec, reserialise_spec};
 use microkit_tool::elf::ElfFile;
 use microkit_tool::loader::Loader;
+use microkit_tool::pd_symbols::patch_pd_symbols;
 use microkit_tool::report::write_report;
 use microkit_tool::sdf::parse;
 use microkit_tool::sel4::{
@@ -20,7 +21,7 @@ use microkit_tool::sel4::{
     RiscvVirtualMemory,
 };
 use microkit_tool::util::{human_size_strict, json_str, json_str_as_bool, json_str_as_u64};
-use microkit_tool::{MemoryRegion};
+use microkit_tool::MemoryRegion;
 use sel4_capdl_initializer_types::{ObjectNamesLevel, Spec};
 use std::fs::{self, metadata};
 use std::path::{Path, PathBuf};
@@ -523,7 +524,11 @@ fn main() -> Result<(), String> {
             }
         }
     }
+    // The monitor is just a special PD
     pd_elf_files.push(monitor_elf);
+
+    // Patch all the required symbols in the Monitor and children PDs according to the Microkit's requirements
+    patch_pd_symbols(&kernel_config, &mut pd_elf_files, &system)?;
 
     // We have parsed the XML and all ELF files, create the CapDL spec of the system described in the XML.
     let mut spec = build_capdl_spec(&kernel_config, &mut pd_elf_files, &system)?;
@@ -630,7 +635,8 @@ fn main() -> Result<(), String> {
             initial_task_virt_region,
         );
 
-        let alloc_ok = simulate_capdl_object_alloc_algorithm(&mut spec, &kernel_boot_info, &kernel_config);
+        let alloc_ok =
+            simulate_capdl_object_alloc_algorithm(&mut spec, &kernel_boot_info, &kernel_config);
         write_report(&spec, &kernel_config, args.report);
         if !alloc_ok {
             eprintln!("ERROR: could not allocate all required kernel objects. Please see report for more details.");

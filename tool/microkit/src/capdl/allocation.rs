@@ -17,7 +17,7 @@ use crate::{
 /// object allocation algorithm. Record each object's paddr and UT's index in
 /// its `expected_alloc` struct field. Assumes that the spec objects are sorted
 /// by paddr, then by size
-/// 
+///
 /// Returns `true` if all objects can be allocated, `false` otherwise.
 pub fn simulate_capdl_object_alloc_algorithm(
     spec: &mut CapDLSpec,
@@ -43,7 +43,7 @@ pub fn simulate_capdl_object_alloc_algorithm(
         .iter()
         .enumerate()
     {
-        let phys_size_bit = named_object.object.physical_size_bits(&kernel_config) as usize;
+        let phys_size_bit = named_object.object.physical_size_bits(kernel_config) as usize;
         if phys_size_bit > 0 {
             let window_maybe = object_windows_by_size.get_mut(phys_size_bit).unwrap();
             match window_maybe {
@@ -63,7 +63,7 @@ pub fn simulate_capdl_object_alloc_algorithm(
         let named_obj = spec.objects.get(obj_with_paddr_id).unwrap();
         let paddr_base = named_obj.object.paddr().unwrap() as u64;
 
-        let obj_size_bytes = 1 << named_obj.object.physical_size_bits(&kernel_config);
+        let obj_size_bytes = 1 << named_obj.object.physical_size_bits(kernel_config);
         let paddr_range = paddr_base..paddr_base + obj_size_bytes;
 
         // Binary search for the untyped that would fit, if we can't find one, this object is not in valid memory.
@@ -159,7 +159,7 @@ pub fn simulate_capdl_object_alloc_algorithm(
                                 });
 
                                 cur_paddr +=
-                                    1 << named_obj.object.physical_size_bits(&kernel_config);
+                                    1 << named_obj.object.physical_size_bits(kernel_config);
                                 obj_id_range_maybe.as_mut().unwrap().start += 1;
                                 created = true;
                                 break;
@@ -189,7 +189,7 @@ pub fn simulate_capdl_object_alloc_algorithm(
                     paddr: cur_paddr,
                 });
 
-                cur_paddr += 1 << named_obj.object.physical_size_bits(&kernel_config);
+                cur_paddr += 1 << named_obj.object.physical_size_bits(kernel_config);
                 next_obj_id_with_paddr += 1;
             } else {
                 break;
@@ -212,5 +212,5 @@ pub fn simulate_capdl_object_alloc_algorithm(
         }
     }
 
-    return !oom;
+    !oom
 }

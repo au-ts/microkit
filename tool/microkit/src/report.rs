@@ -231,7 +231,7 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
                     .write_all(
                         format!(
                             "\t- {}: '{}'\n",
-                            named_ioport_object.object.human_name(&kernel_config),
+                            named_ioport_object.object.human_name(kernel_config),
                             named_ioport_object.name
                         )
                         .as_bytes(),
@@ -263,7 +263,7 @@ pub fn write_report(spec: &CapDLSpec, kernel_config: &Config, output_path: &str)
         .write_all(b"\n# Kernel Objects Details: ID, Type, Name, Physical Address (on ARM and RISC-V only)\n")
         .unwrap();
     for (id, named_object) in spec.objects.iter().enumerate() {
-        if named_object.object.physical_size_bits(&kernel_config) > 0 {
+        if named_object.object.physical_size_bits(kernel_config) > 0 {
             if kernel_config.arch == Arch::X86_64 {
                 report_file
                     .write_all(

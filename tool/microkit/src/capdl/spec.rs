@@ -173,7 +173,7 @@ impl CapDLObject {
                 } else {
                     unreachable!("unknown frame size bits {}", frame.size_bits);
                 }
-            },
+            }
             CapDLObject::PageTable(_) => "PageTable",
             CapDLObject::AsidPool(_) => "AsidPool",
             CapDLObject::ArmIrq(_) => "ARM IRQ",

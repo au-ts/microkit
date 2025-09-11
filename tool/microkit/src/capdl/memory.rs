@@ -88,10 +88,15 @@ fn get_pt_level_coverage(sel4_config: &Config, level: usize, vaddr: u64) -> Rang
     low..high
 }
 
-fn get_pt_level_to_insert(sel4_config: &Config, page_size: PageSize) -> usize {
-    match page_size {
-        PageSize::Small => sel4_config.num_page_table_levels() - 1,
-        PageSize::Large => sel4_config.num_page_table_levels() - 2,
+fn get_pt_level_to_insert(sel4_config: &Config, page_size_bytes: u64) -> usize {
+    const SMALL_PAGE_BYTES: u64 = PageSize::Small as u64;
+    const LARGE_PAGE_BYTES: u64 = PageSize::Large as u64;
+    match page_size_bytes {
+        SMALL_PAGE_BYTES => sel4_config.num_page_table_levels() - 1,
+        LARGE_PAGE_BYTES => sel4_config.num_page_table_levels() - 2,
+        _ => unreachable!(
+            "internal bug: get_pt_level_to_insert(): unknown page_size_bytes: {page_size_bytes}"
+        ),
     }
 }
 
@@ -213,7 +218,11 @@ fn map_intermediary_level_helper(
 
 pub fn create_vspace(spec: &mut CapDLSpec, sel4_config: &Config, pd_name: &str) -> ObjectId {
     spec.add_root_object(NamedObject {
-        name: format!("{}_{}", get_pt_level_name(sel4_config, top_pt_level_number(sel4_config)), pd_name),
+        name: format!(
+            "{}_{}",
+            get_pt_level_name(sel4_config, top_pt_level_number(sel4_config)),
+            pd_name
+        ),
         object: CapDLObject::PageTable(object::PageTable {
             x86_ept: false,
             is_root: true,
@@ -248,7 +257,7 @@ fn map_recursive(
     pt_obj_id: ObjectId,
     cur_level: usize,
     frame_cap: Cap,
-    frame_size: PageSize,
+    frame_size_bytes: u64,
     vaddr: u64,
 ) -> Result<(), String> {
     if cur_level >= sel4_config.num_page_table_levels() {
@@ -257,15 +266,9 @@ fn map_recursive(
 
     let this_level_index = get_pt_level_index(sel4_config, cur_level, vaddr);
 
-    if cur_level == get_pt_level_to_insert(sel4_config, frame_size) {
+    if cur_level == get_pt_level_to_insert(sel4_config, frame_size_bytes) {
         // Base case: we got to the target level to insert the frame cap.
-        insert_cap_into_page_table_level(
-            spec,
-            pt_obj_id,
-            cur_level,
-            this_level_index,
-            frame_cap,
-        )
+        insert_cap_into_page_table_level(spec, pt_obj_id, cur_level, this_level_index, frame_cap)
     } else {
         // Recursive case: we have not gotten to the correct level, create the next level and recurse down.
         let next_level_name_prefix = get_pt_level_name(sel4_config, cur_level + 1);
@@ -288,7 +291,7 @@ fn map_recursive(
                 next_level_pt_obj_id,
                 cur_level + 1,
                 frame_cap,
-                frame_size,
+                frame_size_bytes,
                 vaddr,
             ),
             Err(err_reason) => Err(err_reason),
@@ -302,7 +305,7 @@ pub fn map_page(
     pd_name: &str,
     vspace_obj_id: ObjectId,
     frame_cap: Cap,
-    frame_size: PageSize,
+    frame_size_bytes: u64,
     vaddr: u64,
 ) -> Result<(), String> {
     map_recursive(
@@ -313,7 +316,7 @@ pub fn map_page(
         vspace_obj_id,
         top_pt_level_number(sel4_config),
         frame_cap,
-        frame_size,
+        frame_size_bytes,
         vaddr,
     )
 }

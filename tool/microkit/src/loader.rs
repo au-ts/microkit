@@ -132,7 +132,7 @@ impl Loader {
         kernel_elf: &ElfFile,
         initial_task_elf: &ElfFile,
         initial_task_phy_base: u64,
-        initial_task_vaddr_range: Range<u64>
+        initial_task_vaddr_range: Range<u64>,
     ) -> Loader {
         let loader_elf = ElfFile::from_path(loader_elf_path).unwrap();
         let sz = loader_elf.word_size;
@@ -195,7 +195,8 @@ impl Loader {
         let mut initial_task_data: Vec<u8> = vec![0; initial_task_size as usize];
         for segment in initial_task_segments.iter() {
             let buf_off = segment.virt_addr - initial_task_vaddr_range.start;
-            initial_task_data[buf_off as usize..(buf_off + segment.mem_size()) as usize].copy_from_slice(&segment.data);
+            initial_task_data[buf_off as usize..(buf_off + segment.mem_size()) as usize]
+                .copy_from_slice(&segment.data);
         }
 
         regions.push((initial_task_phy_base, initial_task_data));

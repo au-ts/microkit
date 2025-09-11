@@ -13,8 +13,8 @@ use crate::{serialise_ut, UntypedObject};
 // The capDL initialiser heap size is calculated by:
 // (spec size * multiplier) + INITIALISER_HEAP_ADD_ON_CONSTANT
 pub const DEFAULT_INITIALISER_HEAP_MULTIPLIER: f64 = 2.0;
-const INITIALISER_HEAP_ADD_ON_CONSTANT: u64 = 16 * 4096; // 64kb
-                                                         // Page size used for allocating the spec and heap segments.
+const INITIALISER_HEAP_ADD_ON_CONSTANT: u64 = 16 * 4096;
+// Page size used for allocating the spec and heap segments.
 pub const INITIALISER_GRANULE_SIZE: PageSize = PageSize::Small;
 
 pub struct CapDLInitialiser {
@@ -66,7 +66,7 @@ impl CapDLInitialiser {
         let heap_size = round_up(
             (spec_size as f64 * self.heap_multiplier) as u64 + INITIALISER_HEAP_ADD_ON_CONSTANT,
             INITIALISER_GRANULE_SIZE as u64,
-        ) as u64;
+        );
         self.elf
             .add_segment(true, true, false, heap_vaddr, vec![0; heap_size as usize]);
         self.elf
@@ -96,7 +96,17 @@ impl CapDLInitialiser {
         self.heap_size = Some(heap_size);
     }
 
-    pub fn add_expected_untypeds(&mut self, untypeds: &Vec<UntypedObject>) {
+    pub fn replace_spec(&mut self, new_payload: Vec<u8>) {
+        if self.spec_size.is_none() || self.heap_size.is_none() {
+            unreachable!("internal bug: CapDLInitialiser::replace_spec() called when no spec have been added before");
+        }
+
+        self.elf.segments.pop();
+        self.elf.segments.pop();
+        self.add_spec(new_payload);
+    }
+
+    pub fn add_expected_untypeds(&mut self, untypeds: &[UntypedObject]) {
         let mut uts_desc: Vec<u8> = Vec::new();
         for ut in untypeds.iter() {
             uts_desc.extend(serialise_ut(ut));

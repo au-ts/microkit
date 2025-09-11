@@ -16,7 +16,9 @@
 /// but few seem to be concerned with giving any introspection regarding the parsed
 /// XML. The roxmltree project allows us to work on a lower-level than something based
 /// on serde and so we can report proper user errors.
-use crate::sel4::{Arch, ArmRiscvIrqTrigger, Config, PageSize, X86IoapicIrqPolarity, X86IoapicIrqTrigger};
+use crate::sel4::{
+    Arch, ArmRiscvIrqTrigger, Config, PageSize, X86IoapicIrqPolarity, X86IoapicIrqTrigger,
+};
 use crate::util::str_to_bool;
 use crate::MAX_PDS;
 use std::path::{Path, PathBuf};
@@ -648,10 +650,7 @@ impl ProtectionDomain {
                         };
                         let irq = SysIrq {
                             id: id as u64,
-                            kind: SysIrqKind::Conventional {
-                                irq,
-                                trigger,
-                            },
+                            kind: SysIrqKind::Conventional { irq, trigger },
                         };
                         irqs.push(irq);
                     } else if let Some(pin_str) = child.attribute("pin") {
@@ -1459,7 +1458,9 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             ));
         }
         if pd.name == MONITOR_PD_NAME {
-            return Err("Error: the PD name 'monitor' is reserved for the Microkit Monitor.".to_string());
+            return Err(
+                "Error: the PD name 'monitor' is reserved for the Microkit Monitor.".to_string(),
+            );
         }
     }
 

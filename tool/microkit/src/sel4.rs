@@ -1,10 +1,10 @@
-use std::cmp::max;
-
 //
 // Copyright 2025, UNSW
 //
 // SPDX-License-Identifier: BSD-2-Clause
 //
+use std::cmp::max;
+
 use serde::Deserialize;
 
 use crate::{elf::ElfFile, util, DisjointMemoryRegion, MemoryRegion, UntypedObject};
@@ -212,10 +212,8 @@ pub fn emulate_kernel_boot(
         Arch::Riscv64 => 38,
         Arch::X86_64 => unreachable!("the kernel boot process should not be emulated for x86!"),
     };
-    let device_regions: Vec<MemoryRegion> = [
-        device_memory.aligned_power_of_two_regions(config, max_bits),
-    ]
-    .concat();
+    let device_regions: Vec<MemoryRegion> =
+        [device_memory.aligned_power_of_two_regions(config, max_bits)].concat();
     let normal_regions: Vec<MemoryRegion> = [
         boot_region.aligned_power_of_two_regions(config, max_bits),
         normal_memory.aligned_power_of_two_regions(config, max_bits),
@@ -324,11 +322,11 @@ impl Config {
             Arch::Aarch64 => match self.hypervisor {
                 true => 0x0000008000000000,
                 false => u64::pow(2, 64) - u64::pow(2, 39),
-            }
+            },
             Arch::Riscv64 => match self.riscv_pt_levels.unwrap() {
-                RiscvVirtualMemory::Sv39 => u64::pow(2, 64) - u64::pow(2,38),
-            }
-            Arch::X86_64 => u64::pow(2, 64) - u64::pow(2,39),
+                RiscvVirtualMemory::Sv39 => u64::pow(2, 64) - u64::pow(2, 38),
+            },
+            Arch::X86_64 => u64::pow(2, 64) - u64::pow(2, 39),
         }
     }
 
