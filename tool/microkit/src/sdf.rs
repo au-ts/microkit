@@ -79,7 +79,7 @@ pub enum SysMapPerms {
     Execute = 4,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SysMap {
     pub mr: String,
     pub vaddr: u64,
@@ -90,17 +90,18 @@ pub struct SysMap {
     pub text_pos: Option<roxmltree::TextPos>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum SysMemoryRegionKind {
     User,
     Elf,
     Stack,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SysMemoryRegion {
     pub name: String,
     pub size: u64,
+    page_size_specified_by_user: bool,
     pub page_size: PageSize,
     pub page_count: u64,
     pub phys_addr: Option<u64>,
@@ -130,7 +131,7 @@ impl SysMemoryRegion {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum SysIrqKind {
     Conventional {
         irq: u64,
@@ -152,7 +153,7 @@ pub enum SysIrqKind {
     },
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct SysIrq {
     pub id: u64,
     pub kind: SysIrqKind,
@@ -168,14 +169,14 @@ impl SysIrq {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct IOPort {
     pub id: u64,
     pub addr: u64,
     pub size: u64,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum SysSetVarKind {
     // For size we do not store the size since when we parse mappings
     // we do not have access to the memory region yet. The size is resolved
@@ -185,7 +186,7 @@ pub enum SysSetVarKind {
     Paddr { region: String },
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct SysSetVar {
     pub symbol: String,
     pub kind: SysSetVarKind,
@@ -205,7 +206,7 @@ pub struct Channel {
     pub end_b: ChannelEnd,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ProtectionDomain {
     /// Only populated for child protection domains
     pub id: Option<u64>,
@@ -233,7 +234,7 @@ pub struct ProtectionDomain {
     text_pos: Option<roxmltree::TextPos>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct VirtualMachine {
     pub vcpus: Vec<VirtualCpu>,
     pub name: String,
@@ -243,7 +244,7 @@ pub struct VirtualMachine {
     pub period: u64,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct VirtualCpu {
     pub id: u64,
 }
@@ -983,8 +984,10 @@ impl SysMemoryRegion {
 
         let name = checked_lookup(xml_sdf, node, "name")?;
         let size = sdf_parse_number(checked_lookup(xml_sdf, node, "size")?, node)?;
+        let mut page_size_specified_by_user = false;
 
         let page_size = if let Some(xml_page_size) = node.attribute("page_size") {
+            page_size_specified_by_user = true;
             sdf_parse_number(xml_page_size, node)?
         } else {
             config.page_sizes()[0]
@@ -1027,6 +1030,7 @@ impl SysMemoryRegion {
             name: name.to_string(),
             size,
             page_size: page_size.into(),
+            page_size_specified_by_user,
             page_count,
             phys_addr,
             text_pos: Some(xml_sdf.doc.text_pos_at(node.range().start)),
@@ -1641,8 +1645,12 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         }
     }
 
-    // Optimise page size of MRs, if we can
+    // Optimise page size of MRs, if the page size is not specified
     for mr in &mut mrs {
+        if mr.page_size_specified_by_user {
+            continue;
+        }
+
         // If the largest possible page size based on the MR's size is already
         // set as its page size, skip it.
         let mr_largest_page_size = mr.optimal_page_size(config);
