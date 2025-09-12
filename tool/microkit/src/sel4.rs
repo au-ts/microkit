@@ -41,7 +41,7 @@ pub struct PlatformConfig {
 /// The cap_address refers to a cap address that addresses this cap.
 /// The cap_address is is intended to be valid within the context of the
 /// initial task.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Object {
     /// Type of kernel object
     pub object_type: ObjectType,

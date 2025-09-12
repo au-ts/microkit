@@ -19,6 +19,8 @@
 use crate::sel4::{Config, IrqTrigger, PageSize};
 use crate::util::str_to_bool;
 use crate::MAX_PDS;
+
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Events that come through entry points (e.g notified or protected) are given an
@@ -154,7 +156,7 @@ pub struct SysSetVar {
 
 #[derive(Debug, Clone)]
 pub struct ChannelEnd {
-    pub pd: usize,
+    pub pd: String,
     pub id: u64,
     pub notify: bool,
     pub pp: bool,
@@ -189,7 +191,7 @@ pub struct ProtectionDomain {
     pub has_children: bool,
     /// Index into the total list of protection domains if a parent
     /// protection domain exists
-    pub parent: Option<usize>,
+    pub parent: Option<String>,
     /// Location in the parsed SDF file
     text_pos: roxmltree::TextPos,
 }
@@ -329,12 +331,12 @@ impl SysMap {
 }
 
 impl ProtectionDomain {
-    pub fn needs_ep(&self, self_id: usize, channels: &[Channel]) -> bool {
+    pub fn needs_ep(&self, channels: &[Channel]) -> bool {
         self.has_children
             || self.virtual_machine.is_some()
             || channels.iter().any(|channel| {
-                (channel.end_a.pp && channel.end_b.pd == self_id)
-                    || (channel.end_b.pp && channel.end_a.pd == self_id)
+                (channel.end_a.pp && channel.end_b.pd == self.name)
+                    || (channel.end_b.pp && channel.end_a.pd == self.name)
             })
     }
 
@@ -910,9 +912,9 @@ impl ChannelEnd {
                 value_error(xml_sdf, node, "pp must be 'true' or 'false'".to_string())
             })?;
 
-        if let Some(pd_idx) = pds.iter().position(|pd| pd.name == end_pd) {
+        if let Some(_) = pds.iter().position(|pd| pd.name == end_pd) {
             Ok(ChannelEnd {
-                pd: pd_idx,
+                pd: end_pd.to_string(),
                 id: end_id.try_into().unwrap(),
                 notify,
                 pp,
@@ -973,7 +975,7 @@ struct XmlSystemDescription<'a> {
 
 #[derive(Debug)]
 pub struct SystemDescription {
-    pub protection_domains: Vec<ProtectionDomain>,
+    pub protection_domains: HashMap<String, ProtectionDomain>,
     pub memory_regions: Vec<SysMemoryRegion>,
     pub channels: Vec<Channel>,
 }
@@ -1121,7 +1123,6 @@ fn check_no_text(xml_sdf: &XmlSystemDescription, node: &roxmltree::Node) -> Resu
 fn pd_tree_to_list(
     xml_sdf: &XmlSystemDescription,
     mut pd: ProtectionDomain,
-    idx: usize,
 ) -> Result<Vec<ProtectionDomain>, String> {
     let mut child_ids = vec![];
     for child_pd in &pd.child_pds {
@@ -1151,15 +1152,10 @@ fn pd_tree_to_list(
     for mut child_pd in child_pds {
         // The parent PD's index is set for each child. We then pass the index relative to the *total*
         // list to any nested children so their parent index can be set to the position of this child.
-        child_pd.parent = Some(idx);
+        child_pd.parent = Some(pd.name.clone());
         new_child_pds.extend(pd_tree_to_list(
             xml_sdf,
             child_pd,
-            // We need to pass the position of this current child PD in the global list.
-            // `idx` is this child's parent index in the global list, so we need to add
-            // the position of this child to `idx` which will be the number of extra child
-            // PDs we've just processed, plus one for the actual entry of this child.
-            idx + new_child_pds.len() + 1,
         )?);
     }
 
@@ -1184,7 +1180,7 @@ fn pd_flatten(
         // These are all root PDs, so should not have parents.
         assert!(pd.parent.is_none());
         // We provide the index of the PD in the entire PD list
-        all_pds.extend(pd_tree_to_list(xml_sdf, pd, all_pds.len())?);
+        all_pds.extend(pd_tree_to_list(xml_sdf, pd)?);
     }
 
     Ok(all_pds)
@@ -1270,14 +1266,24 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         ));
     }
 
-    for pd in &pds {
-        if pds.iter().filter(|x| pd.name == x.name).count() > 1 {
-            return Err(format!(
-                "Error: duplicate protection domain name '{}'.",
-                pd.name
-            ));
+    let pds_map = {
+        let mut pds_by_name: HashMap<String, ProtectionDomain> = HashMap::new();
+
+        for pd in pds.into_iter() {
+            if pds_by_name.contains_key(&pd.name) {
+                return Err(format!(
+                    "Error: duplicate protection domain name '{}'.",
+                    pd.name
+                ));
+            }
+
+            pds_by_name.insert(pd.name.clone(), pd);
         }
-    }
+
+        pds_by_name
+    };
+
+    let pds = pds_map;
 
     for mr in &mrs {
         if mrs.iter().filter(|x| mr.name == x.name).count() > 1 {
@@ -1289,7 +1295,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
     }
 
     let mut vms = vec![];
-    for pd in &pds {
+    for pd in pds.values() {
         if let Some(vm) = &pd.virtual_machine {
             if vms.contains(&vm) {
                 return Err(format!(
@@ -1303,7 +1309,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
 
     // Ensure no duplicate IRQs
     let mut all_irqs = Vec::new();
-    for pd in &pds {
+    for pd in pds.values() {
         for sysirq in &pd.irqs {
             if all_irqs.contains(&sysirq.irq) {
                 return Err(format!(
@@ -1317,38 +1323,40 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
 
     // Ensure no duplicate channel identifiers.
     // This means checking that no interrupt IDs clash with any channel IDs
-    let mut ch_ids = vec![vec![]; pds.len()];
-    for (pd_idx, pd) in pds.iter().enumerate() {
+    let mut ch_ids: HashMap<String, Vec<_>> = HashMap::with_capacity(pds.len());
+    for pd in pds.values() {
+        ch_ids.insert(pd.name.clone(), vec![]);
         for sysirq in &pd.irqs {
-            if ch_ids[pd_idx].contains(&sysirq.id) {
+            if ch_ids[&pd.name].contains(&sysirq.id) {
                 return Err(format!(
                     "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
                     sysirq.id, pd.name, filename, pd.text_pos.row, pd.text_pos.col
                 ));
             }
-            ch_ids[pd_idx].push(sysirq.id);
+
+            if let Some(val) = ch_ids.get_mut(&pd.name) { val.push(sysirq.id); };
         }
     }
 
     for ch in &channels {
-        if ch_ids[ch.end_a.pd].contains(&ch.end_a.id) {
-            let pd = &pds[ch.end_a.pd];
+        if ch_ids[&ch.end_a.pd].contains(&ch.end_a.id) {
+            let pd = &pds[&ch.end_a.pd];
             return Err(format!(
                 "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
                 ch.end_a.id, pd.name, filename, pd.text_pos.row, pd.text_pos.col
             ));
         }
 
-        if ch_ids[ch.end_b.pd].contains(&ch.end_b.id) {
-            let pd = &pds[ch.end_b.pd];
+        if ch_ids[&ch.end_b.pd].contains(&ch.end_b.id) {
+            let pd = &pds[&ch.end_b.pd];
             return Err(format!(
                 "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
                 ch.end_b.id, pd.name, filename, pd.text_pos.row, pd.text_pos.col
             ));
         }
 
-        let pd_a = &pds[ch.end_a.pd];
-        let pd_b = &pds[ch.end_b.pd];
+        let pd_a = &pds[&ch.end_a.pd];
+        let pd_b = &pds[&ch.end_b.pd];
         if ch.end_a.pp && pd_a.priority >= pd_b.priority {
             return Err(format!(
                 "Error: PPCs must be to protection domains of strictly higher priorities; \
@@ -1363,12 +1371,12 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             ));
         }
 
-        ch_ids[ch.end_a.pd].push(ch.end_a.id);
-        ch_ids[ch.end_b.pd].push(ch.end_b.id);
+        if let Some(val) = ch_ids.get_mut(&ch.end_a.pd) { val.push(ch.end_a.id); };
+        if let Some(val) = ch_ids.get_mut(&ch.end_b.pd) { val.push(ch.end_b.id); };
     }
 
     // Ensure that all maps are correct
-    for pd in &pds {
+    for pd in pds.values() {
         check_maps(&xml_sdf, &mrs, pd, &pd.maps)?;
         if let Some(vm) = &pd.virtual_machine {
             check_maps(&xml_sdf, &mrs, vm, &vm.maps)?;
@@ -1406,7 +1414,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
 
     // Check that all MRs are used
     let mut all_maps = vec![];
-    for pd in &pds {
+    for pd in pds.values() {
         all_maps.extend(&pd.maps);
         if let Some(vm) = &pd.virtual_machine {
             all_maps.extend(&vm.maps);
