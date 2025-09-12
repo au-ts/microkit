@@ -453,6 +453,7 @@ enum InvocationLabel {
     ARMVCPUAckVppi,
     // ARM IRQ
     ARMIRQIssueIRQHandlerTrigger,
+    ARMIRQIssueSGISignal,
     // RISC-V Page Table
     RISCVPageTableMap,
     RISCVPageTableUnmap,
@@ -967,6 +968,25 @@ impl Invocation {
                 arg_strs.push(Invocation::fmt_field("dest_depth", dest_depth));
                 (irq_control, &cap_lookup[&irq_control])
             }
+            InvocationArgs::IrqControlIssueSGICap {
+                irq_control,
+                irq,
+                target,
+                dest_root,
+                dest_index,
+                dest_depth,
+            } => {
+                arg_strs.push(Invocation::fmt_field("irq", irq));
+                arg_strs.push(Invocation::fmt_field("target", target.into()));
+                arg_strs.push(Invocation::fmt_field_cap(
+                    "dest_root",
+                    dest_root,
+                    cap_lookup,
+                ));
+                arg_strs.push(Invocation::fmt_field("dest_index", dest_index));
+                arg_strs.push(Invocation::fmt_field("dest_depth", dest_depth));
+                (irq_control, &cap_lookup[&irq_control])
+            }
             InvocationArgs::IrqHandlerSetNotification {
                 irq_handler,
                 notification,
@@ -1092,6 +1112,7 @@ impl Invocation {
             }
             InvocationLabel::ARMIRQIssueIRQHandlerTrigger
             | InvocationLabel::RISCVIRQIssueIRQHandlerTrigger => "IRQ Control",
+            InvocationLabel::ARMIRQIssueSGISignal => "IRQ Control",
             InvocationLabel::IRQSetIRQHandler => "IRQ Handler",
             InvocationLabel::ARMPageTableMap | InvocationLabel::RISCVPageTableMap => "Page Table",
             InvocationLabel::ARMPageMap | InvocationLabel::RISCVPageMap => "Page",
@@ -1117,6 +1138,7 @@ impl Invocation {
             InvocationLabel::ARMASIDPoolAssign | InvocationLabel::RISCVASIDPoolAssign => "Assign",
             InvocationLabel::ARMIRQIssueIRQHandlerTrigger
             | InvocationLabel::RISCVIRQIssueIRQHandlerTrigger => "Get",
+            InvocationLabel::ARMIRQIssueSGISignal => "IssueSGISignal",
             InvocationLabel::IRQSetIRQHandler => "SetNotification",
             InvocationLabel::ARMPageTableMap
             | InvocationLabel::ARMPageMap
@@ -1151,6 +1173,10 @@ impl InvocationArgs {
             InvocationArgs::IrqControlGetTrigger { .. } => match config.arch {
                 Arch::Aarch64 => InvocationLabel::ARMIRQIssueIRQHandlerTrigger,
                 Arch::Riscv64 => InvocationLabel::RISCVIRQIssueIRQHandlerTrigger,
+            },
+            InvocationArgs::IrqControlIssueSGICap { .. } => match config.arch {
+                Arch::Aarch64 => InvocationLabel::ARMIRQIssueSGISignal,
+                Arch::Riscv64 => panic!("SGIs are not supported on RISC-V yet"),
             },
             InvocationArgs::IrqHandlerSetNotification { .. } => InvocationLabel::IRQSetIRQHandler,
             InvocationArgs::PageTableMap { .. } => match config.arch {
@@ -1258,6 +1284,18 @@ impl InvocationArgs {
             } => (
                 irq_control,
                 vec![irq, trigger as u64, dest_index, dest_depth],
+                vec![dest_root],
+            ),
+            InvocationArgs::IrqControlIssueSGICap {
+                irq_control,
+                irq,
+                target,
+                dest_root,
+                dest_index,
+                dest_depth,
+            } => (
+                irq_control,
+                vec![irq, target.into(), dest_index, dest_depth],
                 vec![dest_root],
             ),
             InvocationArgs::IrqHandlerSetNotification {
@@ -1378,6 +1416,17 @@ pub enum InvocationArgs {
         irq_control: u64,
         irq: u64,
         trigger: IrqTrigger,
+        dest_root: u64,
+        dest_index: u64,
+        dest_depth: u64,
+    },
+    IrqControlIssueSGICap {
+        // (invocation) cap
+        irq_control: u64,
+        // The SGI INTID (0-15) that can be signalled.
+        irq: u64,
+        // The node ID that will be targeted. 0-7 for GICv2 and 0-31 for GICv3.
+        target: u8,
         dest_root: u64,
         dest_index: u64,
         dest_depth: u64,

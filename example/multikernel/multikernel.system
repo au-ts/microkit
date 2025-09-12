@@ -9,6 +9,7 @@
 
     <protection_domain name="core0_A" priority="254" core="0" >
         <program_image path="core0.elf" />
+        <irq irq="1" id="1" />
     </protection_domain>
 
     <protection_domain name="core0_B" priority="254" core="0" >
@@ -23,11 +24,13 @@
     <protection_domain name="core1" priority="254" core="1" >
         <program_image path="core1.elf" />
 
-        <irq irq="0" id="1" />
+        <!-- XXX: These should be prevented since taken by core0. -->
+        <!--      Or just at all? Does it ever make sense to SGI IRQs? -->
+        <!-- <irq irq="0" id="1" /> -->
     </protection_domain>
 
-    <!-- <channel>
-        <end pd="core0" id="0"  />
-        <end pd="core1" id="0" />
-    </channel> -->
+    <channel>
+        <end pd="core0_A" id="0" notify="false" />
+        <end pd="core1"   id="0" notify="true" />
+    </channel>
 </system>

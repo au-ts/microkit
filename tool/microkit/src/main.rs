@@ -2343,8 +2343,37 @@ fn build_system(
             ) {
                 // Both channel ends are on a core that is not us.
                 (None, None) => continue,
-                (None, Some(recv_pd)) => todo!(),
-                (Some(_), None) => todo!(),
+                // In this case, we are the cross-core receiver; set up an IRQ.
+                (None, Some(recv_pd)) => {
+                    // TODO: simple case for now (single send notify)
+                    if !send.notify && !send.pp && !recv.notify && !recv.pp {
+                        continue;
+                    };
+                }
+                // In this case, we are the cross-core sender: set up an SGI
+                (Some(send_pd), None) => {
+                    // TODO: simple case for now (single send notify)
+                    if !send.notify && !send.pp && !recv.notify && !recv.pp {
+                        continue;
+                    };
+
+                    let send_cnode_obj = cnode_objs_by_pd[&send.pd];
+                    let send_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + send.id;
+
+                    system_invocations.push(Invocation::new(
+                        config,
+                        InvocationArgs::IrqControlIssueSGICap {
+                            irq_control: IRQ_CONTROL_CAP_ADDRESS,
+                            // TODO! => 1 IRQ per core this implies
+                            irq: send_pd.core,
+                            // target: recv_pd.core, TODO: hardcoded for now.
+                            target: 0,
+                            dest_root: send_cnode_obj.cap_addr,
+                            dest_index: send_cap_idx,
+                            dest_depth: PD_CAP_BITS,
+                        },
+                    ));
+                }
                 (Some(_), Some(_)) => {
                     let send_cnode_obj = cnode_objs_by_pd[&send.pd];
                     let recv_notification_obj = notification_objs_by_pd[&recv.pd];
@@ -3645,19 +3674,23 @@ fn main() -> Result<(), String> {
     };
 
     let mut report_buf = BufWriter::new(report);
-    match write_report(
-        &mut report_buf,
-        &kernel_config,
-        // TEMP!
-        &built_systems[0],
-        &bootstrap_invocation_datas[0],
-    ) {
-        Ok(()) => report_buf.flush().unwrap(),
-        Err(err) => {
-            return Err(format!(
-                "Could not write out report file '{}': {}",
-                args.report, err
-            ))
+    for (multikernel_idx, (built_system, bootstrap_invocation_data)) in
+        zip(built_systems.iter(), bootstrap_invocation_datas.iter()).enumerate()
+    {
+        writeln!(report_buf, "======================== Report for multikernel: {multikernel_idx} ===================================\n").unwrap();
+        match write_report(
+            &mut report_buf,
+            &kernel_config,
+            &built_system,
+            &bootstrap_invocation_data,
+        ) {
+            Ok(()) => report_buf.flush().unwrap(),
+            Err(err) => {
+                return Err(format!(
+                    "Could not write out report file '{}': {}",
+                    args.report, err
+                ))
+            }
         }
     }
     report_buf.flush().unwrap();
