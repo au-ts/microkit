@@ -96,13 +96,13 @@ static inline void microkit_notify(microkit_channel ch)
 
 static inline void microkit_irq_ack(microkit_channel ch)
 {
-    if (ch > MICROKIT_MAX_CHANNEL_ID || (microkit_irqs & (1ULL << ch)) == 0) {
-        microkit_dbg_puts(microkit_name);
-        microkit_dbg_puts(" microkit_irq_ack: invalid channel given '");
-        microkit_dbg_put32(ch);
-        microkit_dbg_puts("'\n");
-        return;
-    }
+    // if (ch > MICROKIT_MAX_CHANNEL_ID || (microkit_irqs & (1ULL << ch)) == 0) {
+    //     microkit_dbg_puts(microkit_name);
+    //     microkit_dbg_puts(" microkit_irq_ack: invalid channel given '");
+    //     microkit_dbg_put32(ch);
+    //     microkit_dbg_puts("'\n");
+    //     return;
+    // }
     seL4_IRQHandler_Ack(BASE_IRQ_CAP + ch);
 }
 

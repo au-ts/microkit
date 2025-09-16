@@ -154,7 +154,7 @@ pub struct SysSetVar {
     pub kind: SysSetVarKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct ChannelEnd {
     pub pd: String,
     pub id: u64,
@@ -331,10 +331,10 @@ impl SysMap {
 }
 
 impl ProtectionDomain {
-    pub fn needs_ep(&self, channels: &[Channel]) -> bool {
+    pub fn needs_ep(&self, channels: &[&Channel]) -> bool {
         self.has_children
             || self.virtual_machine.is_some()
-            || channels.iter().any(|channel| {
+            || channels.iter().any(|&channel| {
                 (channel.end_a.pp && channel.end_b.pd == self.name)
                     || (channel.end_b.pp && channel.end_a.pd == self.name)
             })

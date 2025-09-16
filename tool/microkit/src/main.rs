@@ -9,6 +9,7 @@
 
 use elf::ElfFile;
 use loader::Loader;
+use microkit_tool::sdf::{ChannelEnd, SysIrq};
 use microkit_tool::{
     elf, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError, MemoryRegion,
     ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH,
@@ -377,6 +378,7 @@ struct BuiltSystem {
 
 pub fn pd_write_symbols(
     pds: &HashMap<String, ProtectionDomain>,
+    // TODO: Channel -> [UndirectedChannel, DirectedChannel]
     channels: &[Channel],
     pd_elf_files: &mut HashMap<String, ElfFile>,
     pd_setvar_values: &HashMap<String, Vec<u64>>,
@@ -804,6 +806,11 @@ fn emulate_kernel_boot(
     }
 }
 
+#[derive(Debug)]
+struct FullSystemState {
+    sgi_irq_numbers: HashMap<ChannelEnd, u64>,
+}
+
 fn build_system(
     config: &Config,
     pd_elf_files: &HashMap<String, ElfFile>,
@@ -812,6 +819,7 @@ fn build_system(
     protection_domains: &HashMap<String, ProtectionDomain>,
     memory_regions: &[SysMemoryRegion],
     channels: &[Channel],
+    full_system_state: &FullSystemState,
     core: u64,
     invocation_table_size: u64,
     system_cnode_size: u64,
@@ -920,6 +928,56 @@ fn build_system(
             .filter(|ut| ut.is_device)
             .collect::<Vec<_>>(),
     );
+
+    // TODO: Validate that there are no more than 8 (GICv2) or 16 (GICv3) cross core channels
+    //       and that none of them are endpoints; only notifications are possible.
+
+    // Split out the channels into same-core and cross-core channels.
+    let (same_core_channels, cross_core_channels): (Vec<_>, Vec<_>) =
+        channels.into_iter().partition(|&channel| {
+            protection_domains.contains_key(&channel.end_a.pd)
+                && protection_domains.contains_key(&channel.end_b.pd)
+        });
+    // Prevent usage of this variable.
+    #[allow(unused_variables)]
+    let channels = ();
+
+    let cross_core_sender_channels: Vec<_> = cross_core_channels
+        .iter()
+        // Make both directions of the channels
+        .flat_map(|&cc| [(&cc.end_a, &cc.end_b), (&cc.end_b, &cc.end_a)])
+        // And only look at the ones where we are the sender (not the receiver)
+        //     and where the channel in the right direction
+        .filter(|(send, _)| protection_domains.contains_key(&send.pd) && send.notify)
+        .collect();
+
+    let cross_core_receiver_channels: Vec<_> = cross_core_channels
+        .iter()
+        // Make both directions of the channels
+        .flat_map(|&cc| [(&cc.end_a, &cc.end_b), (&cc.end_b, &cc.end_a)])
+        // And only look at the ones where we are the receiver (not the sender)
+        //     and where the channel in the right direction
+        .filter(|(send, recv)| protection_domains.contains_key(&recv.pd) && send.notify)
+        .collect();
+
+    let cross_core_receiver_sgi_irqs_by_pd = {
+        let mut irqs_by_pd: HashMap<String, Vec<SysIrq>> = HashMap::new();
+
+        for &(_, recv) in cross_core_receiver_channels.iter() {
+            let sysirq = SysIrq {
+                irq: *full_system_state
+                    .sgi_irq_numbers
+                    .get(&recv)
+                    .expect("internal error: receiver should have allocated irq number"),
+                id: recv.id,
+                trigger: sel4::IrqTrigger::Level,
+            };
+
+            irqs_by_pd.entry(recv.pd.clone()).or_default().push(sysirq);
+        }
+
+        irqs_by_pd
+    };
 
     // 2. Now that the available resources are known it is possible to proceed with the
     // monitor task boot strap.
@@ -1525,7 +1583,7 @@ fn build_system(
     // Endpoints
     let pd_endpoint_names: Vec<String> = protection_domains
         .values()
-        .filter(|pd| pd.needs_ep(&channels))
+        .filter(|&pd| pd.needs_ep(&same_core_channels))
         .map(|pd| format!("EP: PD={}", pd.name))
         .collect();
     let endpoint_names = [vec![format!("EP: Monitor Fault")], pd_endpoint_names].concat();
@@ -1549,7 +1607,7 @@ fn build_system(
         protection_domains
             .values()
             .filter_map(|pd| {
-                if pd.needs_ep(channels) {
+                if pd.needs_ep(&same_core_channels) {
                     let obj = &endpoint_objs[1..][i];
                     i += 1;
                     Some((pd.name.clone(), obj))
@@ -1803,6 +1861,45 @@ fn build_system(
         }
     }
 
+    // TODO: Validate that SGI IRQs aren't used... above?
+    // TODO: Platform-dependence.
+    // XXX: Could merge into the above loop via the .chain() constructs
+    for &(send, recv) in cross_core_receiver_channels.iter() {
+        assert!(!protection_domains.contains_key(&send.pd));
+        let recv_pd = &protection_domains[&recv.pd];
+
+        let cap_address = system_cap_address_mask | cap_slot;
+
+        let &irq_number = full_system_state
+            .sgi_irq_numbers
+            .get(recv)
+            .expect("INTERNAL: receiver should have an allocated IRQ number");
+
+        system_invocations.push(Invocation::new(
+            config,
+            InvocationArgs::IrqControlGetTrigger {
+                irq_control: IRQ_CONTROL_CAP_ADDRESS,
+                irq: irq_number,
+                // SGIs are level triggered.
+                trigger: sel4::IrqTrigger::Level,
+                dest_root: root_cnode_cap,
+                dest_index: cap_address,
+                dest_depth: config.cap_address_bits,
+            },
+        ));
+
+        cap_slot += 1;
+        cap_address_names.insert(
+            cap_address,
+            format!("SGI Handler: irq={}", irq_number),
+        );
+
+        irq_cap_addresses
+            .get_mut(recv_pd)
+            .unwrap()
+            .push(cap_address);
+    }
+
     // This has to be done prior to minting!
     let num_asid_invocations = protection_domains.len() + virtual_machines.len();
     let mut asid_invocation = Invocation::new(
@@ -2039,7 +2136,13 @@ fn build_system(
     let mut badged_irq_caps: HashMap<&ProtectionDomain, Vec<u64>> = HashMap::new();
     for (notification_obj, pd) in zip(&notification_objs, protection_domains.values()) {
         badged_irq_caps.insert(pd, vec![]);
-        for sysirq in &pd.irqs {
+
+        for sysirq in pd.irqs.iter().chain(
+            cross_core_receiver_sgi_irqs_by_pd
+                .get(&pd.name)
+                .map(|v| v.iter())
+                .unwrap_or_default(),
+        ) {
             let badge = 1 << sysirq.id;
             let badged_cap_address = system_cap_address_mask | cap_slot;
             system_invocations.push(Invocation::new(
@@ -2149,7 +2252,7 @@ fn build_system(
 
     // Minting in the address space
     for pd in protection_domains.values() {
-        let obj = if pd.needs_ep(channels) {
+        let obj = if pd.needs_ep(&same_core_channels) {
             pd_endpoint_objs[&pd.name]
         } else {
             &notification_objs_by_pd[&pd.name]
@@ -2234,7 +2337,15 @@ fn build_system(
 
     // Mint access to interrupt handlers in the PD CSpace
     for (pd_idx, pd) in protection_domains.values().enumerate() {
-        for (sysirq, irq_cap_address) in zip(&pd.irqs, &irq_cap_addresses[pd]) {
+        for (sysirq, irq_cap_address) in zip(
+            pd.irqs.iter().chain(
+                cross_core_receiver_sgi_irqs_by_pd
+                    .get(&pd.name)
+                    .map(|v| v.iter())
+                    .unwrap_or_default(),
+            ),
+            &irq_cap_addresses[pd],
+        ) {
             let cap_idx = BASE_IRQ_CAP + sysirq.id;
             assert!(cap_idx < PD_CAP_SIZE);
             system_invocations.push(Invocation::new(
@@ -2335,99 +2446,83 @@ fn build_system(
         }
     }
 
-    for cc in channels {
-        for (send, recv) in [(&cc.end_a, &cc.end_b), (&cc.end_b, &cc.end_a)] {
-            match (
-                protection_domains.get(&send.pd),
-                protection_domains.get(&recv.pd),
-            ) {
-                // Both channel ends are on a core that is not us.
-                (None, None) => continue,
-                // In this case, we are the cross-core receiver; set up an IRQ.
-                (None, Some(recv_pd)) => {
-                    // TODO: simple case for now (single send notify)
-                    if !send.notify && !send.pp && !recv.notify && !recv.pp {
-                        continue;
-                    };
-                }
-                // In this case, we are the cross-core sender: set up an SGI
-                (Some(send_pd), None) => {
-                    // TODO: simple case for now (single send notify)
-                    if !send.notify && !send.pp && !recv.notify && !recv.pp {
-                        continue;
-                    };
+    for (send, recv) in same_core_channels
+        .iter()
+        // Make both directions of the channels
+        .flat_map(|&cc| [(&cc.end_a, &cc.end_b), (&cc.end_b, &cc.end_a)])
+    {
+        let send_cnode_obj = cnode_objs_by_pd[&send.pd];
+        let recv_notification_obj = notification_objs_by_pd[&recv.pd];
 
-                    let send_cnode_obj = cnode_objs_by_pd[&send.pd];
-                    let send_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + send.id;
+        if send.notify {
+            let send_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + send.id;
+            assert!(send_cap_idx < PD_CAP_SIZE);
+            // receiver sees the sender's badge.
+            let send_badge = 1 << recv.id;
 
-                    system_invocations.push(Invocation::new(
-                        config,
-                        InvocationArgs::IrqControlIssueSGICap {
-                            irq_control: IRQ_CONTROL_CAP_ADDRESS,
-                            // TODO! => 1 IRQ per core this implies
-                            irq: send_pd.core,
-                            // target: recv_pd.core, TODO: hardcoded for now.
-                            target: 0,
-                            dest_root: send_cnode_obj.cap_addr,
-                            dest_index: send_cap_idx,
-                            dest_depth: PD_CAP_BITS,
-                        },
-                    ));
-                }
-                (Some(_), Some(_)) => {
-                    let send_cnode_obj = cnode_objs_by_pd[&send.pd];
-                    let recv_notification_obj = notification_objs_by_pd[&recv.pd];
-
-                    if send.notify {
-                        let send_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + send.id;
-                        assert!(send_cap_idx < PD_CAP_SIZE);
-                        // receiver sees the sender's badge.
-                        let send_badge = 1 << recv.id;
-
-                        system_invocations.push(Invocation::new(
-                            config,
-                            InvocationArgs::CnodeMint {
-                                cnode: send_cnode_obj.cap_addr,
-                                dest_index: send_cap_idx,
-                                dest_depth: PD_CAP_BITS,
-                                src_root: root_cnode_cap,
-                                src_obj: recv_notification_obj.cap_addr,
-                                src_depth: config.cap_address_bits,
-                                rights: Rights::All as u64, // FIXME: Check rights
-                                badge: send_badge,
-                            },
-                        ));
-                    }
-
-                    if send.pp {
-                        let send_cap_idx = BASE_OUTPUT_ENDPOINT_CAP + send.id;
-                        assert!(send_cap_idx < PD_CAP_SIZE);
-                        // receiver sees the sender's badge.
-                        let send_badge = PPC_BADGE | recv.id;
-
-                        let recv_endpoint_obj = pd_endpoint_objs[&recv.pd];
-
-                        system_invocations.push(Invocation::new(
-                            config,
-                            InvocationArgs::CnodeMint {
-                                cnode: send_cnode_obj.cap_addr,
-                                dest_index: send_cap_idx,
-                                dest_depth: PD_CAP_BITS,
-                                src_root: root_cnode_cap,
-                                src_obj: recv_endpoint_obj.cap_addr,
-                                src_depth: config.cap_address_bits,
-                                rights: Rights::All as u64, // FIXME: Check rights
-                                badge: send_badge,
-                            },
-                        ));
-                    }
-                }
-            }
-
-            // println!("send: {send:x?} {recv:?}");
-            // println!("{:x?}", notification_objs_by_pd);
-            // println!("{:x?}", cnode_objs_by_pd);
+            system_invocations.push(Invocation::new(
+                config,
+                InvocationArgs::CnodeMint {
+                    cnode: send_cnode_obj.cap_addr,
+                    dest_index: send_cap_idx,
+                    dest_depth: PD_CAP_BITS,
+                    src_root: root_cnode_cap,
+                    src_obj: recv_notification_obj.cap_addr,
+                    src_depth: config.cap_address_bits,
+                    rights: Rights::All as u64, // FIXME: Check rights
+                    badge: send_badge,
+                },
+            ));
         }
+
+        if send.pp {
+            let send_cap_idx = BASE_OUTPUT_ENDPOINT_CAP + send.id;
+            assert!(send_cap_idx < PD_CAP_SIZE);
+            // receiver sees the sender's badge.
+            let send_badge = PPC_BADGE | recv.id;
+
+            let recv_endpoint_obj = pd_endpoint_objs[&recv.pd];
+
+            system_invocations.push(Invocation::new(
+                config,
+                InvocationArgs::CnodeMint {
+                    cnode: send_cnode_obj.cap_addr,
+                    dest_index: send_cap_idx,
+                    dest_depth: PD_CAP_BITS,
+                    src_root: root_cnode_cap,
+                    src_obj: recv_endpoint_obj.cap_addr,
+                    src_depth: config.cap_address_bits,
+                    rights: Rights::All as u64, // FIXME: Check rights
+                    badge: send_badge,
+                },
+            ));
+        }
+    }
+
+    for &(send, recv) in cross_core_sender_channels.iter() {
+        assert!(!protection_domains.contains_key(&recv.pd));
+
+        let send_cnode_obj = cnode_objs_by_pd[&send.pd];
+        let send_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + send.id;
+
+        println!("sender: {:?}, receiver: {:?}", send, recv);
+        let &recv_irq_number = full_system_state
+            .sgi_irq_numbers
+            .get(recv)
+            .expect("INTERNAL: receiver should have an allocated IRQ number");
+
+        system_invocations.push(Invocation::new(
+            config,
+            InvocationArgs::IrqControlIssueSGICap {
+                irq_control: IRQ_CONTROL_CAP_ADDRESS,
+                irq: recv_irq_number,
+                // target: recv_pd.core, TODO: hardcoded for now.
+                target: 0,
+                dest_root: send_cnode_obj.cap_addr,
+                dest_index: send_cap_idx,
+                dest_depth: PD_CAP_BITS,
+            },
+        ));
     }
 
     // Mint a cap between monitor and passive PDs.
@@ -3438,6 +3533,33 @@ fn main() -> Result<(), String> {
     let mut monitor_elfs_by_core = Vec::with_capacity(NUM_MULTIKERNELS);
     let mut bootstrap_invocation_datas = vec![];
 
+    let full_system_state = {
+        // TODO: 8 for GICv2, 16 for GICv3, xx: other platforms.
+        const NUMBER_SGI_IRQ: u64 = 8;
+        let mut next_sgi_irq = NUMBER_SGI_IRQ - 1;
+
+        let mut sgi_irq_numbers = HashMap::new();
+        sgi_irq_numbers.insert(
+            ChannelEnd {
+                pd: "core0_A".to_owned(),
+                id: 0,
+                notify: false,
+                pp: false,
+            },
+            0,
+        );
+
+        // TODO:
+        // let irq_number = next_sgi_irq;
+        // // XX: It would make sense for the SGI targets to be bidirectional sometimes?
+        // //     that would help probably.
+        // next_sgi_irq = next_sgi_irq.checked_sub(1).expect(&format!(
+        //     "more than {NUMBER_SGI_IRQ} IRQs needed for cross-core notifications"
+        // ));
+
+        FullSystemState { sgi_irq_numbers }
+    };
+
     for multikernel_idx in 0..NUM_MULTIKERNELS {
         let mut invocation_table_size = kernel_config.minimum_page_size;
         let mut system_cnode_size = 2;
@@ -3492,6 +3614,7 @@ fn main() -> Result<(), String> {
                 // TODO: per-core
                 &system.memory_regions[..],
                 &system.channels,
+                &full_system_state,
                 core,
                 invocation_table_size,
                 system_cnode_size,

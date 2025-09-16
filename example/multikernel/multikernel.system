@@ -9,7 +9,6 @@
 
     <protection_domain name="core0_A" priority="254" core="0" >
         <program_image path="core0.elf" />
-        <irq irq="1" id="1" />
     </protection_domain>
 
     <protection_domain name="core0_B" priority="254" core="0" >

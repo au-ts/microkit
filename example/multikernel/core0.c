@@ -21,4 +21,13 @@ void notified(microkit_channel ch)
     microkit_dbg_puts(" notified: ");
     microkit_dbg_put32(ch);
     microkit_dbg_puts("\n");
+
+    if (ch == 5) {
+        microkit_dbg_puts("-> on same core\n");
+    } else if (ch == 0) {
+        microkit_dbg_puts("-> cross core\n");
+        microkit_irq_ack(ch);
+    } else {
+        microkit_dbg_puts("-> unknown channel\n");
+    }
 }
