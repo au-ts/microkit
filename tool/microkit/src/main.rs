@@ -3497,13 +3497,13 @@ fn main() -> Result<(), String> {
         search_paths.push(PathBuf::from(path));
     }
 
-    // TODO: From loader?
-    const NUM_MULTIKERNELS: usize = 2;
+    // TODO: Are these the same?
+    let num_multikernels: usize = json_str_as_u64(&kernel_config_json, "MAX_NUM_NODES")? as usize;
 
     // Get the elf files for each pd:
-    let mut pd_elf_files_by_core = Vec::with_capacity(NUM_MULTIKERNELS);
+    let mut pd_elf_files_by_core = Vec::with_capacity(num_multikernels);
     let mut built_systems = vec![];
-    let mut monitor_elfs_by_core = Vec::with_capacity(NUM_MULTIKERNELS);
+    let mut monitor_elfs_by_core = Vec::with_capacity(num_multikernels);
     let mut bootstrap_invocation_datas = vec![];
 
     let full_system_state = {
@@ -3542,7 +3542,7 @@ fn main() -> Result<(), String> {
         FullSystemState { sgi_irq_numbers }
     };
 
-    for multikernel_idx in 0..NUM_MULTIKERNELS {
+    for multikernel_idx in 0..num_multikernels {
         let mut invocation_table_size = kernel_config.minimum_page_size;
         let mut system_cnode_size = 2;
         let mut built_system;

@@ -979,7 +979,7 @@ int main(void)
      */
     copy_data();
 
-#if defined(BOARD_zcu102) || defined(BOARD_ultra96v2) || defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel) || defined(BOARD_qemu_virt_aarch64_multikernel)
+#if defined(BOARD_zcu102) || defined(BOARD_ultra96v2) || defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel) || defined(BOARD_qemu_virt_aarch64_multikernel) || defined(BOARD_qemu_virt_aarch64)
     configure_gicv2();
 #else
 #error

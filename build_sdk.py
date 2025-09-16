@@ -231,7 +231,7 @@ SUPPORTED_BOARDS = (
             "KernelArmExportPCNTUser": True,
             "KernelArmExportPTMRUser": True,
             "KernelArmVtimerUpdateVOffset": False,
-            "KernelMaxNumNodes": 4,
+            "KernelMaxNumNodes": 2,
             "KernelEnableMultikernelSupport": True,
         },
         multikernels=2,
@@ -788,7 +788,7 @@ def main() -> None:
                 loader_defines.append(("PHYSICAL_ADDRESS_BITS", arm_pa_size_bits))
 
             # Used in multicore configurations, inject the number of cores into the makefile for loader.c
-            if hasattr(board, 'multikernels'):
+            if board.multikernels is not None:
                 loader_defines.append(("NUM_MULTIKERNELS", board.multikernels))
                 print(f"Number of multikernels is {board.multikernels}")
             else:
