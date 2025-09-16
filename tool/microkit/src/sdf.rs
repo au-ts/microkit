@@ -454,16 +454,7 @@ impl ProtectionDomain {
             }
         }
 
-        let core = match node.attribute("core") {
-            Some(attr) => sdf_parse_number(attr, node)?,
-            None => {
-                return Err(value_error(
-                    xml_sdf,
-                    node,
-                    "Missing core or invalid core".to_string(),
-                ))
-            }
-        };
+        let core = sdf_parse_number(node.attribute("core").unwrap_or("0"), node)?;
 
         #[allow(clippy::manual_range_contains)]
         if stack_size < PD_MIN_STACK_SIZE || stack_size > PD_MAX_STACK_SIZE {
