@@ -29,7 +29,7 @@
     </protection_domain>
 
     <channel>
-        <end pd="core0_A" id="0" notify="false" />
-        <end pd="core1"   id="0" notify="true" />
+        <end pd="core0_A" id="0" />
+        <end pd="core1"   id="0" />
     </channel>
 </system>

@@ -817,6 +817,7 @@ fn build_system(
     kernel_elf: &ElfFile,
     monitor_elf: &ElfFile,
     protection_domains: &HashMap<String, ProtectionDomain>,
+    all_protection_domains: &HashMap<String, ProtectionDomain>,
     memory_regions: &[SysMemoryRegion],
     channels: &[Channel],
     full_system_state: &FullSystemState,
@@ -970,7 +971,8 @@ fn build_system(
                     .get(&recv)
                     .expect("internal error: receiver should have allocated irq number"),
                 id: recv.id,
-                trigger: sel4::IrqTrigger::Level,
+                // ARM GIC Spec: §4.4 Software Generated Interrupts
+                trigger: sel4::IrqTrigger::Edge,
             };
 
             irqs_by_pd.entry(recv.pd.clone()).or_default().push(sysirq);
@@ -1836,12 +1838,22 @@ fn build_system(
     let mut cap_slot = init_system.cap_slot;
     let kernel_objects = init_system.objects;
 
+
+    // TODO: Validate that SGI IRQs aren't used twice
+    // TODO: Platform-dependence.
+
+
     // Create all the necessary interrupt handler objects. These aren't
     // created through retype though!
     let mut irq_cap_addresses: HashMap<&ProtectionDomain, Vec<u64>> = HashMap::new();
     for pd in protection_domains.values() {
         irq_cap_addresses.insert(pd, vec![]);
-        for sysirq in &pd.irqs {
+        for sysirq in pd.irqs.iter().chain(
+            cross_core_receiver_sgi_irqs_by_pd
+                .get(&pd.name)
+                .map(|v| v.iter())
+                .unwrap_or_default(),
+        ) {
             let cap_address = system_cap_address_mask | cap_slot;
             system_invocations.push(Invocation::new(
                 config,
@@ -1859,45 +1871,6 @@ fn build_system(
             cap_address_names.insert(cap_address, format!("IRQ Handler: irq={}", sysirq.irq));
             irq_cap_addresses.get_mut(pd).unwrap().push(cap_address);
         }
-    }
-
-    // TODO: Validate that SGI IRQs aren't used... above?
-    // TODO: Platform-dependence.
-    // XXX: Could merge into the above loop via the .chain() constructs
-    for &(send, recv) in cross_core_receiver_channels.iter() {
-        assert!(!protection_domains.contains_key(&send.pd));
-        let recv_pd = &protection_domains[&recv.pd];
-
-        let cap_address = system_cap_address_mask | cap_slot;
-
-        let &irq_number = full_system_state
-            .sgi_irq_numbers
-            .get(recv)
-            .expect("INTERNAL: receiver should have an allocated IRQ number");
-
-        system_invocations.push(Invocation::new(
-            config,
-            InvocationArgs::IrqControlGetTrigger {
-                irq_control: IRQ_CONTROL_CAP_ADDRESS,
-                irq: irq_number,
-                // SGIs are level triggered.
-                trigger: sel4::IrqTrigger::Level,
-                dest_root: root_cnode_cap,
-                dest_index: cap_address,
-                dest_depth: config.cap_address_bits,
-            },
-        ));
-
-        cap_slot += 1;
-        cap_address_names.insert(
-            cap_address,
-            format!("SGI Handler: irq={}", irq_number),
-        );
-
-        irq_cap_addresses
-            .get_mut(recv_pd)
-            .unwrap()
-            .push(cap_address);
     }
 
     // This has to be done prior to minting!
@@ -2501,6 +2474,7 @@ fn build_system(
 
     for &(send, recv) in cross_core_sender_channels.iter() {
         assert!(!protection_domains.contains_key(&recv.pd));
+        let recv_pd = &all_protection_domains[&recv.pd];
 
         let send_cnode_obj = cnode_objs_by_pd[&send.pd];
         let send_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + send.id;
@@ -2516,8 +2490,7 @@ fn build_system(
             InvocationArgs::IrqControlIssueSGICap {
                 irq_control: IRQ_CONTROL_CAP_ADDRESS,
                 irq: recv_irq_number,
-                // target: recv_pd.core, TODO: hardcoded for now.
-                target: 0,
+                target: recv_pd.core.try_into().expect("core # fits in u8"),
                 dest_root: send_cnode_obj.cap_addr,
                 dest_index: send_cap_idx,
                 dest_depth: PD_CAP_BITS,
@@ -3543,10 +3516,19 @@ fn main() -> Result<(), String> {
             ChannelEnd {
                 pd: "core0_A".to_owned(),
                 id: 0,
-                notify: false,
+                notify: true,
                 pp: false,
             },
             0,
+        );
+        sgi_irq_numbers.insert(
+            ChannelEnd {
+                pd: "core1".to_owned(),
+                id: 0,
+                notify: true,
+                pp: false,
+            },
+            1,
         );
 
         // TODO:
@@ -3611,6 +3593,7 @@ fn main() -> Result<(), String> {
                 &kernel_elf,
                 &monitor_elf,
                 &core_local_protection_domains,
+                &system.protection_domains,
                 // TODO: per-core
                 &system.memory_regions[..],
                 &system.channels,

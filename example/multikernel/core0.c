@@ -6,28 +6,28 @@
 #include <stdint.h>
 #include <microkit.h>
 
+#define print(str) do { microkit_dbg_puts(microkit_name); microkit_dbg_puts(": "); microkit_dbg_puts(str); } while (0)
+
 void init(void)
 {
-    microkit_dbg_puts(microkit_name);
-    microkit_dbg_puts(" says: hello, world (from core 0)\n");
+    print("hello, world (from core 0)\n");
 
-    microkit_dbg_puts("notifying intra-core\n");
+    print("notifying same core on 5\n");
     microkit_notify(5);
 }
 
 void notified(microkit_channel ch)
 {
-    microkit_dbg_puts(microkit_name);
-    microkit_dbg_puts(" notified: ");
+    print("notified: ");
     microkit_dbg_put32(ch);
-    microkit_dbg_puts("\n");
 
     if (ch == 5) {
-        microkit_dbg_puts("-> on same core\n");
+        microkit_dbg_puts(" (same core)\n");
     } else if (ch == 0) {
-        microkit_dbg_puts("-> cross core\n");
-        microkit_irq_ack(ch);
+        microkit_dbg_puts(" (cross core)\n");
+        print("replying from core 0 to core 1\n");
+        microkit_notify(0);
     } else {
-        microkit_dbg_puts("-> unknown channel\n");
+        microkit_dbg_puts(" (unknown)\n");
     }
 }
