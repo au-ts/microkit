@@ -1838,10 +1838,8 @@ fn build_system(
     let mut cap_slot = init_system.cap_slot;
     let kernel_objects = init_system.objects;
 
-
     // TODO: Validate that SGI IRQs aren't used twice
     // TODO: Platform-dependence.
-
 
     // Create all the necessary interrupt handler objects. These aren't
     // created through retype though!
@@ -3509,35 +3507,34 @@ fn main() -> Result<(), String> {
     let full_system_state = {
         // TODO: 8 for GICv2, 16 for GICv3, xx: other platforms.
         const NUMBER_SGI_IRQ: u64 = 8;
+
         let mut next_sgi_irq = NUMBER_SGI_IRQ - 1;
-
         let mut sgi_irq_numbers = HashMap::new();
-        sgi_irq_numbers.insert(
-            ChannelEnd {
-                pd: "core0_A".to_owned(),
-                id: 0,
-                notify: true,
-                pp: false,
-            },
-            0,
-        );
-        sgi_irq_numbers.insert(
-            ChannelEnd {
-                pd: "core1".to_owned(),
-                id: 0,
-                notify: true,
-                pp: false,
-            },
-            1,
-        );
 
-        // TODO:
-        // let irq_number = next_sgi_irq;
-        // // XX: It would make sense for the SGI targets to be bidirectional sometimes?
-        // //     that would help probably.
-        // next_sgi_irq = next_sgi_irq.checked_sub(1).expect(&format!(
-        //     "more than {NUMBER_SGI_IRQ} IRQs needed for cross-core notifications"
-        // ));
+        for (_, recv, _, _) in system
+            .channels
+            .iter()
+            // Make both directions of the channels
+            .flat_map(|cc| [(&cc.end_a, &cc.end_b), (&cc.end_b, &cc.end_a)])
+            .map(|(send, recv)| {
+                (
+                    send,
+                    recv,
+                    &system.protection_domains[&send.pd],
+                    &system.protection_domains[&recv.pd],
+                )
+            })
+            // On different cores.
+            .filter(|(_, _, send_pd, recv_pd)| send_pd.core != recv_pd.core)
+            // And only look at the ones where we are the sender (not the receiver)
+            //     and where the channel in the right direction
+            .filter(|(send, _, _, _)| send.notify)
+        {
+            sgi_irq_numbers.insert(recv.clone(), next_sgi_irq);
+            next_sgi_irq = next_sgi_irq.checked_sub(1).expect(&format!(
+                "more than {NUMBER_SGI_IRQ} IRQs needed for cross-core notifications"
+            ));
+        }
 
         FullSystemState { sgi_irq_numbers }
     };

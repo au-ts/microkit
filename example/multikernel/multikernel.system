@@ -32,4 +32,26 @@
         <end pd="core0_A" id="0" />
         <end pd="core1"   id="0" />
     </channel>
+<!--
+    Used for testing # irqs before crashing
+
+    <channel>
+        <end pd="core0_A" id="10" />
+        <end pd="core1"   id="10" />
+    </channel>
+
+    <channel>
+        <end pd="core0_A" id="11" />
+        <end pd="core1"   id="11" />
+    </channel>
+
+    <channel>
+        <end pd="core0_A" id="12" />
+        <end pd="core1"   id="12" />
+    </channel>
+
+    <channel>
+        <end pd="core0_A" id="13" />
+        <end pd="core1"   id="13" />
+    </channel> -->
 </system>
