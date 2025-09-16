@@ -816,6 +816,16 @@ impl Invocation {
         format!("         {field:<20} 0x{cap:016x} ({s})")
     }
 
+    fn fmt_field_trigger(field_name: &'static str, value: IrqTrigger) -> String {
+        let value_int = value as u64;
+        let value_str = match value {
+            IrqTrigger::Level => "Level",
+            IrqTrigger::Edge => "Edge",
+        };
+
+        format!("         {field_name:<20} {value_str} ({value_int})")
+    }
+
     // This function is not particularly elegant. What is happening is that we are formatting
     // each invocation and its arguments depending on the kind of argument.
     // We do this in an explicit way due to there only being a dozen or so invocations rather
@@ -958,7 +968,7 @@ impl Invocation {
                 dest_depth,
             } => {
                 arg_strs.push(Invocation::fmt_field("irq", irq));
-                arg_strs.push(Invocation::fmt_field("trigger", trigger as u64));
+                arg_strs.push(Invocation::fmt_field_trigger("trigger", trigger));
                 arg_strs.push(Invocation::fmt_field_cap(
                     "dest_root",
                     dest_root,
@@ -983,7 +993,7 @@ impl Invocation {
                     dest_root,
                     cap_lookup,
                 ));
-                arg_strs.push(Invocation::fmt_field("dest_index", dest_index));
+                arg_strs.push(Invocation::fmt_field_hex("dest_index", dest_index));
                 arg_strs.push(Invocation::fmt_field("dest_depth", dest_depth));
                 (irq_control, &cap_lookup[&irq_control])
             }
