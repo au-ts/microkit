@@ -462,7 +462,9 @@ def build_sel4(
 ) -> Dict[str, Any]:
     """Build seL4"""
     build_dir = build_dir / board.name / config.name / "sel4"
-    build_dir.mkdir(exist_ok=True, parents=True)
+    # clear to remove the cmake cache
+    shutil.rmtree(build_dir, ignore_errors=True)
+    build_dir.mkdir(parents=True)
 
     sel4_install_dir = build_dir / "install"
     sel4_build_dir = build_dir / "build"
@@ -764,7 +766,6 @@ def main() -> None:
         build_doc(root_dir)
 
     build_dir = Path("build")
-    shutil.rmtree(build_dir, ignore_errors=True)
     for board in selected_boards:
         for config in selected_configs:
             if not args.skip_sel4:
