@@ -27,8 +27,17 @@ pub struct PlatformConfigRegion {
 }
 
 #[derive(Deserialize)]
+pub struct PlatformKernelDeviceRegion {
+    pub start: u64,
+    pub end: u64,
+    #[serde(rename = "userAvailable")]
+    pub user_available: bool,
+}
+
+#[derive(Deserialize)]
 pub struct PlatformConfig {
     pub devices: Vec<PlatformConfigRegion>,
+    pub kernel_devs: Vec<PlatformKernelDeviceRegion>,
     pub memory: Vec<PlatformConfigRegion>,
 }
 
@@ -71,7 +80,7 @@ pub struct Config {
     /// RISC-V specific, what kind of virtual memory system (e.g Sv39)
     pub riscv_pt_levels: Option<RiscvVirtualMemory>,
     pub invocations_labels: serde_json::Value,
-    pub device_regions: Vec<PlatformConfigRegion>,
+    pub kernel_devices: Vec<PlatformKernelDeviceRegion>,
     pub normal_regions: Vec<PlatformConfigRegion>,
 }
 

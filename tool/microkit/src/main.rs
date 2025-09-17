@@ -524,111 +524,191 @@ fn kernel_partial_boot(
 ) -> KernelPartialBootInfo {
     // Determine the untyped caps of the system
     // This lets allocations happen correctly.
+    // This function follows the bkernel boot sequence.
+
+    let mut reserved_regions = DisjointMemoryRegion::default();
+
+    // =====
+    //       Here we emulate init_freemem() and arch_init_freemem(), excluding
+    //       the addition of the root task memory to the reserved regions,
+    //       as we don't know this information yet.
+    //       Multikernel: Also follows arch_init_coremem() for subset physical memory.
+    // =====
+
+    // Done before map_kernel_window()
+    let useable_physical_memory = {
+        let mut physical_memory = DisjointMemoryRegion::default();
+
+        // XXX: If this wasn't multikernel, iterate over all normal regions.
+        //      Because it is, we pick follow arch_init_coremem() which sets up
+        //      just this one region.
+
+        let kernel_elf_sized_align = 0x1000000;
+        let start = kernel_config.normal_regions[0].start + (core) * kernel_elf_sized_align;
+        physical_memory.insert_region(start, start + kernel_elf_sized_align);
+
+        physical_memory
+    };
+
+    // Done during map_kernel_window(): Remove any kernel-reserved device regions
+    for region in kernel_config.kernel_devices.iter() {
+        if !region.user_available {
+            reserved_regions.insert_region(region.start, region.end);
+        }
+    }
+
+    // ============ arch_init_freemem():
+    // XXX: Theoreticallly, the initial task size would be added to reserved regions, as well
+    //    as the DTB and the extra reserved region. But it's not since this is partial()
+
+    // Calculate where the kernel image region is
+    let (kernel_region, boot_region, kernel_p_v_offset) = {
+
+        let kernel_loadable_segments = kernel_elf.loadable_segments();
+        let kernel_first_vaddr = kernel_loadable_segments
+            .first()
+            .expect("kernel has at least one loadable segment")
+            .virt_addr;
+        let (kernel_last_vaddr, _) = kernel_elf
+            .find_symbol("ki_end")
+            .expect("Could not find 'ki_end' symbol");
+
+        // nb: Picked from the base of the available regions computed above.
+        let kernel_first_paddr = useable_physical_memory.regions[0].base;
+        let kernel_p_v_offset = kernel_first_vaddr - kernel_first_paddr;
+
+        println!("Kernel First Paddr: {:x}", kernel_first_paddr);
+        println!("Kernel PV Offset: {:x}", kernel_p_v_offset as i64);
+
+        // Remove the kernel image.
+        let kernel_last_paddr = kernel_last_vaddr - kernel_p_v_offset;
+        let kernel_region = MemoryRegion::new(kernel_first_paddr, kernel_last_paddr);
+
+        // but get the boot region, we'll add that back later
+        // FIXME: Why calcaultae it now if we add it back later?
+        let (ki_boot_end_v, _) = kernel_elf
+            .find_symbol("ki_boot_end")
+            .expect("Could not find 'ki_boot_end' symbol");
+        assert!(ki_boot_end_v < kernel_last_vaddr);
+        let ki_boot_end_p = ki_boot_end_v - kernel_p_v_offset;
+        let boot_region = MemoryRegion::new(kernel_first_paddr, ki_boot_end_p);
+
+        (kernel_region, boot_region, kernel_p_v_offset)
+    };
+
+    // Actually remove it.
+    reserved_regions.insert_region(kernel_region.base, kernel_region.end);
+
+    let mut available_regions = useable_physical_memory;
+
+    // ============ init_freemem()
+
+    let mut free_memory = DisjointMemoryRegion::default();
+
+    // "Now iterate through the available regions, removing any reserved regions."
+    let reserved_regions = {
+        let mut reserved2 = DisjointMemoryRegion::default();
+        let mut a = 0;
+        let mut r = 0;
+        let reserved = &mut reserved_regions.regions;
+        let avail_reg = &mut available_regions.regions;
+        while a < avail_reg.len() && r < reserved.len() {
+            if reserved[r].base == reserved[r].end {
+                /* reserved region is empty - skip it */
+                r += 1;
+            } else if avail_reg[a].base >= avail_reg[a].end {
+                /* skip the entire region - it's empty now after trimming */
+                a += 1;
+            } else if reserved[r].end <= avail_reg[a].base {
+                /* the reserved region is below the available region - skip it */
+                reserved2.insert_region(reserved[r].base, reserved[r].end);
+                r += 1;
+            } else if reserved[r].base >= avail_reg[a].end {
+                /* the reserved region is above the available region - take the whole thing */
+                reserved2.insert_region(avail_reg[a].base, avail_reg[a].end);
+                free_memory.insert_region(avail_reg[a].base, avail_reg[a].end);
+                a += 1;
+            } else {
+                /* the reserved region overlaps with the available region */
+                if reserved[r].base <= avail_reg[a].base {
+                    /* the region overlaps with the start of the available region.
+                     * trim start of the available region */
+                    avail_reg[a].base = min(avail_reg[a].end, reserved[r].end);
+                    /* do not increment reserved index here - there could be more overlapping regions */
+                } else {
+                    assert!(reserved[r].base < avail_reg[a].end);
+                    /* take the first chunk of the available region and move
+                     * the start to the end of the reserved region */
+                    let mut m = avail_reg[a];
+                    m.end = reserved[r].base;
+                    reserved2.insert_region(m.base, m.end);
+                    free_memory.insert_region(m.base, m.end);
+                    if avail_reg[a].end > reserved[r].end {
+                        avail_reg[a].base = reserved[r].end;
+                        /* we could increment reserved index here, but it's more consistent with the
+                         * other overlapping case if we don't */
+                    } else {
+                        a += 1;
+                    }
+                }
+            }
+        }
+
+        // add the rest of the reserved
+        while r < reserved.len() {
+            if reserved[r].base < reserved[r].end {
+                reserved2.insert_region(reserved[r].base, reserved[r].end);
+            }
+
+            r += 1;
+        }
+
+        // add the rest of the available
+        while a < avail_reg.len() {
+            if avail_reg[a].base < avail_reg[a].end {
+                reserved2.insert_region(avail_reg[a].base, avail_reg[a].end);
+                free_memory.insert_region(avail_reg[a].base, avail_reg[a].end);
+            }
+
+            a += 1;
+        }
+
+        println!("{:x?}\n{:x?}", reserved_regions.regions, reserved2.regions);
+
+        reserved2
+    };
+
+    // ====
+    //     Here we emulate create_untypeds(), where normal_memory represents
+    //     the normal memory untypeds, and device_memory is those untypeds
+    //     marked as "device". All of this is available to userspace.
+    // ====
+
+
     let mut device_memory = DisjointMemoryRegion::default();
     let mut normal_memory = DisjointMemoryRegion::default();
 
-    for r in &kernel_config.device_regions {
-        println!("adding device memory {:x} {:x}", r.start, r.end);
-        device_memory.insert_region(r.start, r.end);
+    // ======= Adding the inverse of all the reserved regions as device memory.
+    // Note that the reserved regions no longer contains available regions
+
+    let mut start = 0;
+    for reserved_reg in reserved_regions.regions.iter() {
+        device_memory.insert_region(start, reserved_reg.base);
+        start = reserved_reg.end;
     }
 
-    // Very Hacky..
-    /*
-        for r in &kernel_config.normal_regions {
-            normal_memory.insert_region(r.start, r.end);
-        }
-    */
-    assert!(kernel_config.normal_regions.len() == 1);
-    // See kernel init_coremem
-    let kernel_elf_sized_align = 0x1000000;
-    let start = kernel_config.normal_regions[0].start + (core) * kernel_elf_sized_align;
-    normal_memory.insert_region(start, start + kernel_elf_sized_align);
-    assert!(normal_memory.regions.len() == 1);
-
-    // resinert the rest back as device memory. TODO(kernel too) don't include other kernel as device mem.
-    if start != kernel_config.normal_regions[0].start {
-        // HACK: Because of the way the kernel does it these are joined together, but here it is...
-        let base = kernel_config.normal_regions[0].start;
-        let end = start;
-        let mut insert_idx = device_memory.regions.len();
-        for (idx, region) in device_memory.regions.iter().enumerate() {
-            if end <= region.base {
-                insert_idx = idx;
-                break;
-            }
-        }
-        if end == device_memory.regions[insert_idx].base {
-            // assert!(aligned right)
-            // extend up to new increased end
-            device_memory.regions[insert_idx].end = end;
-        } else {
-            device_memory
-                .regions
-                .insert(insert_idx, MemoryRegion::new(base, end));
-        }
-        // device_memory.check();
+    if start < kernel_config.paddr_user_device_top {
+        device_memory.insert_region(start, kernel_config.paddr_user_device_top);
     }
 
-    if normal_memory.regions[0].end != kernel_config.normal_regions[0].end {
-        // device_memory.insert_region(normal_memory.regions[0].end, kernel_config.normal_regions[0].end);
+    // XXX: Don't add the boot_region to normal_memory, for some reason (???)
 
-        // HACK: Because of the way the kernel does it these are joined together, but here it is...
-        let base = normal_memory.regions[0].end;
-        let end = kernel_config.normal_regions[0].end;
-        let mut insert_idx = device_memory.regions.len();
-        for (idx, region) in device_memory.regions.iter().enumerate() {
-            if end <= region.base {
-                insert_idx = idx;
-                break;
-            }
-        }
-        if end == device_memory.regions[insert_idx].base {
-            // assert!(aligned right)
-            println!(
-                "overwriting {:x}..{:x} with {:x}, {:x}",
-                device_memory.regions[insert_idx].base,
-                device_memory.regions[insert_idx].end,
-                base,
-                end
-            );
-            // extend down to new decreased base
-            device_memory.regions[insert_idx].base = base;
-        } else {
-            device_memory
-                .regions
-                .insert(insert_idx, MemoryRegion::new(base, end));
-        }
-        // device_memory.check();
+    // =========== Add the free memory as normal
+    for free_memory in free_memory.regions.iter() {
+        normal_memory.insert_region(free_memory.base, free_memory.end);
     }
 
-    // ============= Multikernel: calculate where we want to load the kernel ======================
-    let kernel_loadable_segments = kernel_elf.loadable_segments();
-    let kernel_first_vaddr = kernel_loadable_segments
-        .first()
-        .expect("kernel has at least one loadable segment")
-        .virt_addr;
-    let (kernel_last_vaddr, _) = kernel_elf
-        .find_symbol("ki_end")
-        .expect("Could not find 'ki_end' symbol");
-
-    let kernel_first_paddr = normal_memory.regions[0].base;
-    let kernel_p_v_offset = kernel_first_vaddr - kernel_first_paddr;
-
-    println!("Kernel First Paddr: {:x}", kernel_first_paddr);
-    println!("Kernel PV Offset: {:x}", kernel_p_v_offset as i64);
-
-    // ============= Remove the kernel image itself ====================
-    let kernel_last_paddr = kernel_last_vaddr - kernel_p_v_offset;
-    normal_memory.remove_region(kernel_first_paddr, kernel_last_paddr);
-
-    // but get the boot region, we'll add that back later
-    // FIXME: Why calcaultae it now if we add it back later?
-    let (ki_boot_end_v, _) = kernel_elf
-        .find_symbol("ki_boot_end")
-        .expect("Could not find 'ki_boot_end' symbol");
-    assert!(ki_boot_end_v < kernel_last_vaddr);
-    let ki_boot_end_p = ki_boot_end_v - kernel_p_v_offset;
-    let boot_region = MemoryRegion::new(kernel_first_paddr, ki_boot_end_p);
+    println!("{:x?}\n{:x?}", normal_memory.regions, device_memory.regions);
 
     KernelPartialBootInfo {
         device_memory,
@@ -3457,7 +3537,7 @@ fn main() -> Result<(), String> {
         arm_smc,
         riscv_pt_levels: Some(RiscvVirtualMemory::Sv39),
         invocations_labels,
-        device_regions: kernel_platform_config.devices,
+        kernel_devices: kernel_platform_config.kernel_devs,
         normal_regions: kernel_platform_config.memory,
     };
 
