@@ -200,7 +200,7 @@ SUPPORTED_BOARDS = (
             "KernelArmVtimerUpdateVOffset": False,
             "KernelEnableMultikernelSupport": True,
             # XXX: Derive from devicetree?
-            "KernelMaxNumNodes": 4,
+            "KernelMaxNumNodes": 2,
         },
         multikernels=2,
     ),
