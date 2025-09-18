@@ -117,6 +117,7 @@ struct LoaderKernelInfo64 {
     extra_device_addr_p: u64,
     extra_device_size: u64,
     kernel_elf_paddr_base: u64,
+    kernel_boot_info_p: u64,
 }
 
 #[repr(C)]
@@ -360,6 +361,7 @@ impl<'a> Loader<'a> {
                 extra_device_addr_p: reserved_regions[i].base,
                 extra_device_size: reserved_regions[i].size(),
                 kernel_elf_paddr_base: kernel_first_paddrs[i],
+                kernel_boot_info_p: 0,
             });
         }
 

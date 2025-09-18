@@ -67,6 +67,7 @@ struct kernel_data {
     uintptr_t extra_device_addr_p;
     uintptr_t extra_device_size;
     uintptr_t kernel_elf_paddr_base;
+    uintptr_t kernel_boot_info_p;
 };
 
 // Changing this structure is precarious, maybe better to wrap in NUM_MULTIKERNELS IFDEF
@@ -79,16 +80,7 @@ struct loader_data {
     struct kernel_data kernel_data[];
 };
 
-typedef void (*sel4_entry)(
-    uintptr_t ui_p_reg_start,
-    uintptr_t ui_p_reg_end,
-    intptr_t pv_offset,
-    uintptr_t v_entry,
-    uintptr_t dtb_addr_p,
-    uintptr_t dtb_size,
-    uintptr_t extra_device_addr_p,
-    uintptr_t extra_device_size
-);
+typedef void (*sel4_entry)(uintptr_t kernel_boot_info_p);
 
 static void *memcpy(void *dst, const void *src, size_t sz)
 {
@@ -152,6 +144,14 @@ uint64_t boot_lvl0_lower[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
 uint64_t boot_lvl1_lower[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
 
 uint64_t num_multikernels = NUM_MULTIKERNELS;
+
+#include "sel4/bootinfo.h"
+
+struct {
+    seL4_KernelBootInfo info;
+    seL4_KernelBootMemoryDescriptor descriptors[10];
+} kernel_boot_infos[NUM_MULTIKERNELS];
+
 #else
 /* Paging structures for kernel mapping */
 uint64_t boot_lvl0_upper[1 << 9] ALIGN(1 << 12);
@@ -177,7 +177,7 @@ uint64_t boot_lvl2_pt_elf[1 << 9] ALIGN(1 << 12);
 
 extern char _text;
 extern char _bss_end;
-const struct loader_data *loader_data = (void *) &_bss_end;
+struct loader_data *loader_data = (void *) &_bss_end;
 struct region *regions; // Should be end of loader data at loader_data->kernel_data[laoder_data->num_kernels]
 
 #if defined(BOARD_tqma8xqp1gb)
@@ -598,6 +598,28 @@ static void print_loader_data(void)
         puts("\nLDR|INFO:              entry  : ");
         puthex64(loader_data->kernel_data[i].v_entry);
         puts("\n");
+
+        kernel_boot_infos[i].info.magic = SEL4_KERNEL_BOOT_INFO_MAGIC;
+        kernel_boot_infos[i].info.version = SEL4_KERNEL_BOOT_INFO_VERSION_0;
+        kernel_boot_infos[i].info.root_task_entry = loader_data->kernel_data[i].v_entry;
+        kernel_boot_infos[i].info.root_task_pv_offset = loader_data->kernel_data[i].pv_offset;
+
+        kernel_boot_infos[i].info.number_of_memory_descriptors = 2;
+        kernel_boot_infos[i].info.offset_of_memory_descriptors = (uintptr_t)&kernel_boot_infos[i].descriptors - (uintptr_t)&kernel_boot_infos[i].info;
+
+        kernel_boot_infos[i].descriptors[0].base = loader_data->kernel_data[i].ui_p_reg_start;
+        kernel_boot_infos[i].descriptors[0].end = loader_data->kernel_data[i].ui_p_reg_end;
+        kernel_boot_infos[i].descriptors[0].kind = SEL4_KERNEL_BOOT_MEMORY_DESCRIPTOR_KIND_ROOT_TASK;
+
+        kernel_boot_infos[i].descriptors[1].base = loader_data->kernel_data[i].extra_device_addr_p;
+        kernel_boot_infos[i].descriptors[1].end = loader_data->kernel_data[i].extra_device_addr_p + loader_data->kernel_data[i].extra_device_size;
+        kernel_boot_infos[i].descriptors[1].kind = 5;
+
+        // TODO: RAM.
+        // TODO: Kenrel.
+        // TODO: Reserved.
+
+        loader_data->kernel_data[i].kernel_boot_info_p = &kernel_boot_infos[i].info;
     }
 
     for (uint32_t i = 0; i < loader_data->num_regions; i++) {
@@ -696,22 +718,12 @@ static void start_kernel(int id)
     puts("\n\thas entry point: ");
     puthex64(loader_data->kernel_data[id].kernel_entry);
     puts("\n");
-    puts("\thas paddr: ");
-    puthex64(loader_data->kernel_data[id].kernel_elf_paddr_base);
+    puts("\thas kernel_boot_info_p: ");
+    puthex64(loader_data->kernel_data[id].kernel_boot_info_p);
     puts("\n");
-
         
     ((sel4_entry)(loader_data->kernel_data[id].kernel_entry))(
-        loader_data->kernel_data[id].ui_p_reg_start,
-        loader_data->kernel_data[id].ui_p_reg_end,
-        loader_data->kernel_data[id].pv_offset,
-        loader_data->kernel_data[id].v_entry,
-        // HACK HACK
-        loader_data->kernel_data[id].kernel_elf_paddr_base,
-        // 0,
-        0,
-        loader_data->kernel_data[id].extra_device_addr_p,
-        loader_data->kernel_data[id].extra_device_size
+        loader_data->kernel_data[id].kernel_boot_info_p
     );
 }
 
