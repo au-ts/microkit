@@ -881,6 +881,14 @@ void secondary_cpu_entry() {
     /* Whether or not seL4 is booting in EL2 does not matter, as it always looks at tpidr_el1 */
     MSR("tpidr_el1", cpu);
 
+    uint64_t mpidr_el1;
+    asm volatile("mrs %x0, mpidr_el1" : "=r"(mpidr_el1) :: "cc");
+    puts("LDR|INFO: secondary (CPU ");
+    puthex32(cpu);
+    puts(") has MPIDR_EL1: ");
+    puthex64(mpidr_el1);
+    puts("\n");
+
     puts("LDR|INFO: enabling MMU (CPU ");
     puthex32(cpu);
     puts(")\n");
