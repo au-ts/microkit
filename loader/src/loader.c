@@ -149,8 +149,10 @@ uint64_t num_multikernels = NUM_MULTIKERNELS;
 
 struct {
     seL4_KernelBootInfo info;
-    seL4_KernelBootMemoryDescriptor descriptors[10];
+    uint8_t descriptor_memory[4096 - sizeof(seL4_KernelBootInfo)];
 } kernel_boot_infos[NUM_MULTIKERNELS];
+
+_Static_assert(sizeof(kernel_boot_infos) == NUM_MULTIKERNELS * 4096);
 
 #else
 /* Paging structures for kernel mapping */
@@ -599,27 +601,37 @@ static void print_loader_data(void)
         puthex64(loader_data->kernel_data[i].v_entry);
         puts("\n");
 
-        kernel_boot_infos[i].info.magic = SEL4_KERNEL_BOOT_INFO_MAGIC;
-        kernel_boot_infos[i].info.version = SEL4_KERNEL_BOOT_INFO_VERSION_0;
-        kernel_boot_infos[i].info.root_task_entry = loader_data->kernel_data[i].v_entry;
-        kernel_boot_infos[i].info.root_task_pv_offset = loader_data->kernel_data[i].pv_offset;
+        seL4_KernelBootInfo *bootinfo = &kernel_boot_infos[i].info;
 
-        kernel_boot_infos[i].info.number_of_memory_descriptors = 2;
-        kernel_boot_infos[i].info.offset_of_memory_descriptors = (uintptr_t)&kernel_boot_infos[i].descriptors - (uintptr_t)&kernel_boot_infos[i].info;
+        bootinfo->magic = SEL4_KERNEL_BOOT_INFO_MAGIC;
+        bootinfo->version = SEL4_KERNEL_BOOT_INFO_VERSION_0;
+        bootinfo->root_task_entry = loader_data->kernel_data[i].v_entry;
 
-        kernel_boot_infos[i].descriptors[0].base = loader_data->kernel_data[i].ui_p_reg_start;
-        kernel_boot_infos[i].descriptors[0].end = loader_data->kernel_data[i].ui_p_reg_end;
-        kernel_boot_infos[i].descriptors[0].kind = SEL4_KERNEL_BOOT_MEMORY_DESCRIPTOR_KIND_ROOT_TASK;
+        bootinfo->num_kernel_regions = 0;
+        bootinfo->num_ram_regions = 0;
+        bootinfo->num_root_task_regions = 1;
+        bootinfo->num_reserved_regions = 1;
 
-        kernel_boot_infos[i].descriptors[1].base = loader_data->kernel_data[i].extra_device_addr_p;
-        kernel_boot_infos[i].descriptors[1].end = loader_data->kernel_data[i].extra_device_addr_p + loader_data->kernel_data[i].extra_device_size;
-        kernel_boot_infos[i].descriptors[1].kind = 5;
+        void *descriptor_mem = &kernel_boot_infos[i].descriptor_memory;
+        seL4_KernelBoot_KernelRegion *kernel_regions = descriptor_mem;
+        seL4_KernelBoot_RamRegion *ram_regions = (void *)((uintptr_t)kernel_regions + (bootinfo->num_kernel_regions * sizeof(seL4_KernelBoot_KernelRegion)));
+        seL4_KernelBoot_RootTaskRegion *root_task_regions = (void *)((uintptr_t)ram_regions + (bootinfo->num_ram_regions * sizeof(seL4_KernelBoot_RamRegion)));
+        seL4_KernelBoot_ReservedRegion *reserved_regions = (void *)((uintptr_t)root_task_regions + (bootinfo->num_root_task_regions * sizeof(seL4_KernelBoot_RootTaskRegion)));
+
+        root_task_regions[0].paddr_base = loader_data->kernel_data[i].ui_p_reg_start;
+        root_task_regions[0].paddr_end = loader_data->kernel_data[i].ui_p_reg_end;
+        root_task_regions[0].vaddr_base = loader_data->kernel_data[i].ui_p_reg_start - loader_data->kernel_data[i].pv_offset;
+
+        // Actually this is just another root task region? kinda
+        // but that would break microkit.
+        reserved_regions[0].base = loader_data->kernel_data[i].extra_device_addr_p;
+        reserved_regions[0].end = loader_data->kernel_data[i].extra_device_addr_p + loader_data->kernel_data[i].extra_device_size;
 
         // TODO: RAM.
         // TODO: Kenrel.
         // TODO: Reserved.
 
-        loader_data->kernel_data[i].kernel_boot_info_p = &kernel_boot_infos[i].info;
+        loader_data->kernel_data[i].kernel_boot_info_p = bootinfo;
     }
 
     for (uint32_t i = 0; i < loader_data->num_regions; i++) {
