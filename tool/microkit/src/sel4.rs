@@ -9,37 +9,6 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{BufWriter, Write};
 
-mod kernel_bootinfo {
-    #[repr(C, packed)]
-    #[derive(Debug, Clone)]
-    pub struct KernelBootInfo {
-        pub magic: u32,
-        pub version: u8,
-        pub _padding0: [u8; 3usize],
-        pub root_task_entry: u64,
-        pub root_task_pv_offset: u64,
-        pub offset_of_memory_descriptors: u64,
-        pub number_of_memory_descriptors: u32,
-        pub _padding1: [u8; 28usize],
-    }
-
-    #[repr(C, packed)]
-    #[derive(Debug, Clone)]
-    pub struct KernelBootMemoryDescriptor {
-        pub base: u64,
-        pub end: u64,
-        pub kind: u8,
-        pub _padding: [u8; 3usize],
-    }
-
-    const SEL4_KERNEL_BOOT_INFO_MAGIC: u32 = 0x73654c34  /* "seL4" */;
-    const SEL4_KERNEL_BOOT_INFO_VERSION_0: u8 = 0;
-    const SEL4_KERNEL_BOOT_MEMORY_DESCRIPTOR_KIND_KERNEL: u8 = 0;
-    const SEL4_KERNEL_BOOT_MEMORY_DESCRIPTOR_KIND_RAM: u8 = 1;
-    const SEL4_KERNEL_BOOT_MEMORY_DESCRIPTOR_KIND_ROOT_TASK: u8 = 2;
-    const SEL4_KERNEL_BOOT_MEMORY_DESCRIPTOR_KIND_RESERVED: u8 = 3;
-}
-
 #[derive(Clone)]
 pub struct BootInfo {
     pub p_v_offset: u64,
