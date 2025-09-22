@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright 2025, UNSW
+
+ SPDX-License-Identifier: BSD-2-Clause
+-->
+<system>
+    <!-- <memory_region name="shared" size="0x1000" phys_addr="0xb0000000" /> -->
+    <!-- This kinda just works... it would be the CNode of the second (QEMU) but it gets allocated around it. -->
+    <!-- any reserved ones checked for both so it's fine?? -->
+    <memory_region name="shared" size="0x1000" phys_addr="0x61254000" />
+    <!-- Odroid -->
+    <!-- <memory_region name="shared" size="0x1000" phys_addr="0x5300000" /> -->
+
+    <protection_domain name="core0" priority="254" core="0" >
+        <program_image path="core0.elf" />
+
+        <map mr="shared" vaddr="0x3_000_000" perms="rw" setvar_vaddr="shared_v" />
+        <setvar symbol="shared_p" region_paddr="shared" />
+    </protection_domain>
+
+    <protection_domain name="core1" priority="254" core="1" >
+        <program_image path="core1.elf" />
+
+        <map mr="shared" vaddr="0x3_000_000" perms="rw" setvar_vaddr="shared_v" />
+        <setvar symbol="shared_p" region_paddr="shared" />
+    </protection_domain>
+
+    <channel>
+        <end pd="core0" id="0" />
+        <end pd="core1"   id="0" />
+    </channel>
+</system>
