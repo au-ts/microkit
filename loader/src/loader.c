@@ -868,7 +868,7 @@ static void configure_gicv2(void)
     }
 
     /* level-triggered, 1-N */
-    for (i = 64; i < nirqs; i += 32) {
+    for (i = 32; i < nirqs; i += 32) {
         gic_dist->config[i >> 5] = 0x55555555;
     }
 
