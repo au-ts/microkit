@@ -25,7 +25,7 @@ use sel4::{
     RiscvVirtualMemory, RiscvVmAttributes,
 };
 use std::cmp::{max, min};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::iter::zip;
@@ -127,7 +127,7 @@ struct InitSystem<'a> {
     last_fixed_address: u64,
     normal_untyped: &'a mut ObjectAllocator,
     device_untyped: &'a mut ObjectAllocator,
-    cap_address_names: &'a mut HashMap<u64, String>,
+    cap_address_names: &'a mut BTreeMap<u64, String>,
     objects: Vec<Object>,
 }
 
@@ -141,7 +141,7 @@ impl<'a> InitSystem<'a> {
         normal_untyped: &'a mut ObjectAllocator,
         device_untyped: &'a mut ObjectAllocator,
         invocations: &'a mut Vec<Invocation>,
-        cap_address_names: &'a mut HashMap<u64, String>,
+        cap_address_names: &'a mut BTreeMap<u64, String>,
     ) -> InitSystem<'a> {
         InitSystem {
             config,
@@ -363,13 +363,13 @@ struct BuiltSystem {
     reserved_region: MemoryRegion,
     fault_ep_cap_address: u64,
     reply_cap_address: u64,
-    cap_lookup: HashMap<u64, String>,
+    cap_lookup: BTreeMap<u64, String>,
     pd_tcb_caps: Vec<u64>,
     vm_tcb_caps: Vec<u64>,
     sched_caps: Vec<u64>,
     ntfn_caps: Vec<u64>,
-    pd_elf_regions: HashMap<String, Vec<Region>>,
-    pd_setvar_values: HashMap<String, Vec<u64>>,
+    pd_elf_regions: BTreeMap<String, Vec<Region>>,
+    pd_setvar_values: BTreeMap<String, Vec<u64>>,
     pd_stack_addrs: Vec<u64>,
     kernel_objects: Vec<Object>,
     initial_task_virt_region: MemoryRegion,
@@ -377,11 +377,11 @@ struct BuiltSystem {
 }
 
 pub fn pd_write_symbols(
-    pds: &HashMap<String, ProtectionDomain>,
+    pds: &BTreeMap<String, ProtectionDomain>,
     // TODO: Channel -> [UndirectedChannel, DirectedChannel]
     channels: &[Channel],
-    pd_elf_files: &mut HashMap<String, ElfFile>,
-    pd_setvar_values: &HashMap<String, Vec<u64>>,
+    pd_elf_files: &mut BTreeMap<String, ElfFile>,
+    pd_setvar_values: &BTreeMap<String, Vec<u64>>,
 ) -> Result<(), String> {
     for pd in pds.values() {
         let elf = pd_elf_files.get_mut(&pd.name).unwrap();
@@ -888,16 +888,16 @@ fn emulate_kernel_boot(
 
 #[derive(Debug)]
 struct FullSystemState {
-    sgi_irq_numbers: HashMap<ChannelEnd, u64>,
+    sgi_irq_numbers: BTreeMap<ChannelEnd, u64>,
 }
 
 fn build_system(
     config: &Config,
-    pd_elf_files: &HashMap<String, ElfFile>,
+    pd_elf_files: &BTreeMap<String, ElfFile>,
     kernel_elf: &ElfFile,
     monitor_elf: &ElfFile,
-    protection_domains: &HashMap<String, ProtectionDomain>,
-    all_protection_domains: &HashMap<String, ProtectionDomain>,
+    protection_domains: &BTreeMap<String, ProtectionDomain>,
+    all_protection_domains: &BTreeMap<String, ProtectionDomain>,
     memory_regions: &[SysMemoryRegion],
     channels: &[Channel],
     full_system_state: &FullSystemState,
@@ -909,7 +909,7 @@ fn build_system(
     assert!(invocation_table_size % config.minimum_page_size == 0);
     assert!(invocation_table_size <= MAX_SYSTEM_INVOCATION_SIZE);
 
-    let mut cap_address_names: HashMap<u64, String> = HashMap::new();
+    let mut cap_address_names: BTreeMap<u64, String> = BTreeMap::new();
     cap_address_names.insert(INIT_NULL_CAP_ADDRESS, "null".to_string());
     cap_address_names.insert(INIT_TCB_CAP_ADDRESS, "TCB: init".to_string());
     cap_address_names.insert(INIT_CNODE_CAP_ADDRESS, "CNode: init".to_string());
@@ -1042,7 +1042,7 @@ fn build_system(
         .collect();
 
     let cross_core_receiver_sgi_irqs_by_pd = {
-        let mut irqs_by_pd: HashMap<String, Vec<SysIrq>> = HashMap::new();
+        let mut irqs_by_pd: BTreeMap<String, Vec<SysIrq>> = BTreeMap::new();
 
         for &(_, recv) in cross_core_receiver_channels.iter() {
             let sysirq = SysIrq {
@@ -1387,10 +1387,9 @@ fn build_system(
     //     as needed by protection domains based on mappings required
     let mut phys_addr_next = reserved_base + invocation_table_size;
     // Now we create additional MRs (and mappings) for the ELF files.
-    let mut pd_elf_regions: HashMap<String, Vec<Region>> =
-        HashMap::with_capacity(protection_domains.len());
+    let mut pd_elf_regions: BTreeMap<String, Vec<Region>> = BTreeMap::new();
     let mut extra_mrs = Vec::new();
-    let mut pd_extra_maps: HashMap<&ProtectionDomain, Vec<SysMap>> = HashMap::new();
+    let mut pd_extra_maps: BTreeMap<&ProtectionDomain, Vec<SysMap>> = BTreeMap::new();
     for pd in protection_domains.values() {
         pd_elf_regions.insert(
             pd.name.clone(),
@@ -1495,7 +1494,7 @@ fn build_system(
             all_mrs.push(mr);
         }
     }
-    let all_mr_by_name: HashMap<&str, &SysMemoryRegion> =
+    let all_mr_by_name: BTreeMap<&str, &SysMemoryRegion> =
         all_mrs.iter().map(|mr| (mr.name.as_str(), *mr)).collect();
 
     let mut system_invocations: Vec<Invocation> = Vec::new();
@@ -1511,7 +1510,7 @@ fn build_system(
     );
 
     init_system.reserve(invocation_table_allocations);
-    let mut mr_pages: HashMap<&SysMemoryRegion, Vec<Object>> = HashMap::new();
+    let mut mr_pages: BTreeMap<&SysMemoryRegion, Vec<Object>> = BTreeMap::new();
 
     // 3.1 Work out how many fixed page objects are required
 
@@ -1682,9 +1681,9 @@ fn build_system(
     let endpoint_objs = init_system.allocate_objects(ObjectType::Endpoint, endpoint_names, None);
     let fault_ep_endpoint_object = &endpoint_objs[0];
 
-    // TODO: HASHMAP
+    // TODO: BTreeMap
     // Because the first reply object is for the monitor, we map from index 1 of endpoint_objs
-    let pd_endpoint_objs: HashMap<String, &Object> = {
+    let pd_endpoint_objs: BTreeMap<String, &Object> = {
         let mut i = 0;
         protection_domains
             .values()
@@ -1706,8 +1705,8 @@ fn build_system(
         .collect();
     let notification_objs =
         init_system.allocate_objects(ObjectType::Notification, notification_names, None);
-    let notification_objs_by_pd: HashMap<&String, &Object> =
-        HashMap::from_iter(zip(protection_domains.keys(), &notification_objs));
+    let notification_objs_by_pd: BTreeMap<&String, &Object> =
+        BTreeMap::from_iter(zip(protection_domains.keys(), &notification_objs));
     let notification_caps = notification_objs.iter().map(|ntfn| ntfn.cap_addr).collect();
 
     // Determine number of upper directory / directory / page table objects required
@@ -1910,8 +1909,8 @@ fn build_system(
 
     let cnode_objs =
         init_system.allocate_objects(ObjectType::CNode, cnode_names, Some(PD_CAP_SIZE));
-    let cnode_objs_by_pd: HashMap<&String, &Object> =
-        HashMap::from_iter(zip(protection_domains.keys(), &cnode_objs));
+    let cnode_objs_by_pd: BTreeMap<&String, &Object> =
+        BTreeMap::from_iter(zip(protection_domains.keys(), &cnode_objs));
 
     let vm_cnode_objs = &cnode_objs[protection_domains.len()..];
 
@@ -1923,7 +1922,7 @@ fn build_system(
 
     // Create all the necessary interrupt handler objects. These aren't
     // created through retype though!
-    let mut irq_cap_addresses: HashMap<&ProtectionDomain, Vec<u64>> = HashMap::new();
+    let mut irq_cap_addresses: BTreeMap<&ProtectionDomain, Vec<u64>> = BTreeMap::new();
     for pd in protection_domains.values() {
         irq_cap_addresses.insert(pd, vec![]);
         for sysirq in pd.irqs.iter().chain(
@@ -2184,7 +2183,7 @@ fn build_system(
         }
     }
 
-    let mut badged_irq_caps: HashMap<&ProtectionDomain, Vec<u64>> = HashMap::new();
+    let mut badged_irq_caps: BTreeMap<&ProtectionDomain, Vec<u64>> = BTreeMap::new();
     for (notification_obj, pd) in zip(&notification_objs, protection_domains.values()) {
         badged_irq_caps.insert(pd, vec![]);
 
@@ -3008,7 +3007,7 @@ fn build_system(
         system_invocation.add_raw_invocation(config, &mut system_invocation_data);
     }
 
-    let pd_setvar_values: HashMap<String, Vec<u64>> = protection_domains
+    let pd_setvar_values: BTreeMap<String, Vec<u64>> = protection_domains
         .values()
         .map(|pd| {
             (
@@ -3589,7 +3588,7 @@ fn main() -> Result<(), String> {
         const NUMBER_SGI_IRQ: u64 = 8;
 
         let mut next_sgi_irq = NUMBER_SGI_IRQ - 1;
-        let mut sgi_irq_numbers = HashMap::new();
+        let mut sgi_irq_numbers = BTreeMap::new();
 
         for (_, recv, _, _) in system
             .channels
@@ -3639,14 +3638,14 @@ fn main() -> Result<(), String> {
 
         let core = multikernel_idx as u64;
 
-        let core_local_protection_domains: HashMap<String, ProtectionDomain> = system
+        let core_local_protection_domains: BTreeMap<String, ProtectionDomain> = system
             .protection_domains
             .clone()
             .into_iter()
             .filter(|(_, pd)| pd.core == core)
             .collect();
 
-        pd_elf_files_by_core.push(HashMap::new());
+        pd_elf_files_by_core.push(BTreeMap::new());
         let pd_elf_files = &mut pd_elf_files_by_core[multikernel_idx];
         for pd in core_local_protection_domains.values() {
             match get_full_path(&pd.program_image, &search_paths) {

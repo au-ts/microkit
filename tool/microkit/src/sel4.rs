@@ -6,7 +6,7 @@
 
 use crate::UntypedObject;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::io::{BufWriter, Write};
 
 #[derive(Clone)]
@@ -181,7 +181,7 @@ impl RiscvVirtualMemory {
     }
 }
 
-#[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum ObjectType {
     Untyped,
     Tcb,
@@ -313,7 +313,7 @@ impl ObjectType {
 }
 
 #[repr(u64)]
-#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum PageSize {
     Small = 0x1000,
     Large = 0x200_000,
@@ -814,7 +814,7 @@ impl Invocation {
     fn fmt_field_cap(
         field_name: &'static str,
         cap: u64,
-        cap_lookup: &HashMap<u64, String>,
+        cap_lookup: &BTreeMap<u64, String>,
     ) -> String {
         let s = if let Some(name) = cap_lookup.get(&cap) {
             name
@@ -844,7 +844,7 @@ impl Invocation {
         &self,
         f: &mut BufWriter<W>,
         config: &Config,
-        cap_lookup: &HashMap<u64, String>,
+        cap_lookup: &BTreeMap<u64, String>,
     ) {
         let mut arg_strs = Vec::new();
         let (service, service_str): (u64, &str) = match self.args {

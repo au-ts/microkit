@@ -20,7 +20,7 @@ use crate::sel4::{Config, IrqTrigger, PageSize};
 use crate::util::str_to_bool;
 use crate::MAX_PDS;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// Events that come through entry points (e.g notified or protected) are given an
@@ -91,14 +91,14 @@ pub struct SysMap {
     pub text_pos: Option<roxmltree::TextPos>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum SysMemoryRegionKind {
     User,
     Elf,
     Stack,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SysMemoryRegion {
     pub name: String,
     pub size: u64,
@@ -110,6 +110,18 @@ pub struct SysMemoryRegion {
     /// due to the user's SDF or created by the tool for setting up the
     /// stack, ELF, etc.
     pub kind: SysMemoryRegionKind,
+}
+
+impl Ord for SysMemoryRegion {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.name.cmp(&other.name)
+    }
+}
+
+impl PartialOrd for SysMemoryRegion {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl SysMemoryRegion {
@@ -131,14 +143,14 @@ impl SysMemoryRegion {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SysIrq {
     pub irq: u64,
     pub id: u64,
     pub trigger: IrqTrigger,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum SysSetVarKind {
     // For size we do not store the size since when we parse mappings
     // we do not have access to the memory region yet. The size is resolved
@@ -148,13 +160,13 @@ pub enum SysSetVarKind {
     Paddr { region: String },
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct SysSetVar {
     pub symbol: String,
     pub kind: SysSetVarKind,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct ChannelEnd {
     pub pd: String,
     pub id: u64,
@@ -168,7 +180,7 @@ pub struct Channel {
     pub end_b: ChannelEnd,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ProtectionDomain {
     /// Only populated for child protection domains
     pub id: Option<u64>,
@@ -196,7 +208,19 @@ pub struct ProtectionDomain {
     text_pos: roxmltree::TextPos,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+impl Ord for ProtectionDomain {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.name.cmp(&other.name)
+    }
+}
+
+impl PartialOrd for ProtectionDomain {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VirtualMachine {
     pub vcpus: Vec<VirtualCpu>,
     pub name: String,
@@ -206,7 +230,19 @@ pub struct VirtualMachine {
     pub period: u64,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+impl Ord for VirtualMachine {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.name.cmp(&other.name)
+    }
+}
+
+impl PartialOrd for VirtualMachine {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct VirtualCpu {
     pub id: u64,
 }
@@ -966,7 +1002,7 @@ struct XmlSystemDescription<'a> {
 
 #[derive(Debug)]
 pub struct SystemDescription {
-    pub protection_domains: HashMap<String, ProtectionDomain>,
+    pub protection_domains: BTreeMap<String, ProtectionDomain>,
     pub memory_regions: Vec<SysMemoryRegion>,
     pub channels: Vec<Channel>,
 }
@@ -1258,7 +1294,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
     }
 
     let pds_map = {
-        let mut pds_by_name: HashMap<String, ProtectionDomain> = HashMap::new();
+        let mut pds_by_name: BTreeMap<String, ProtectionDomain> = BTreeMap::new();
 
         for pd in pds.into_iter() {
             if pds_by_name.contains_key(&pd.name) {
@@ -1314,7 +1350,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
 
     // Ensure no duplicate channel identifiers.
     // This means checking that no interrupt IDs clash with any channel IDs
-    let mut ch_ids: HashMap<String, Vec<_>> = HashMap::with_capacity(pds.len());
+    let mut ch_ids: BTreeMap<String, Vec<_>> = BTreeMap::new();
     for pd in pds.values() {
         ch_ids.insert(pd.name.clone(), vec![]);
         for sysirq in &pd.irqs {

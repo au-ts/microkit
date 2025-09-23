@@ -5,7 +5,7 @@
 //
 
 use crate::util::bytes_to_struct;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -135,7 +135,7 @@ pub struct ElfFile {
     pub word_size: usize,
     pub entry: u64,
     pub segments: Vec<ElfSegment>,
-    symbols: HashMap<String, (ElfSymbol64, bool)>,
+    symbols: BTreeMap<String, (ElfSymbol64, bool)>,
 }
 
 impl ElfFile {
@@ -265,7 +265,7 @@ impl ElfFile {
         let symtab_str = &bytes[symtab_str_start..symtab_str_end];
 
         // Read all the symbols
-        let mut symbols: HashMap<String, (ElfSymbol64, bool)> = HashMap::new();
+        let mut symbols: BTreeMap<String, (ElfSymbol64, bool)> = BTreeMap::new();
         let mut offset = 0;
         let symbol_size = std::mem::size_of::<ElfSymbol64>();
         while offset < symtab.len() {
