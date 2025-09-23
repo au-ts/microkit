@@ -896,7 +896,7 @@ fn build_system(
     monitor_elf: &ElfFile,
     protection_domains: &BTreeMap<String, ProtectionDomain>,
     all_protection_domains: &BTreeMap<String, ProtectionDomain>,
-    memory_regions: &[SysMemoryRegion],
+    memory_regions: &[&SysMemoryRegion],
     channels: &[Channel],
     full_system_state: &FullSystemState,
     core: u64,
@@ -1438,6 +1438,7 @@ fn build_system(
                 phys_addr: Some(phys_addr_next),
                 text_pos: None,
                 kind: SysMemoryRegionKind::Elf,
+                used_cores: vec![pd.core],
             };
             phys_addr_next += aligned_size;
 
@@ -1475,6 +1476,7 @@ fn build_system(
             phys_addr: None,
             text_pos: None,
             kind: SysMemoryRegionKind::Stack,
+            used_cores: vec![pd.core],
         };
 
         let stack_map = SysMap {
@@ -1493,10 +1495,11 @@ fn build_system(
 
     let mut all_mrs: Vec<&SysMemoryRegion> =
         Vec::with_capacity(memory_regions.len() + extra_mrs.len());
-    for mr_set in [memory_regions, &extra_mrs[..]] {
-        for mr in mr_set {
-            all_mrs.push(mr);
-        }
+    for &mr in memory_regions {
+        all_mrs.push(mr);
+    }
+    for mr in &extra_mrs[..] {
+        all_mrs.push(mr);
     }
     let all_mr_by_name: BTreeMap<&str, &SysMemoryRegion> =
         all_mrs.iter().map(|mr| (mr.name.as_str(), *mr)).collect();
@@ -3683,6 +3686,12 @@ fn main() -> Result<(), String> {
             }
         }
 
+        let memory_regions_for_core: Vec<_> = system
+            .memory_regions
+            .iter()
+            .filter(|&mr| mr.used_cores.contains(&(multikernel_idx as u64)))
+            .collect();
+
         loop {
             built_system = build_system(
                 &kernel_config,
@@ -3691,8 +3700,7 @@ fn main() -> Result<(), String> {
                 &monitor_elf,
                 &core_local_protection_domains,
                 &system.protection_domains,
-                // TODO: per-core
-                &system.memory_regions[..],
+                &memory_regions_for_core,
                 &system.channels,
                 &full_system_state,
                 core,

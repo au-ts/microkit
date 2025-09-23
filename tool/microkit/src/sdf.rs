@@ -20,7 +20,7 @@ use crate::sel4::{Config, IrqTrigger, PageSize};
 use crate::util::str_to_bool;
 use crate::MAX_PDS;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// Events that come through entry points (e.g notified or protected) are given an
@@ -110,6 +110,7 @@ pub struct SysMemoryRegion {
     /// due to the user's SDF or created by the tool for setting up the
     /// stack, ELF, etc.
     pub kind: SysMemoryRegionKind,
+    pub used_cores: Vec<u64>,
 }
 
 impl Ord for SysMemoryRegion {
@@ -883,6 +884,8 @@ impl SysMemoryRegion {
             phys_addr,
             text_pos: Some(xml_sdf.doc.text_pos_at(node.range().start)),
             kind: SysMemoryRegionKind::User,
+            // Filled in later.
+            used_cores: vec![],
         })
     }
 }
@@ -1180,10 +1183,7 @@ fn pd_tree_to_list(
         // The parent PD's index is set for each child. We then pass the index relative to the *total*
         // list to any nested children so their parent index can be set to the position of this child.
         child_pd.parent = Some(pd.name.clone());
-        new_child_pds.extend(pd_tree_to_list(
-            xml_sdf,
-            child_pd,
-        )?);
+        new_child_pds.extend(pd_tree_to_list(xml_sdf, child_pd)?);
     }
 
     let mut all = vec![pd];
@@ -1361,7 +1361,9 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
                 ));
             }
 
-            if let Some(val) = ch_ids.get_mut(&pd.name) { val.push(sysirq.id); };
+            if let Some(val) = ch_ids.get_mut(&pd.name) {
+                val.push(sysirq.id);
+            };
         }
     }
 
@@ -1398,8 +1400,12 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             ));
         }
 
-        if let Some(val) = ch_ids.get_mut(&ch.end_a.pd) { val.push(ch.end_a.id); };
-        if let Some(val) = ch_ids.get_mut(&ch.end_b.pd) { val.push(ch.end_b.id); };
+        if let Some(val) = ch_ids.get_mut(&ch.end_a.pd) {
+            val.push(ch.end_a.id);
+        };
+        if let Some(val) = ch_ids.get_mut(&ch.end_b.pd) {
+            val.push(ch.end_b.id);
+        };
     }
 
     // Ensure that all maps are correct
@@ -1439,25 +1445,39 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         }
     }
 
-    // Check that all MRs are used
+    let mut cores_using_mr = BTreeMap::<&str, BTreeSet<u64>>::new();
+    for pd in pds.values() {
+        // TODO: don't duplicate.
+        for map in pd.maps.iter() {
+            cores_using_mr.entry(&map.mr).or_default().insert(pd.core);
+        }
+
+        if let Some(vm) = &pd.virtual_machine {
+            for map in vm.maps.iter() {
+                cores_using_mr.entry(&map.mr).or_default().insert(pd.core);
+            }
+        }
+    }
+
+    for mr in mrs.iter_mut() {
+        match cores_using_mr.get(&mr.name.as_str()) {
+            Some(cores_using) => {
+                mr.used_cores.extend(cores_using.iter());
+            }
+            None => {
+                println!("WARNING: unused memory region '{}'", mr.name);
+            }
+        }
+    }
+
+    println!("CORES USING: {:?}", cores_using_mr);
+
+    // TODO: make into a map
     let mut all_maps = vec![];
     for pd in pds.values() {
         all_maps.extend(&pd.maps);
         if let Some(vm) = &pd.virtual_machine {
             all_maps.extend(&vm.maps);
-        }
-    }
-    for mr in &mrs {
-        let mut found = false;
-        for map in &all_maps {
-            if map.mr == mr.name {
-                found = true;
-                break;
-            }
-        }
-
-        if !found {
-            println!("WARNING: unused memory region '{}'", mr.name);
         }
     }
 
