@@ -62,24 +62,6 @@ typedef struct {
 
 meson_timer_t timer;
 
-static char hexchar(unsigned int v)
-{
-    return v < 10 ? '0' + v : ('a' - 10) + v;
-}
-
-static void puthex64(uint64_t val)
-{
-    char buffer[16 + 3];
-    buffer[0] = '0';
-    buffer[1] = 'x';
-    buffer[16 + 3 - 1] = 0;
-    for (unsigned i = 16 + 1; i > 1; i--) {
-        buffer[i] = hexchar(val & 0xf);
-        val >>= 4;
-    }
-    microkit_dbg_puts(buffer);
-}
-
 uint64_t meson_get_time()
 {
     uint64_t initial_high = timer.regs->timer_e_hi;
@@ -116,8 +98,13 @@ void meson_stop_timer()
     timer.disable = true;
 }
 
+uintptr_t symbol_shared_buffer;
+volatile uint64_t *shared;
+
 void init()
 {
+    shared = (void *)symbol_shared_buffer;
+
     timer.regs = (void *)(timer_regs + TIMER_REG_START);
 
     timer.regs->mux = TIMER_A_EN | (TIMESTAMP_TIMEBASE_1_US << TIMER_E_INPUT_CLK) |
@@ -130,16 +117,17 @@ void init()
     meson_set_timeout(1000, true);
 }
 
+
 void notified(microkit_channel ch)
 {
     switch (ch) {
     case TIMER_IRQ_CH:
-        microkit_dbg_puts("Got timer interrupt!\n");
+        microkit_dbg_puts("TIMER: Got timer interrupt!\n");
         microkit_irq_ack(ch);
-        microkit_dbg_puts("Current time is: ");
-        puthex64(meson_get_time());
-        microkit_dbg_puts("\n");
+
+        *shared = meson_get_time();
         microkit_notify(SEND_CH);
+
         break;
     default:
         microkit_dbg_puts("TIMER|ERROR: unexpected channel!\n");

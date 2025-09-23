@@ -995,7 +995,11 @@ void secondary_cpu_entry() {
     dsb();
 
     // Temp: Hang all other kernels otherwise output becomes garbled
+#ifdef BOARD_odroidc4_multikernel
+    for (volatile int i = 0; i < cpu * 10000000; i++);
+#else
     for (volatile int i = 0; i < cpu * 100000000; i++);
+#endif
     start_kernel(cpu);
 
     puts("LDR|ERROR: seL4 Loader: Error - KERNEL RETURNED (CPU ");
