@@ -887,6 +887,7 @@ fn emulate_kernel_boot(
 #[derive(Debug)]
 struct FullSystemState {
     sgi_irq_numbers: BTreeMap<ChannelEnd, u64>,
+    memory_regions: Vec<SysMemoryRegion>,
 }
 
 fn build_system(
@@ -3639,7 +3640,22 @@ fn main() -> Result<(), String> {
             ));
         }
 
-        FullSystemState { sgi_irq_numbers }
+        // Take all the memory regions used on multiple cores and make them shared.
+
+        let mut shared_phys_addr_next = 0x5300000;
+
+        let mut memory_regions = vec![];
+        for mut mr in system.memory_regions {
+
+            if mr.used_cores.len() > 1 {
+                mr.phys_addr = Some(shared_phys_addr_next);
+                shared_phys_addr_next += mr.size;
+            }
+
+            memory_regions.push(mr);
+        }
+
+        FullSystemState { sgi_irq_numbers, memory_regions }
     };
 
     for multikernel_idx in 0..num_multikernels {
@@ -3686,8 +3702,7 @@ fn main() -> Result<(), String> {
             }
         }
 
-        let memory_regions_for_core: Vec<_> = system
-            .memory_regions
+        let memory_regions_for_core: Vec<_> = full_system_state.memory_regions
             .iter()
             .filter(|&mr| mr.used_cores.contains(&(multikernel_idx as u64)))
             .collect();
