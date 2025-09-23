@@ -739,6 +739,78 @@ static void start_kernel(int id)
     );
 }
 
+
+#define IRQ_SET_ALL 0xffffffff
+#define TARGET_CPU_ALLINT(CPU) ( \
+        ( ((CPU)&0xff)<<0u  ) |\
+        ( ((CPU)&0xff)<<8u  ) |\
+        ( ((CPU)&0xff)<<16u ) |\
+        ( ((CPU)&0xff)<<24u ) \
+    )
+
+/* Memory map for GIC distributor */
+struct gic_dist_map {
+    uint32_t enable;                /* 0x000 */
+    uint32_t ic_type;               /* 0x004 */
+    uint32_t dist_ident;            /* 0x008 */
+    uint32_t res1[29];              /* [0x00C, 0x080) */
+
+    uint32_t security[32];          /* [0x080, 0x100) */
+
+    uint32_t enable_set[32];        /* [0x100, 0x180) */
+    uint32_t enable_clr[32];        /* [0x180, 0x200) */
+    uint32_t pending_set[32];       /* [0x200, 0x280) */
+    uint32_t pending_clr[32];       /* [0x280, 0x300) */
+    uint32_t active[32];            /* [0x300, 0x380) */
+    uint32_t res2[32];              /* [0x380, 0x400) */
+
+    uint32_t priority[255];         /* [0x400, 0x7FC) */
+    uint32_t res3;                  /* 0x7FC */
+
+    uint32_t targets[255];            /* [0x800, 0xBFC) */
+    uint32_t res4;                  /* 0xBFC */
+
+    uint32_t config[64];             /* [0xC00, 0xD00) */
+
+    uint32_t spi[32];               /* [0xD00, 0xD80) */
+    uint32_t res5[20];              /* [0xD80, 0xDD0) */
+    uint32_t res6;                  /* 0xDD0 */
+    uint32_t legacy_int;            /* 0xDD4 */
+    uint32_t res7[2];               /* [0xDD8, 0xDE0) */
+    uint32_t match_d;               /* 0xDE0 */
+    uint32_t enable_d;              /* 0xDE4 */
+    uint32_t res8[70];               /* [0xDE8, 0xF00) */
+
+    uint32_t sgi_control;           /* 0xF00 */
+    uint32_t res9[3];               /* [0xF04, 0xF10) */
+    uint32_t sgi_pending_clr[4];    /* [0xF10, 0xF20) */
+    uint32_t res10[40];             /* [0xF20, 0xFC0) */
+
+    uint32_t periph_id[12];         /* [0xFC0, 0xFF0) */
+    uint32_t component_id[4];       /* [0xFF0, 0xFFF] */
+};
+
+static uint8_t infer_cpu_gic_id(int nirqs)
+{
+   volatile struct gic_dist_map *gic_dist = (volatile void *)(GICD_BASE);
+
+    uint64_t i;
+    uint32_t target = 0;
+    for (i = 0; i < nirqs; i += 4) {
+        target = gic_dist->targets[i >> 2];
+        target |= target >> 16;
+        target |= target >> 8;
+        if (target) {
+            break;
+        }
+    }
+    if (!target) {
+        puts("Warning: Could not infer GIC interrupt target ID, assuming 0.\n");
+        target = 0 << 1;
+    }
+    return target & 0xff;
+}
+
 #if defined(BOARD_zcu102) || defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel) || defined(BOARD_qemu_virt_aarch64) || defined(BOARD_qemu_virt_aarch64_multikernel)
 static void configure_gicv2(void)
 {
@@ -765,44 +837,48 @@ static void configure_gicv2(void)
     puts("LDR|INFO: Configuring GICv2 for ARM\n");
     // -------
 
-    puts("LDR|INFO: Enable the GIC distributer\n");
-    uint32_t gicd_enable = *((volatile uint32_t *)(GICD_BASE));
+    volatile struct gic_dist_map *gic_dist = (volatile void *)(GICD_BASE);
 
-    if ((gicd_enable & 0x1) != 0x1) {
-        puts("LDR|INFO: Enabling...\n");
-        *((volatile uint32_t *)(GICD_BASE)) = 0x1;
+    uint64_t i;
+    int nirqs = 32 * ((gic_dist->ic_type & 0x1f) + 1);
+    gic_dist->enable = 0;
+
+    for (i = 0; i < nirqs; i += 32) {
+        /* disable */
+        gic_dist->enable_clr[i >> 5] = IRQ_SET_ALL;
+        /* clear pending */
+        gic_dist->pending_clr[i >> 5] = IRQ_SET_ALL;
     }
 
-    uint32_t gicd_typer = *((volatile uint32_t *)(GICD_BASE + 0x4));
-    uint32_t it_lines_number = gicd_typer & 0x1f;
-    puts("LDR|INFO: GICv2 ITLinesNumber: "); // If zero, then number of interrupts is 32
-    puthex32(it_lines_number);
-    puts("\n");
-
-    unsigned int nr_lines = 32 * (it_lines_number + 1);
-    puts("LDR|INFO: GICv2 Max supported interrupts: ");
-    puthex32(nr_lines);
-    puts("\n");
-
-    puts("LDR|INFO: GICv2 Disable and clear all interrupts\n");
-    for (uint32_t i = 0; i <= it_lines_number; i++) {
-        *((volatile uint32_t *)(GICD_BASE + 0x180 + (i * 4))) = 0xffffffff; // enable clr
-        *((volatile uint32_t *)(GICD_BASE + 0x280 + (i * 4))) = 0xffffffff; // pending clr
+    /* reset interrupts priority */
+    for (i = 32; i < nirqs; i += 4) {
+        if (1 /* config_set(CONFIG_ARM_HYPERVISOR_SUPPORT) */) {
+            gic_dist->priority[i >> 2] = 0x80808080;
+        } else {
+            gic_dist->priority[i >> 2] = 0;
+        }
+    }
+    /*
+     * reset int target to current cpu
+     * We query which id that the GIC uses for us and use that.
+     */
+    uint8_t target = infer_cpu_gic_id(nirqs);
+    for (i = 0; i < nirqs; i += 4) {
+        gic_dist->targets[i >> 2] = TARGET_CPU_ALLINT(target);
     }
 
-    puts("LDR|INFO: GICv2 Setting all interrupts to be level triggered\n");
-    for (uint32_t i = 0; i <= it_lines_number; i++) {
-        *((volatile uint32_t *)(GICD_BASE + 0xC00 + (i * 4))) = 0x55555555; // config
+    /* level-triggered, 1-N */
+    for (i = 64; i < nirqs; i += 32) {
+        gic_dist->config[i >> 5] = 0x55555555;
     }
 
-    puts("LDR|INFO: GICv2 Setting all interrupts to Group 1\n");
-    for (uint32_t i = 0; i <= it_lines_number; i++) {
-        *((volatile uint32_t *)(GICD_BASE + 0x80 + (i * 4))) = 0x0; // security
-    }
-
-    puts("LDR|INFO: GICv2 Make global interrupt priorities default\n");
-    for (uint32_t i = 0; i <= it_lines_number; i++) {
-        *((volatile uint32_t *)(GICD_BASE + 0x400 + (i * 4))) = 0x0; // priority
+    /* group 0 for secure; group 1 for non-secure */
+    for (i = 0; i < nirqs; i += 32) {
+        if (1 /* config_set(CONFIG_ARM_HYPERVISOR_SUPPORT) && !config_set(CONFIG_PLAT_QEMU_ARM_VIRT) */) {
+            gic_dist->security[i >> 5] = 0xffffffff;
+        } else {
+            gic_dist->security[i >> 5] = 0;
+        }
     }
 
     /* For any interrupts to go through the interrupt priority mask
@@ -814,16 +890,8 @@ static void configure_gicv2(void)
      */
     *((volatile uint32_t *)(GICC_BASE + 0x4)) = 0xf0;
 
-    // Just a double check..
-    gicd_enable = *((volatile uint32_t *)(GICD_BASE));
-    if ((gicd_enable & 0x1) != 0x1) {
-        puts("LDR|INFO: GICv2 Not enabled!\n");
-        *((volatile uint32_t *)(GICD_BASE)) = 0x1;
-    }
 
-    puts("LDR|INFO: GICv2 ctlr state: ");
-    puthex32(gicd_enable);
-    puts("\n");
+    gic_dist->enable = 1;
 }
 #endif
 
