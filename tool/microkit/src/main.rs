@@ -563,7 +563,6 @@ fn kernel_partial_boot(
 
     // Calculate where the kernel image region is
     let (kernel_region, boot_region, kernel_p_v_offset) = {
-
         let kernel_loadable_segments = kernel_elf.loadable_segments();
         let kernel_first_vaddr = kernel_loadable_segments
             .first()
@@ -683,7 +682,6 @@ fn kernel_partial_boot(
     //     the normal memory untypeds, and device_memory is those untypeds
     //     marked as "device". All of this is available to userspace.
     // ====
-
 
     let mut device_memory = DisjointMemoryRegion::default();
     let mut normal_memory = DisjointMemoryRegion::default();
@@ -1060,6 +1058,12 @@ fn build_system(
 
         irqs_by_pd
     };
+
+    let monitor_pd_id_by_pd: BTreeMap<String, usize> = protection_domains
+        .keys()
+        .enumerate()
+        .map(|(id, pd_name)| (pd_name.clone(), id))
+        .collect();
 
     // 2. Now that the available resources are known it is possible to proceed with the
     // monitor task boot strap.
@@ -1584,6 +1588,8 @@ fn build_system(
 
     // All the IPC buffers are the first to be allocated which is why this works
     let ipc_buffer_objs = &small_page_objs[..protection_domains.len()];
+    let ipc_buffer_objs_by_pd: BTreeMap<&String, &Object> =
+        BTreeMap::from_iter(zip(protection_domains.keys(), ipc_buffer_objs));
 
     let mut page_small_idx = ipc_buffer_objs.len();
     let mut page_large_idx = 0;
@@ -1629,6 +1635,8 @@ fn build_system(
     let tcb_caps: Vec<u64> = tcb_objs.iter().map(|tcb| tcb.cap_addr).collect();
 
     let pd_tcb_objs = &tcb_objs[..protection_domains.len()];
+    let pd_tcb_objs_by_pd: BTreeMap<&String, &Object> =
+        BTreeMap::from_iter(zip(protection_domains.keys(), pd_tcb_objs));
     let vcpu_tcb_objs = &tcb_objs[protection_domains.len()..];
     assert!(pd_tcb_objs.len() + vcpu_tcb_objs.len() == tcb_objs.len());
     // VCPUs
@@ -1659,6 +1667,8 @@ fn build_system(
     let sched_context_caps: Vec<u64> = sched_context_objs.iter().map(|sc| sc.cap_addr).collect();
 
     let pd_sched_context_objs = &sched_context_objs[..protection_domains.len()];
+    let pd_sched_context_objs_by_pd: BTreeMap<&String, &Object> =
+        BTreeMap::from_iter(zip(protection_domains.keys(), pd_sched_context_objs));
     let vm_sched_context_objs = &sched_context_objs[protection_domains.len()..];
 
     // Endpoints
@@ -1723,8 +1733,7 @@ fn build_system(
     let mut all_pd_uds: Vec<(usize, u64)> = Vec::new();
     let mut all_pd_ds: Vec<(usize, u64)> = Vec::new();
     let mut all_pd_pts: Vec<(usize, u64)> = Vec::new();
-    // TODO: pd_idx??
-    for (pd_idx, pd) in protection_domains.values().enumerate() {
+    for pd in protection_domains.values() {
         let (ipc_buffer_vaddr, _) = pd_elf_files[&pd.name]
             .find_symbol(SYMBOL_IPC_BUFFER)
             .unwrap_or_else(|_| panic!("Could not find {SYMBOL_IPC_BUFFER}"));
@@ -1763,23 +1772,25 @@ fn build_system(
             }
         }
 
+        let monitor_pd_id = monitor_pd_id_by_pd[&pd.name];
+
         let mut pd_uds: Vec<(usize, u64)> = upper_directory_vaddrs
             .into_iter()
-            .map(|vaddr| (pd_idx, vaddr))
+            .map(|vaddr| (monitor_pd_id, vaddr))
             .collect();
         pd_uds.sort_by_key(|ud| ud.1);
         all_pd_uds.extend(pd_uds);
 
         let mut pd_ds: Vec<(usize, u64)> = directory_vaddrs
             .into_iter()
-            .map(|vaddr| (pd_idx, vaddr))
+            .map(|vaddr| (monitor_pd_id, vaddr))
             .collect();
         pd_ds.sort_by_key(|d| d.1);
         all_pd_ds.extend(pd_ds);
 
         let mut pd_pts: Vec<(usize, u64)> = page_table_vaddrs
             .into_iter()
-            .map(|vaddr| (pd_idx, vaddr))
+            .map(|vaddr| (monitor_pd_id, vaddr))
             .collect();
         pd_pts.sort_by_key(|pt| pt.1);
         all_pd_pts.extend(pd_pts);
@@ -1856,6 +1867,8 @@ fn build_system(
     vspace_names.extend(vm_vspace_names);
     let vspace_objs = init_system.allocate_objects(ObjectType::VSpace, vspace_names, None);
     let pd_vspace_objs = &vspace_objs[..protection_domains.len()];
+    let pd_vspace_objs_by_pd: BTreeMap<&String, &Object> =
+        BTreeMap::from_iter(zip(protection_domains.keys(), pd_vspace_objs));
     let vm_vspace_objs = &vspace_objs[protection_domains.len()..];
 
     let pd_ud_names: Vec<String> = all_pd_uds
@@ -1922,9 +1935,9 @@ fn build_system(
 
     // Create all the necessary interrupt handler objects. These aren't
     // created through retype though!
-    let mut irq_cap_addresses: BTreeMap<&ProtectionDomain, Vec<u64>> = BTreeMap::new();
+    let mut irq_cap_addresses: BTreeMap<&String, Vec<u64>> = BTreeMap::new();
     for pd in protection_domains.values() {
-        irq_cap_addresses.insert(pd, vec![]);
+        irq_cap_addresses.insert(&pd.name, vec![]);
         for sysirq in pd.irqs.iter().chain(
             cross_core_receiver_sgi_irqs_by_pd
                 .get(&pd.name)
@@ -1946,7 +1959,10 @@ fn build_system(
 
             cap_slot += 1;
             cap_address_names.insert(cap_address, format!("IRQ Handler: irq={}", sysirq.irq));
-            irq_cap_addresses.get_mut(pd).unwrap().push(cap_address);
+            irq_cap_addresses
+                .get_mut(&pd.name)
+                .unwrap()
+                .push(cap_address);
         }
     }
 
@@ -2012,7 +2028,9 @@ fn build_system(
     // Mint copies of required pages, while also determining what's required
     // for later mapping
     let mut pd_page_descriptors = Vec::new();
-    for (pd_idx, pd) in protection_domains.values().enumerate() {
+    for pd in protection_domains.values() {
+        let pd_idx = monitor_pd_id_by_pd[&pd.name];
+
         for map_set in [&pd.maps, &pd_extra_maps[pd]] {
             for mp in map_set {
                 let mr = all_mr_by_name[mp.mr.as_str()];
@@ -2225,13 +2243,14 @@ fn build_system(
     // For root PDs, this shall be the system fault EP endpoint object.
     // For non-root PDs, this shall be the parent endpoint.
     let badged_fault_ep = system_cap_address_mask | cap_slot;
-    for (i, pd) in protection_domains.values().enumerate() {
+    for pd in protection_domains.values() {
         let is_root = pd.parent.is_none();
         let fault_ep_cap;
         let badge: u64;
         if is_root {
+            let monitor_pd_id = monitor_pd_id_by_pd[&pd.name];
             fault_ep_cap = fault_ep_endpoint_object.cap_addr;
-            badge = i as u64 + 1;
+            badge = monitor_pd_id as u64 + 1;
         } else {
             let Some(pd_id) = pd.id else {
                 panic!("internal error: id is None")
@@ -2386,7 +2405,7 @@ fn build_system(
     system_invocations.push(vspace_mint_invocation);
 
     // Mint access to interrupt handlers in the PD CSpace
-    for (pd_idx, pd) in protection_domains.values().enumerate() {
+    for pd in protection_domains.values() {
         for (sysirq, irq_cap_address) in zip(
             pd.irqs.iter().chain(
                 cross_core_receiver_sgi_irqs_by_pd
@@ -2394,14 +2413,14 @@ fn build_system(
                     .map(|v| v.iter())
                     .unwrap_or_default(),
             ),
-            &irq_cap_addresses[pd],
+            &irq_cap_addresses[&pd.name],
         ) {
             let cap_idx = BASE_IRQ_CAP + sysirq.id;
             assert!(cap_idx < PD_CAP_SIZE);
             system_invocations.push(Invocation::new(
                 config,
                 InvocationArgs::CnodeMint {
-                    cnode: cnode_objs[pd_idx].cap_addr,
+                    cnode: cnode_objs_by_pd[&pd.name].cap_addr,
                     dest_index: cap_idx,
                     dest_depth: PD_CAP_BITS,
                     src_root: root_cnode_cap,
@@ -2415,8 +2434,8 @@ fn build_system(
     }
 
     // Mint access to the child TCB in the CSpace of root PDs
-    for (pd_idx, pd) in protection_domains.values().enumerate() {
-        for (maybe_child_idx, maybe_child_pd) in protection_domains.values().enumerate() {
+    for pd in protection_domains.values() {
+        for maybe_child_pd in protection_domains.values() {
             // Before doing anything, check if we are dealing with a child PD
             if let Some(ref parent_name) = maybe_child_pd.parent {
                 // We are dealing with a child PD, now check if the index of its parent
@@ -2427,11 +2446,11 @@ fn build_system(
                     system_invocations.push(Invocation::new(
                         config,
                         InvocationArgs::CnodeMint {
-                            cnode: cnode_objs[pd_idx].cap_addr,
+                            cnode: cnode_objs_by_pd[&pd.name].cap_addr,
                             dest_index: cap_idx,
                             dest_depth: PD_CAP_BITS,
                             src_root: root_cnode_cap,
-                            src_obj: tcb_objs[maybe_child_idx].cap_addr,
+                            src_obj: pd_tcb_objs_by_pd[&pd.name].cap_addr,
                             src_depth: config.cap_address_bits,
                             rights: Rights::All as u64,
                             badge: 0,
@@ -2443,7 +2462,7 @@ fn build_system(
     }
 
     // Mint access to virtual machine TCBs in the CSpace of parent PDs
-    for (pd_idx, pd) in protection_domains.values().enumerate() {
+    for pd in protection_domains.values() {
         if let Some(ref vm) = pd.virtual_machine {
             // This PD that we are dealing with has a virtual machine, now we
             // need to find the TCB that corresponds to it.
@@ -2455,7 +2474,7 @@ fn build_system(
                 system_invocations.push(Invocation::new(
                     config,
                     InvocationArgs::CnodeMint {
-                        cnode: cnode_objs[pd_idx].cap_addr,
+                        cnode: cnode_objs_by_pd[&pd.name].cap_addr,
                         dest_index: cap_idx,
                         dest_depth: PD_CAP_BITS,
                         src_root: root_cnode_cap,
@@ -2470,7 +2489,7 @@ fn build_system(
     }
 
     // Mint access to virtual machine vCPUs in the CSpace of the parent PDs
-    for (pd_idx, pd) in protection_domains.values().enumerate() {
+    for pd in protection_domains.values() {
         if let Some(ref vm) = pd.virtual_machine {
             // This PD that we are dealing with has a virtual machine, now we
             // need to find the vCPU that corresponds to it.
@@ -2482,7 +2501,7 @@ fn build_system(
                 system_invocations.push(Invocation::new(
                     config,
                     InvocationArgs::CnodeMint {
-                        cnode: cnode_objs[pd_idx].cap_addr,
+                        cnode: cnode_objs_by_pd[&pd.name].cap_addr,
                         dest_index: cap_idx,
                         dest_depth: PD_CAP_BITS,
                         src_root: root_cnode_cap,
@@ -2576,9 +2595,10 @@ fn build_system(
     }
 
     // Mint a cap between monitor and passive PDs.
-    for (pd_idx, pd) in protection_domains.values().enumerate() {
+    for pd in protection_domains.values() {
         if pd.passive {
-            let cnode_obj = &cnode_objs[pd_idx];
+            let monitor_pd_id = monitor_pd_id_by_pd[&pd.name];
+            let cnode_obj = &cnode_objs_by_pd[&pd.name];
             system_invocations.push(Invocation::new(
                 config,
                 InvocationArgs::CnodeMint {
@@ -2590,16 +2610,16 @@ fn build_system(
                     src_depth: config.cap_address_bits,
                     rights: Rights::All as u64, // FIXME: Check rights
                     // Badge needs to start at 1
-                    badge: pd_idx as u64 + 1,
+                    badge: monitor_pd_id as u64 + 1,
                 },
             ));
         }
     }
 
-    for (pd_idx, pd) in protection_domains.values().enumerate() {
+    for pd in protection_domains.values() {
         if pd.smc {
             assert!(config.arm_smc.is_some() && config.arm_smc.unwrap());
-            let cnode_obj = &cnode_objs[pd_idx];
+            let cnode_obj = &cnode_objs_by_pd[&pd.name];
             system_invocations.push(Invocation::new(
                 config,
                 InvocationArgs::CnodeMint {
@@ -2622,7 +2642,7 @@ fn build_system(
     // FIXME: This could use repeat
     for pd in protection_domains.values() {
         for (irq_cap_address, badged_notification_cap_address) in
-            zip(&irq_cap_addresses[pd], &badged_irq_caps[pd])
+            zip(&irq_cap_addresses[&pd.name], &badged_irq_caps[pd])
         {
             system_invocations.push(Invocation::new(
                 config,
@@ -2732,15 +2752,15 @@ fn build_system(
         Arch::Aarch64 => ArmVmAttributes::default() | ArmVmAttributes::ExecuteNever as u64,
         Arch::Riscv64 => RiscvVmAttributes::default() | RiscvVmAttributes::ExecuteNever as u64,
     };
-    for (pd_idx, pd) in protection_domains.values().enumerate() {
+    for pd in protection_domains.values() {
         let (vaddr, _) = pd_elf_files[&pd.name]
             .find_symbol(SYMBOL_IPC_BUFFER)
             .unwrap_or_else(|_| panic!("Could not find {SYMBOL_IPC_BUFFER}"));
         system_invocations.push(Invocation::new(
             config,
             InvocationArgs::PageMap {
-                page: ipc_buffer_objs[pd_idx].cap_addr,
-                vspace: pd_vspace_objs[pd_idx].cap_addr,
+                page: ipc_buffer_objs_by_pd[&pd.name].cap_addr,
+                vspace: pd_vspace_objs_by_pd[&pd.name].cap_addr,
                 vaddr,
                 rights: Rights::Read as u64 | Rights::Write as u64,
                 attr: ipc_buffer_attr,
@@ -2751,16 +2771,17 @@ fn build_system(
     // Initialise the TCBs
 
     // Set the scheduling parameters
-    for (pd_idx, pd) in protection_domains.values().enumerate() {
+    for pd in protection_domains.values() {
+        let monitor_pd_id = monitor_pd_id_by_pd[&pd.name];
         system_invocations.push(Invocation::new(
             config,
             InvocationArgs::SchedControlConfigureFlags {
                 sched_control: kernel_boot_info.sched_control_cap,
-                sched_context: pd_sched_context_objs[pd_idx].cap_addr,
+                sched_context: pd_sched_context_objs_by_pd[&pd.name].cap_addr,
                 budget: pd.budget,
                 period: pd.period,
                 extra_refills: 0,
-                badge: 0x100 + pd_idx as u64,
+                badge: 0x100 + monitor_pd_id as u64,
                 flags: 0,
             },
         ));
@@ -2783,15 +2804,15 @@ fn build_system(
         }
     }
 
-    for (pd_idx, pd) in protection_domains.values().enumerate() {
+    for pd in protection_domains.values() {
         system_invocations.push(Invocation::new(
             config,
             InvocationArgs::TcbSetSchedParams {
-                tcb: pd_tcb_objs[pd_idx].cap_addr,
+                tcb: pd_tcb_objs_by_pd[&pd.name].cap_addr,
                 authority: INIT_TCB_CAP_ADDRESS,
                 mcp: pd.priority as u64,
                 priority: pd.priority as u64,
-                sched_context: pd_sched_context_objs[pd_idx].cap_addr,
+                sched_context: pd_sched_context_objs_by_pd[&pd.name].cap_addr,
                 // This gets over-written by the call to TCB_SetSpace
                 fault_ep: fault_ep_endpoint_object.cap_addr,
             },
@@ -2897,22 +2918,22 @@ fn build_system(
     }
 
     // Set IPC buffer
-    for (pd_idx, pd) in protection_domains.values().enumerate() {
+    for pd in protection_domains.values() {
         let (ipc_buffer_vaddr, _) = pd_elf_files[&pd.name]
             .find_symbol(SYMBOL_IPC_BUFFER)
             .unwrap_or_else(|_| panic!("Could not find {SYMBOL_IPC_BUFFER}"));
         system_invocations.push(Invocation::new(
             config,
             InvocationArgs::TcbSetIpcBuffer {
-                tcb: tcb_objs[pd_idx].cap_addr,
+                tcb: pd_tcb_objs_by_pd[&pd.name].cap_addr,
                 buffer: ipc_buffer_vaddr,
-                buffer_frame: ipc_buffer_objs[pd_idx].cap_addr,
+                buffer_frame: ipc_buffer_objs_by_pd[&pd.name].cap_addr,
             },
         ));
     }
 
     // Set TCB registers (we only set the entry point)
-    for (pd_idx, pd) in protection_domains.values().enumerate() {
+    for pd in protection_domains.values() {
         let regs = match config.arch {
             Arch::Aarch64 => Aarch64Regs {
                 pc: pd_elf_files[&pd.name].entry,
@@ -2931,7 +2952,7 @@ fn build_system(
         system_invocations.push(Invocation::new(
             config,
             InvocationArgs::TcbWriteRegisters {
-                tcb: tcb_objs[pd_idx].cap_addr,
+                tcb: pd_tcb_objs_by_pd[&pd.name].cap_addr,
                 resume: false,
                 // There are no arch-dependent flags to set
                 arch_flags: 0,
