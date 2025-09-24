@@ -811,6 +811,11 @@ static uint8_t infer_cpu_gic_id(int nirqs)
     return target & 0xff;
 }
 
+#define _macrotest_1 ,
+#define is_set(value) _is_set__(_macrotest_##value)
+#define _is_set__(comma) _is_set___(comma 1, 0)
+#define _is_set___(_, v, ...) v
+
 #if defined(BOARD_zcu102) || defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel) || defined(BOARD_qemu_virt_aarch64) || defined(BOARD_qemu_virt_aarch64_multikernel)
 static void configure_gicv2(void)
 {
@@ -852,7 +857,7 @@ static void configure_gicv2(void)
 
     /* reset interrupts priority */
     for (i = 32; i < nirqs; i += 4) {
-        if (1 /* config_set(CONFIG_ARM_HYPERVISOR_SUPPORT) */) {
+        if (loader_data->flags & FLAG_SEL4_HYP) {
             gic_dist->priority[i >> 2] = 0x80808080;
         } else {
             gic_dist->priority[i >> 2] = 0;
@@ -874,7 +879,7 @@ static void configure_gicv2(void)
 
     /* group 0 for secure; group 1 for non-secure */
     for (i = 0; i < nirqs; i += 32) {
-        if (1 /* config_set(CONFIG_ARM_HYPERVISOR_SUPPORT) && !config_set(CONFIG_PLAT_QEMU_ARM_VIRT) */) {
+        if (loader_data->flags & FLAG_SEL4_HYP && !is_set(BOARD_qemu_virt_aarch64)) {
             gic_dist->security[i >> 5] = 0xffffffff;
         } else {
             gic_dist->security[i >> 5] = 0;
