@@ -192,7 +192,7 @@ pub struct ProtectionDomain {
     pub passive: bool,
     pub stack_size: u64,
     pub smc: bool,
-    pub core: u64,
+    pub cpu: u64,
     pub program_image: PathBuf,
     pub maps: Vec<SysMap>,
     pub irqs: Vec<SysIrq>,
@@ -402,7 +402,7 @@ impl ProtectionDomain {
             // The SMC field is only available in certain configurations
             // but we do the error-checking further down.
             "smc",
-            "core",
+            "cpu",
         ];
         if is_child {
             attrs.push("id");
@@ -491,7 +491,7 @@ impl ProtectionDomain {
             }
         }
 
-        let core = sdf_parse_number(node.attribute("core").unwrap_or("0"), node)?;
+        let cpu = sdf_parse_number(node.attribute("cpu").unwrap_or("0"), node)?;
 
         #[allow(clippy::manual_range_contains)]
         if stack_size < PD_MIN_STACK_SIZE || stack_size > PD_MAX_STACK_SIZE {
@@ -705,7 +705,7 @@ impl ProtectionDomain {
             passive,
             stack_size,
             smc,
-            core,
+            cpu,
             program_image: program_image.unwrap(),
             maps,
             irqs,
@@ -1449,12 +1449,12 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
     for pd in pds.values() {
         // TODO: don't duplicate.
         for map in pd.maps.iter() {
-            cores_using_mr.entry(&map.mr).or_default().insert(pd.core);
+            cores_using_mr.entry(&map.mr).or_default().insert(pd.cpu);
         }
 
         if let Some(vm) = &pd.virtual_machine {
             for map in vm.maps.iter() {
-                cores_using_mr.entry(&map.mr).or_default().insert(pd.core);
+                cores_using_mr.entry(&map.mr).or_default().insert(pd.cpu);
             }
         }
     }

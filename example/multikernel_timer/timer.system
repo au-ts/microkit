@@ -17,7 +17,7 @@
         <map mr="shared" vaddr="0x2_100_000" perms="rw" cached="false" setvar_vaddr="symbol_shared_buffer" />
     </protection_domain>
 
-    <protection_domain name="client" core="1">
+    <protection_domain name="client" cpu="1">
         <program_image path="client.elf" />
 
         <map mr="shared" vaddr="0x2_100_000" perms="rw" cached="false" setvar_vaddr="symbol_shared_buffer" />

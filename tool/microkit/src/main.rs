@@ -520,7 +520,7 @@ struct KernelPartialBootInfo {
 fn kernel_partial_boot(
     kernel_config: &Config,
     kernel_elf: &ElfFile,
-    core: u64,
+    cpu: u64,
 ) -> KernelPartialBootInfo {
     // Determine the untyped caps of the system
     // This lets allocations happen correctly.
@@ -544,7 +544,7 @@ fn kernel_partial_boot(
         //      just this one region.
 
         let kernel_elf_sized_align = 0x1000000;
-        let start = kernel_config.normal_regions[0].start + (core) * kernel_elf_sized_align;
+        let start = kernel_config.normal_regions[0].start + (cpu) * kernel_elf_sized_align;
         physical_memory.insert_region(start, start + kernel_elf_sized_align);
 
         physical_memory
@@ -719,9 +719,9 @@ fn kernel_partial_boot(
 fn emulate_kernel_boot_partial(
     kernel_config: &Config,
     kernel_elf: &ElfFile,
-    core: u64,
+    cpu: u64,
 ) -> (DisjointMemoryRegion, MemoryRegion) {
-    let partial_info = kernel_partial_boot(kernel_config, kernel_elf, core);
+    let partial_info = kernel_partial_boot(kernel_config, kernel_elf, cpu);
     (partial_info.normal_memory, partial_info.boot_region)
 }
 
@@ -799,13 +799,13 @@ fn calculate_rootserver_size(config: &Config, initial_task_region: MemoryRegion)
 fn emulate_kernel_boot(
     config: &Config,
     kernel_elf: &ElfFile,
-    core: u64,
+    cpu: u64,
     initial_task_phys_region: MemoryRegion,
     initial_task_virt_region: MemoryRegion,
     reserved_region: MemoryRegion,
 ) -> BootInfo {
     assert!(initial_task_phys_region.size() == initial_task_virt_region.size());
-    let partial_info = kernel_partial_boot(config, kernel_elf, core);
+    let partial_info = kernel_partial_boot(config, kernel_elf, cpu);
     let mut normal_memory = partial_info.normal_memory;
     let device_memory = partial_info.device_memory;
     let boot_region = partial_info.boot_region;
@@ -900,7 +900,7 @@ fn build_system(
     memory_regions: &[&SysMemoryRegion],
     channels: &[Channel],
     full_system_state: &FullSystemState,
-    core: u64,
+    cpu: u64,
     invocation_table_size: u64,
     system_cnode_size: u64,
 ) -> Result<BuiltSystem, String> {
@@ -941,7 +941,7 @@ fn build_system(
     // Now that the size is determined, find a free region in the physical memory
     // space.
     let (mut available_memory, kernel_boot_region) =
-        emulate_kernel_boot_partial(config, kernel_elf, core);
+        emulate_kernel_boot_partial(config, kernel_elf, cpu);
 
     // The kernel relies on the reserved region being allocated above the kernel
     // boot/ELF region, so we have the end of the kernel boot region as the lower
@@ -975,7 +975,7 @@ fn build_system(
     let kernel_boot_info = emulate_kernel_boot(
         config,
         kernel_elf,
-        core,
+        cpu,
         initial_task_phys_region,
         initial_task_virt_region,
         reserved_region,
@@ -1439,7 +1439,7 @@ fn build_system(
                 phys_addr: Some(phys_addr_next),
                 text_pos: None,
                 kind: SysMemoryRegionKind::Elf,
-                used_cores: vec![pd.core],
+                used_cores: vec![pd.cpu],
             };
             phys_addr_next += aligned_size;
 
@@ -1477,7 +1477,7 @@ fn build_system(
             phys_addr: None,
             text_pos: None,
             kind: SysMemoryRegionKind::Stack,
-            used_cores: vec![pd.core],
+            used_cores: vec![pd.cpu],
         };
 
         let stack_map = SysMap {
@@ -2590,7 +2590,7 @@ fn build_system(
             InvocationArgs::IrqControlIssueSGICap {
                 irq_control: IRQ_CONTROL_CAP_ADDRESS,
                 irq: recv_irq_number,
-                target: recv_pd.core.try_into().expect("core # fits in u8"),
+                target: recv_pd.cpu.try_into().expect("core # fits in u8"),
                 dest_root: send_cnode_obj.cap_addr,
                 dest_index: send_cap_idx,
                 dest_depth: PD_CAP_BITS,
@@ -3629,7 +3629,7 @@ fn main() -> Result<(), String> {
                 )
             })
             // On different cores.
-            .filter(|(_, _, send_pd, recv_pd)| send_pd.core != recv_pd.core)
+            .filter(|(_, _, send_pd, recv_pd)| send_pd.cpu != recv_pd.cpu)
             // And only look at the ones where we are the sender (not the receiver)
             //     and where the channel in the right direction
             .filter(|(send, _, _, _)| send.notify)
@@ -3682,7 +3682,7 @@ fn main() -> Result<(), String> {
             .protection_domains
             .clone()
             .into_iter()
-            .filter(|(_, pd)| pd.core == core)
+            .filter(|(_, pd)| pd.cpu == core)
             .collect();
 
         pd_elf_files_by_core.push(BTreeMap::new());
@@ -3722,7 +3722,7 @@ fn main() -> Result<(), String> {
                 invocation_table_size,
                 system_cnode_size,
             )?;
-            println!("BUILT(core={}): system_cnode_size={} built_system.number_of_system_caps={} invocation_table_size={} built_system.invocation_data_size={}",
+            println!("BUILT(cpu={}): system_cnode_size={} built_system.number_of_system_caps={} invocation_table_size={} built_system.invocation_data_size={}",
                      core, system_cnode_size, built_system.number_of_system_caps, invocation_table_size, built_system.invocation_data_size);
 
             if built_system.number_of_system_caps <= system_cnode_size
