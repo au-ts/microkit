@@ -5,12 +5,7 @@
  SPDX-License-Identifier: BSD-2-Clause
 -->
 <system>
-    <!-- <memory_region name="shared" size="0x1000" phys_addr="0xb0000000" /> -->
-    <!-- This kinda just works... it would be the CNode of the second (QEMU) but it gets allocated around it. -->
-    <!-- any reserved ones checked for both so it's fine?? -->
-    <memory_region name="shared" size="0x1000" phys_addr="0x61254000" />
-    <!-- Odroid -->
-    <!-- <memory_region name="shared" size="0x1000" phys_addr="0x5300000" /> -->
+    <memory_region name="shared" size="0x1000" />
 
     <protection_domain name="core0" priority="254" core="0" >
         <program_image path="core0.elf" />
