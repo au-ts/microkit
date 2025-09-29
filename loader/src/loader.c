@@ -1040,11 +1040,6 @@ int main(void)
         goto fail;
     }
 
-    char *v = 0x5300000;
-    for (int i = 0; i < 0x100000; i++) {
-        v[i] = 0;
-    }
-
     regions = (void *) &(loader_data->kernel_bootinfos_and_regions[loader_data->num_kernels]);
 
 #ifdef ARCH_riscv64
