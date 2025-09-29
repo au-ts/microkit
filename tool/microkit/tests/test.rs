@@ -24,7 +24,7 @@ const DEFAULT_KERNEL_CONFIG: sel4::Config = sel4::Config {
     riscv_pt_levels: None,
     // Not necessary for SDF parsing
     invocations_labels: json!(null),
-    device_regions: vec![],
+    kernel_devices: vec![],
     normal_regions: vec![],
 };
 
