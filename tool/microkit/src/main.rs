@@ -361,6 +361,7 @@ struct BuiltSystem {
     system_invocations: Vec<Invocation>,
     kernel_boot_info: BootInfo,
     reserved_region: MemoryRegion,
+    useable_physical_memory: DisjointMemoryRegion,
     fault_ep_cap_address: u64,
     reply_cap_address: u64,
     cap_lookup: BTreeMap<u64, String>,
@@ -508,6 +509,7 @@ struct KernelPartialBootInfo {
     normal_memory: DisjointMemoryRegion,
     kernel_p_v_offset: u64,
     boot_region: MemoryRegion,
+    useable_physical_memory: DisjointMemoryRegion,
 }
 
 ///
@@ -598,7 +600,7 @@ fn kernel_partial_boot(
     // Actually remove it.
     reserved_regions.insert_region(kernel_region.base, kernel_region.end);
 
-    let mut available_regions = useable_physical_memory;
+    let mut available_regions = useable_physical_memory.clone();
 
     // ============ init_freemem()
 
@@ -713,6 +715,7 @@ fn kernel_partial_boot(
         normal_memory,
         kernel_p_v_offset,
         boot_region,
+        useable_physical_memory,
     }
 }
 
@@ -720,9 +723,13 @@ fn emulate_kernel_boot_partial(
     kernel_config: &Config,
     kernel_elf: &ElfFile,
     cpu: u64,
-) -> (DisjointMemoryRegion, MemoryRegion) {
+) -> (DisjointMemoryRegion, MemoryRegion, DisjointMemoryRegion) {
     let partial_info = kernel_partial_boot(kernel_config, kernel_elf, cpu);
-    (partial_info.normal_memory, partial_info.boot_region)
+    (
+        partial_info.normal_memory,
+        partial_info.boot_region,
+        partial_info.useable_physical_memory,
+    )
 }
 
 fn get_n_paging(region: MemoryRegion, bits: u64) -> u64 {
@@ -940,7 +947,7 @@ fn build_system(
 
     // Now that the size is determined, find a free region in the physical memory
     // space.
-    let (mut available_memory, kernel_boot_region) =
+    let (mut available_memory, kernel_boot_region, useable_physical_memory) =
         emulate_kernel_boot_partial(config, kernel_elf, cpu);
 
     // The kernel relies on the reserved region being allocated above the kernel
@@ -3066,6 +3073,7 @@ fn build_system(
         system_invocations,
         kernel_boot_info,
         reserved_region,
+        useable_physical_memory,
         fault_ep_cap_address: fault_ep_endpoint_object.cap_addr,
         reply_cap_address: reply_obj.cap_addr,
         cap_lookup: cap_address_names,
@@ -3646,7 +3654,6 @@ fn main() -> Result<(), String> {
 
         let mut memory_regions = vec![];
         for mut mr in system.memory_regions {
-
             if mr.used_cores.len() > 1 {
                 mr.phys_addr = Some(shared_phys_addr_next);
                 shared_phys_addr_next += mr.size;
@@ -3655,7 +3662,10 @@ fn main() -> Result<(), String> {
             memory_regions.push(mr);
         }
 
-        FullSystemState { sgi_irq_numbers, memory_regions }
+        FullSystemState {
+            sgi_irq_numbers,
+            memory_regions,
+        }
     };
 
     for multikernel_idx in 0..num_multikernels {
@@ -3702,7 +3712,8 @@ fn main() -> Result<(), String> {
             }
         }
 
-        let memory_regions_for_core: Vec<_> = full_system_state.memory_regions
+        let memory_regions_for_core: Vec<_> = full_system_state
+            .memory_regions
             .iter()
             .filter(|&mr| mr.used_cores.contains(&(multikernel_idx as u64)))
             .collect();
@@ -3954,6 +3965,10 @@ fn main() -> Result<(), String> {
             .map(|bs| bs.reserved_region)
             .collect::<Vec<_>>(),
         loader_regions,
+        &built_systems
+            .iter()
+            .map(|bs| &bs.useable_physical_memory.regions[..])
+            .collect::<Vec<_>>()[..],
     );
     println!("Made image");
     loader.write_image(Path::new(args.output));

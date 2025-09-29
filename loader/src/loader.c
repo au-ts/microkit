@@ -58,17 +58,14 @@ struct region {
     uintptr_t type;
 };
 
-struct kernel_data {
-    uintptr_t kernel_entry;
-    uintptr_t ui_p_reg_start;
-    uintptr_t ui_p_reg_end;
-    uintptr_t pv_offset;
-    uintptr_t v_entry;
-    uintptr_t extra_device_addr_p;
-    uintptr_t extra_device_size;
-    uintptr_t kernel_elf_paddr_base;
-    uintptr_t kernel_boot_info_p;
+#include "sel4/bootinfo.h"
+
+struct KernelBootInfoAndRegions {
+    seL4_KernelBootInfo info;
+    uint8_t descriptor_memory[4096 - sizeof(seL4_KernelBootInfo)];
 };
+
+_Static_assert(sizeof(struct KernelBootInfoAndRegions) == 0x1000);
 
 // Changing this structure is precarious, maybe better to wrap in NUM_MULTIKERNELS IFDEF
 struct loader_data {
@@ -77,7 +74,7 @@ struct loader_data {
     uintptr_t flags;
     uintptr_t num_kernels;
     uintptr_t num_regions;
-    struct kernel_data kernel_data[];
+    struct KernelBootInfoAndRegions kernel_bootinfos_and_regions[];
 };
 
 typedef void (*sel4_entry)(uintptr_t kernel_boot_info_p);
@@ -144,15 +141,6 @@ uint64_t boot_lvl0_lower[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
 uint64_t boot_lvl1_lower[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
 
 uint64_t num_multikernels = NUM_MULTIKERNELS;
-
-#include "sel4/bootinfo.h"
-
-struct {
-    seL4_KernelBootInfo info;
-    uint8_t descriptor_memory[4096 - sizeof(seL4_KernelBootInfo)];
-} kernel_boot_infos[NUM_MULTIKERNELS];
-
-_Static_assert(sizeof(kernel_boot_infos) == NUM_MULTIKERNELS * 4096);
 
 #else
 /* Paging structures for kernel mapping */
@@ -582,56 +570,34 @@ static void print_loader_data(void)
         puts("LDR|INFO: Kernel: ");
         puthex64(i);
         puts("\n");
-        puts("LDR|INFO: Kernel:      entry:   ");
-        puthex64(loader_data->kernel_data[i].kernel_entry);
-        puts("\n");
-        puts("LDR|INFO: Kernel:      kernel_elf_paddr_base:   ");
-        puthex64(loader_data->kernel_data[i].kernel_elf_paddr_base);
-        puts("\n");
+        // puts("LDR|INFO: Kernel:      entry:   ");
+        // puthex64(loader_data->kernel_data[i].kernel_entry);
+        // puts("\n");
+        // puts("LDR|INFO: Kernel:      kernel_elf_paddr_base:   ");
+        // puthex64(loader_data->kernel_data[i].kernel_elf_paddr_base);
+        // puts("\n");
 
-        puts("LDR|INFO: Root server: physmem: ");
-        puthex64(loader_data->kernel_data[i].ui_p_reg_start);
-        puts(" -- ");
-        puthex64(loader_data->kernel_data[i].ui_p_reg_end);
-        puts("\nLDR|INFO:              virtmem: ");
-        puthex64(loader_data->kernel_data[i].ui_p_reg_start - loader_data->kernel_data[i].pv_offset);
-        puts(" -- ");
-        puthex64(loader_data->kernel_data[i].ui_p_reg_end - loader_data->kernel_data[i].pv_offset);
-        puts("\nLDR|INFO:              entry  : ");
-        puthex64(loader_data->kernel_data[i].v_entry);
-        puts("\n");
+        // puts("LDR|INFO: Root server: physmem: ");
+        // puthex64(loader_data->kernel_data[i].ui_p_reg_start);
+        // puts(" -- ");
+        // puthex64(loader_data->kernel_data[i].ui_p_reg_end);
+        // puts("\nLDR|INFO:              virtmem: ");
+        // puthex64(loader_data->kernel_data[i].ui_p_reg_start - loader_data->kernel_data[i].pv_offset);
+        // puts(" -- ");
+        // puthex64(loader_data->kernel_data[i].ui_p_reg_end - loader_data->kernel_data[i].pv_offset);
+        // puts("\nLDR|INFO:              entry  : ");
+        // puthex64(loader_data->kernel_data[i].v_entry);
+        // puts("\n");
 
-        seL4_KernelBootInfo *bootinfo = &kernel_boot_infos[i].info;
+        seL4_KernelBootInfo *bootinfo = &loader_data->kernel_bootinfos_and_regions[i].info;
 
-        bootinfo->magic = SEL4_KERNEL_BOOT_INFO_MAGIC;
-        bootinfo->version = SEL4_KERNEL_BOOT_INFO_VERSION_0;
-        bootinfo->root_task_entry = loader_data->kernel_data[i].v_entry;
-
-        bootinfo->num_kernel_regions = 0;
-        bootinfo->num_ram_regions = 0;
-        bootinfo->num_root_task_regions = 1;
-        bootinfo->num_reserved_regions = 1;
-
-        void *descriptor_mem = &kernel_boot_infos[i].descriptor_memory;
+        void *descriptor_mem = &loader_data->kernel_bootinfos_and_regions[i].descriptor_memory;
         seL4_KernelBoot_KernelRegion *kernel_regions = descriptor_mem;
         seL4_KernelBoot_RamRegion *ram_regions = (void *)((uintptr_t)kernel_regions + (bootinfo->num_kernel_regions * sizeof(seL4_KernelBoot_KernelRegion)));
         seL4_KernelBoot_RootTaskRegion *root_task_regions = (void *)((uintptr_t)ram_regions + (bootinfo->num_ram_regions * sizeof(seL4_KernelBoot_RamRegion)));
         seL4_KernelBoot_ReservedRegion *reserved_regions = (void *)((uintptr_t)root_task_regions + (bootinfo->num_root_task_regions * sizeof(seL4_KernelBoot_RootTaskRegion)));
 
-        root_task_regions[0].paddr_base = loader_data->kernel_data[i].ui_p_reg_start;
-        root_task_regions[0].paddr_end = loader_data->kernel_data[i].ui_p_reg_end;
-        root_task_regions[0].vaddr_base = loader_data->kernel_data[i].ui_p_reg_start - loader_data->kernel_data[i].pv_offset;
-
-        // Actually this is just another root task region? kinda
-        // but that would break microkit.
-        reserved_regions[0].base = loader_data->kernel_data[i].extra_device_addr_p;
-        reserved_regions[0].end = loader_data->kernel_data[i].extra_device_addr_p + loader_data->kernel_data[i].extra_device_size;
-
-        // TODO: RAM.
-        // TODO: Kenrel.
-        // TODO: Reserved.
-
-        loader_data->kernel_data[i].kernel_boot_info_p = bootinfo;
+        // TODO: print.
     }
 
     for (uint32_t i = 0; i < loader_data->num_regions; i++) {
@@ -728,14 +694,15 @@ static void start_kernel(int id)
     puts("LDR|INFO: Kernel starting: ");
     putc(id + '0');
     puts("\n\thas entry point: ");
-    puthex64(loader_data->kernel_data[id].kernel_entry);
+    // puthex64(loader_data->kernel_data[id].kernel_entry);
+    puthex64(0x000000ffff000000);
     puts("\n");
     puts("\thas kernel_boot_info_p: ");
-    puthex64(loader_data->kernel_data[id].kernel_boot_info_p);
+    puthex64((uintptr_t)&loader_data->kernel_bootinfos_and_regions[id].info);
     puts("\n");
         
-    ((sel4_entry)(loader_data->kernel_data[id].kernel_entry))(
-        loader_data->kernel_data[id].kernel_boot_info_p
+    ((sel4_entry)(0x000000ffff000000))(
+        (uintptr_t)&loader_data->kernel_bootinfos_and_regions[id].info
     );
 }
 
@@ -1078,7 +1045,7 @@ int main(void)
         v[i] = 0;
     }
 
-    regions = (void *) &(loader_data->kernel_data[loader_data->num_kernels]);
+    regions = (void *) &(loader_data->kernel_bootinfos_and_regions[loader_data->num_kernels]);
 
 #ifdef ARCH_riscv64
     puts("LDR|INFO: configured with FIRST_HART_ID ");

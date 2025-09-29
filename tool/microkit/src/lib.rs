@@ -9,6 +9,7 @@ pub mod loader;
 pub mod sdf;
 pub mod sel4;
 pub mod util;
+pub mod kernel_bootinfo;
 
 use std::cmp::min;
 use std::fmt;
@@ -159,7 +160,7 @@ impl MemoryRegion {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct DisjointMemoryRegion {
     pub regions: Vec<MemoryRegion>,
 }
