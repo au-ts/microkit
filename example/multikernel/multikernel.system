@@ -5,19 +5,18 @@
  SPDX-License-Identifier: BSD-2-Clause
 -->
 <system>
-    <!-- TODO: Shared memory. -->
-
     <protection_domain name="core0_A" priority="254" cpu="0" >
         <program_image path="core0.elf" />
     </protection_domain>
 
-    <protection_domain name="core0_B" priority="254" cpu="0" >
+    <protection_domain name="core0_B" priority="253" cpu="0" >
         <program_image path="core0.elf" />
     </protection_domain>
 
     <channel>
-        <end pd="core0_A" id="5"  />
-        <end pd="core0_B" id="5" />
+        <end pd="core0_A" id="5" />
+        <!-- to check ppc are ok on same core -->
+        <end pd="core0_B" id="5" pp="true" />
     </channel>
 
     <protection_domain name="core1" priority="254" cpu="1" >

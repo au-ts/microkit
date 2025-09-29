@@ -539,3 +539,24 @@ mod system {
         )
     }
 }
+
+#[cfg(test)]
+mod multikernel {
+    use super::*;
+
+    #[test]
+    fn test_cross_core_ppcs() {
+        check_error(
+            "multikernel_cross_core_ppc.system",
+            "Error: PPCs are not allowed across cores on multikernels; channel with PPC exists from pd test2 (cpu: 1) to pd test1 (cpu: 0)",
+        )
+    }
+
+    #[test]
+    fn test_cross_core_parenthood() {
+        check_error(
+            "multikernel_cross_core_parenthood.system",
+            "Error: children of a parent are not allowed to exist on a different system on multikernel; found child test2 (cpu: 1) underneath parent test1 (cpu: 0)",
+        )
+    }
+}

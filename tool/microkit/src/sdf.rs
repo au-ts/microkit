@@ -662,7 +662,15 @@ impl ProtectionDomain {
                     })
                 }
                 "protection_domain" => {
-                    child_pds.push(ProtectionDomain::from_xml(config, xml_sdf, &child, true)?)
+                    let child_pd = ProtectionDomain::from_xml(config, xml_sdf, &child, true)?;
+
+                    if child_pd.cpu != cpu {
+                        return Err(format!(
+                            "Error: children of a parent are not allowed to exist on a different system on multikernel; \
+                                found child {} (cpu: {}) underneath parent {} (cpu: {})", child_pd.name, child_pd.cpu, name, cpu));
+                    }
+
+                    child_pds.push(child_pd);
                 }
                 "virtual_machine" => {
                     if virtual_machine.is_some() {
@@ -1397,6 +1405,18 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
                 "Error: PPCs must be to protection domains of strictly higher priorities; \
                         channel with PPC exists from pd {} (priority: {}) to pd {} (priority: {})",
                 pd_b.name, pd_b.priority, pd_a.name, pd_a.priority
+            ));
+        } else if ch.end_a.pp && pd_a.cpu != pd_b.cpu {
+            return Err(format!(
+                "Error: PPCs are not allowed across cores on multikernels; \
+                        channel with PPC exists from pd {} (cpu: {}) to pd {} (cpu: {})",
+                pd_a.name, pd_a.cpu, pd_b.name, pd_b.cpu,
+            ));
+        } else if ch.end_b.pp && pd_a.cpu != pd_b.cpu {
+            return Err(format!(
+                "Error: PPCs are not allowed across cores on multikernels; \
+                        channel with PPC exists from pd {} (cpu: {}) to pd {} (cpu: {})",
+                pd_b.name, pd_b.cpu, pd_a.name, pd_a.cpu,
             ));
         }
 
