@@ -545,6 +545,7 @@ fn kernel_partial_boot(
         //      Because it is, we pick follow arch_init_coremem() which sets up
         //      just this one region.
 
+        // XXX: What value is this?
         let kernel_elf_sized_align = 0x1000000;
         let start = kernel_config.normal_regions[0].start + (cpu) * kernel_elf_sized_align;
         physical_memory.insert_region(start, start + kernel_elf_sized_align);
@@ -3650,13 +3651,16 @@ fn main() -> Result<(), String> {
 
         // Take all the memory regions used on multiple cores and make them shared.
 
-        let mut shared_phys_addr_next = 0x5300000;
-
+        // XXX: Choosing this address is somewhat of a hack.
+        let mut shared_phys_addr_prev = kernel_config.normal_regions[0].end;
         let mut memory_regions = vec![];
         for mut mr in system.memory_regions {
             if mr.used_cores.len() > 1 {
-                mr.phys_addr = Some(shared_phys_addr_next);
-                shared_phys_addr_next += mr.size;
+                shared_phys_addr_prev -= mr.size;
+                // XXXX: These might conflict if you specify regions in phys mem.
+                if mr.phys_addr.is_none() {
+                    mr.phys_addr = Some(shared_phys_addr_prev);
+                }
             }
 
             memory_regions.push(mr);
