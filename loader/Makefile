@@ -51,7 +51,7 @@ else ifeq ($(ARCH),riscv64)
 	ARCH_DIR := riscv
 endif
 
-CFLAGS := -std=gnu11 -g -O3 -nostdlib -ffreestanding $(CFLAGS_ARCH) -DBOARD_$(BOARD) -DPRINTING=$(PRINTING) -DNUM_MULTIKERNELS=$(NUM_MULTIKERNELS) -Wall -Wno-unused-function -I/home/julia/ts/multikernel/microkit/build/qemu_virt_aarch64_multikernel/debug/sel4/install/libsel4/include
+CFLAGS := -std=gnu11 -g -O3 -nostdlib -ffreestanding $(CFLAGS_ARCH) -DBOARD_$(BOARD) -DPRINTING=$(PRINTING) -DNUM_MULTIKERNELS=$(NUM_MULTIKERNELS) -Wall -Wno-unused-function -I$(SEL4_SDK)/include
 
 ASM_FLAGS := $(ASM_FLAGS_ARCH) -g
 
