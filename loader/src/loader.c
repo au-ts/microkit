@@ -1040,19 +1040,6 @@ int main(void)
         goto fail;
     }
 
-    puts("LDR|INFO: zeroing out all of memory\n");
-    // XXX: actually zeroing all of memory zeros useful info.
-    char *v = 0x50000000;
-    for (int i = 0; (v + i) < 0x60000000; i++) {
-        v[i] = 0;
-
-        if (i % 0x1000000 == 0) {
-            puts("i is ");
-            puthex32(i);
-            puts("\n");
-        }
-    }
-
     regions = (void *) &(loader_data->kernel_bootinfos_and_regions[loader_data->num_kernels]);
 
 #ifdef ARCH_riscv64
