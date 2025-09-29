@@ -111,6 +111,7 @@ struct LoaderRegion64 {
     r#type: u64,
 }
 
+// struct loader_data
 #[repr(C)]
 struct LoaderHeader64 {
     magic: u64,
@@ -118,6 +119,7 @@ struct LoaderHeader64 {
     flags: u64,
     num_multikernels: u64,
     num_regions: u64,
+    kernel_v_entry: u64,
 }
 
 pub struct Loader<'a> {
@@ -420,6 +422,7 @@ impl<'a> Loader<'a> {
             flags,
             num_multikernels: num_multikernels as u64,
             num_regions: region_metadata.len() as u64,
+            kernel_v_entry: kernel_elf.entry,
         };
 
         Loader {

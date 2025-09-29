@@ -62,7 +62,7 @@ struct region {
 
 struct KernelBootInfoAndRegions {
     seL4_KernelBootInfo info;
-    uint8_t descriptor_memory[4096 - sizeof(seL4_KernelBootInfo)];
+    uint8_t regions_memory[4096 - sizeof(seL4_KernelBootInfo)];
 };
 
 _Static_assert(sizeof(struct KernelBootInfoAndRegions) == 0x1000);
@@ -74,6 +74,7 @@ struct loader_data {
     uintptr_t flags;
     uintptr_t num_kernels;
     uintptr_t num_regions;
+    uintptr_t kernel_v_entry;
     struct KernelBootInfoAndRegions kernel_bootinfos_and_regions[];
 };
 
@@ -591,7 +592,7 @@ static void print_loader_data(void)
 
         seL4_KernelBootInfo *bootinfo = &loader_data->kernel_bootinfos_and_regions[i].info;
 
-        void *descriptor_mem = &loader_data->kernel_bootinfos_and_regions[i].descriptor_memory;
+        void *descriptor_mem = &loader_data->kernel_bootinfos_and_regions[i].regions_memory;
         seL4_KernelBoot_KernelRegion *kernel_regions = descriptor_mem;
         seL4_KernelBoot_RamRegion *ram_regions = (void *)((uintptr_t)kernel_regions + (bootinfo->num_kernel_regions * sizeof(seL4_KernelBoot_KernelRegion)));
         seL4_KernelBoot_RootTaskRegion *root_task_regions = (void *)((uintptr_t)ram_regions + (bootinfo->num_ram_regions * sizeof(seL4_KernelBoot_RamRegion)));
@@ -694,14 +695,13 @@ static void start_kernel(int id)
     puts("LDR|INFO: Kernel starting: ");
     putc(id + '0');
     puts("\n\thas entry point: ");
-    // puthex64(loader_data->kernel_data[id].kernel_entry);
-    puthex64(0x000000ffff000000);
+    puthex64(loader_data->kernel_v_entry);
     puts("\n");
     puts("\thas kernel_boot_info_p: ");
     puthex64((uintptr_t)&loader_data->kernel_bootinfos_and_regions[id].info);
     puts("\n");
         
-    ((sel4_entry)(0x000000ffff000000))(
+    ((sel4_entry)(loader_data->kernel_v_entry))(
         (uintptr_t)&loader_data->kernel_bootinfos_and_regions[id].info
     );
 }
