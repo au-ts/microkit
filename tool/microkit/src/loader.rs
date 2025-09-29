@@ -366,7 +366,7 @@ impl<'a> Loader<'a> {
                     paddr_base: ui_p_reg_start,
                     paddr_end: ui_p_reg_end,
                     vaddr_base: ui_p_reg_start.wrapping_sub(pv_offset),
-                    _padding: [0; _],
+                    _padding: [0; 8],
                 },
             ];
             let reserved_regions = vec![
@@ -380,7 +380,7 @@ impl<'a> Loader<'a> {
             let info = seL4_KernelBootInfo {
                 magic: SEL4_KERNEL_BOOT_INFO_MAGIC,
                 version: SEL4_KERNEL_BOOT_INFO_VERSION_0,
-                _padding0: [0; _],
+                _padding0: [0; 3],
                 root_task_entry,
                 num_kernel_regions: kernel_regions
                     .len()
@@ -398,7 +398,7 @@ impl<'a> Loader<'a> {
                     .len()
                     .try_into()
                     .expect("cannot fit # reserved regions into u8"),
-                _padding: [0; _],
+                _padding: [0; 4],
             };
 
             kernel_bootinfos.push((
