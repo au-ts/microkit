@@ -234,7 +234,7 @@ impl<'a> Loader<'a> {
             let inittask_last_vaddr = round_up(segment.virt_addr + segment.mem_size(), kb(4));
 
             let inittask_first_paddr = initial_task_phys_base[multikernel_idx];
-            let inittask_p_v_offset = inittask_first_vaddr - inittask_first_paddr;
+            let inittask_p_v_offset = inittask_first_vaddr.wrapping_sub(inittask_first_paddr);
 
             // Note: For now we include any zeroes. We could optimize in the future
             regions.push((inittask_first_paddr, &segment.data));
@@ -242,7 +242,7 @@ impl<'a> Loader<'a> {
             let pv_offset = inittask_first_paddr.wrapping_sub(inittask_first_vaddr);
 
             let ui_p_reg_start = inittask_first_paddr;
-            let ui_p_reg_end = inittask_last_vaddr - inittask_p_v_offset;
+            let ui_p_reg_end = inittask_last_vaddr.wrapping_sub(inittask_p_v_offset);
             assert!(ui_p_reg_end > ui_p_reg_start);
 
             let v_entry = initial_task_elf.entry;
