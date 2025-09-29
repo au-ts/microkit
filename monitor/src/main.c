@@ -1227,5 +1227,12 @@ void main(seL4_BootInfo *bi)
 
     puts("MON|INFO: completed system invocations\n");
 
+    if (fault_ep == seL4_CapNull) {
+        puts("MON|INFO: core has no PDs, sleeping\n");
+        for (;;) {
+            seL4_Yield();
+        }
+    }
+
     monitor();
 }

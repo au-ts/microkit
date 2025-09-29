@@ -989,6 +989,36 @@ fn build_system(
         reserved_region,
     );
 
+    if protection_domains.len() == 0 {
+        // No PDs on this core.
+        return Ok(BuiltSystem {
+            // Values needed for the kernel boot.
+            kernel_boot_info,
+            reserved_region,
+            useable_physical_memory,
+            initial_task_phys_region,
+            initial_task_virt_region,
+            // Dummy values as nothing to do.
+            number_of_system_caps: 0,
+            invocation_data_size: 0,
+            invocation_data: vec![],
+            bootstrap_invocations: vec![],
+            system_invocations: vec![],
+            fault_ep_cap_address: 0,
+            reply_cap_address: 0,
+            cap_lookup: BTreeMap::new(),
+            pd_tcb_caps: vec![],
+            vm_tcb_caps: vec![],
+            sched_caps: vec![],
+            ntfn_caps: vec![],
+            pd_elf_regions: BTreeMap::new(),
+            pd_setvar_values: BTreeMap::new(),
+            pd_stack_addrs: vec![],
+            kernel_objects: vec![],
+        });
+    }
+
+
     for ut in &kernel_boot_info.untyped_objects {
         let dev_str = if ut.is_device { " (device)" } else { "" };
         let ut_str = format!(
