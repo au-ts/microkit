@@ -361,7 +361,6 @@ struct BuiltSystem {
     system_invocations: Vec<Invocation>,
     kernel_boot_info: BootInfo,
     reserved_region: MemoryRegion,
-    useable_physical_memory: DisjointMemoryRegion,
     fault_ep_cap_address: u64,
     reply_cap_address: u64,
     cap_lookup: BTreeMap<u64, String>,
@@ -509,7 +508,6 @@ struct KernelPartialBootInfo {
     normal_memory: DisjointMemoryRegion,
     kernel_p_v_offset: u64,
     boot_region: MemoryRegion,
-    useable_physical_memory: DisjointMemoryRegion,
 }
 
 ///
@@ -522,7 +520,8 @@ struct KernelPartialBootInfo {
 fn kernel_partial_boot(
     kernel_config: &Config,
     kernel_elf: &ElfFile,
-    cpu: u64,
+    full_system_state: &FullSystemState,
+    cpu: CpuCore,
 ) -> KernelPartialBootInfo {
     // Determine the untyped caps of the system
     // This lets allocations happen correctly.
@@ -537,21 +536,11 @@ fn kernel_partial_boot(
     //       Multikernel: Also follows arch_init_coremem() for subset physical memory.
     // =====
 
-    // Done before map_kernel_window()
-    let useable_physical_memory = {
-        let mut physical_memory = DisjointMemoryRegion::default();
-
-        // XXX: If this wasn't multikernel, iterate over all normal regions.
-        //      Because it is, we pick follow arch_init_coremem() which sets up
-        //      just this one region.
-
-        // XXX: What value is this?
-        let kernel_elf_sized_align = 0x1000000;
-        let start = kernel_config.normal_regions[0].start + (cpu) * kernel_elf_sized_align;
-        physical_memory.insert_region(start, start + kernel_elf_sized_align);
-
-        physical_memory
-    };
+    // Passed to the kernel
+    let ram_regions = full_system_state
+        .per_core_ram_regions
+        .get(&cpu)
+        .expect("INTERNAL: should have chosen RAM for a core we are booting");
 
     // Done during map_kernel_window(): Remove any kernel-reserved device regions
     for region in kernel_config.kernel_devices.iter() {
@@ -576,7 +565,7 @@ fn kernel_partial_boot(
             .expect("Could not find 'ki_end' symbol");
 
         // nb: Picked from the base of the available regions computed above.
-        let kernel_first_paddr = useable_physical_memory.regions[0].base;
+        let kernel_first_paddr = ram_regions.regions[0].base;
         let kernel_p_v_offset = kernel_first_vaddr - kernel_first_paddr;
 
         println!("Kernel First Paddr: {:x}", kernel_first_paddr);
@@ -601,7 +590,7 @@ fn kernel_partial_boot(
     // Actually remove it.
     reserved_regions.insert_region(kernel_region.base, kernel_region.end);
 
-    let mut available_regions = useable_physical_memory.clone();
+    let mut available_regions = ram_regions.clone();
 
     // ============ init_freemem()
 
@@ -716,21 +705,17 @@ fn kernel_partial_boot(
         normal_memory,
         kernel_p_v_offset,
         boot_region,
-        useable_physical_memory,
     }
 }
 
 fn emulate_kernel_boot_partial(
     kernel_config: &Config,
     kernel_elf: &ElfFile,
-    cpu: u64,
-) -> (DisjointMemoryRegion, MemoryRegion, DisjointMemoryRegion) {
-    let partial_info = kernel_partial_boot(kernel_config, kernel_elf, cpu);
-    (
-        partial_info.normal_memory,
-        partial_info.boot_region,
-        partial_info.useable_physical_memory,
-    )
+    full_system_state: &FullSystemState,
+    cpu: CpuCore,
+) -> (DisjointMemoryRegion, MemoryRegion) {
+    let partial_info = kernel_partial_boot(kernel_config, kernel_elf, full_system_state, cpu);
+    (partial_info.normal_memory, partial_info.boot_region)
 }
 
 fn get_n_paging(region: MemoryRegion, bits: u64) -> u64 {
@@ -807,13 +792,14 @@ fn calculate_rootserver_size(config: &Config, initial_task_region: MemoryRegion)
 fn emulate_kernel_boot(
     config: &Config,
     kernel_elf: &ElfFile,
-    cpu: u64,
+    full_system_state: &FullSystemState,
+    cpu: CpuCore,
     initial_task_phys_region: MemoryRegion,
     initial_task_virt_region: MemoryRegion,
     reserved_region: MemoryRegion,
 ) -> BootInfo {
     assert!(initial_task_phys_region.size() == initial_task_virt_region.size());
-    let partial_info = kernel_partial_boot(config, kernel_elf, cpu);
+    let partial_info = kernel_partial_boot(config, kernel_elf, full_system_state, cpu);
     let mut normal_memory = partial_info.normal_memory;
     let device_memory = partial_info.device_memory;
     let boot_region = partial_info.boot_region;
@@ -892,10 +878,14 @@ fn emulate_kernel_boot(
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct CpuCore(u64);
+
 #[derive(Debug)]
 struct FullSystemState {
     sgi_irq_numbers: BTreeMap<ChannelEnd, u64>,
     memory_regions: Vec<SysMemoryRegion>,
+    per_core_ram_regions: BTreeMap<CpuCore, DisjointMemoryRegion>,
 }
 
 fn build_system(
@@ -908,7 +898,7 @@ fn build_system(
     memory_regions: &[&SysMemoryRegion],
     channels: &[Channel],
     full_system_state: &FullSystemState,
-    cpu: u64,
+    cpu: CpuCore,
     invocation_table_size: u64,
     system_cnode_size: u64,
 ) -> Result<BuiltSystem, String> {
@@ -948,8 +938,8 @@ fn build_system(
 
     // Now that the size is determined, find a free region in the physical memory
     // space.
-    let (mut available_memory, kernel_boot_region, useable_physical_memory) =
-        emulate_kernel_boot_partial(config, kernel_elf, cpu);
+    let (mut available_memory, kernel_boot_region) =
+        emulate_kernel_boot_partial(config, kernel_elf, full_system_state, cpu);
 
     // The kernel relies on the reserved region being allocated above the kernel
     // boot/ELF region, so we have the end of the kernel boot region as the lower
@@ -983,6 +973,7 @@ fn build_system(
     let kernel_boot_info = emulate_kernel_boot(
         config,
         kernel_elf,
+        full_system_state,
         cpu,
         initial_task_phys_region,
         initial_task_virt_region,
@@ -995,7 +986,6 @@ fn build_system(
             // Values needed for the kernel boot.
             kernel_boot_info,
             reserved_region,
-            useable_physical_memory,
             initial_task_phys_region,
             initial_task_virt_region,
             // Dummy values as nothing to do.
@@ -3103,7 +3093,6 @@ fn build_system(
         system_invocations,
         kernel_boot_info,
         reserved_region,
-        useable_physical_memory,
         fault_ep_cap_address: fault_ep_endpoint_object.cap_addr,
         reply_cap_address: reply_obj.cap_addr,
         cap_lookup: cap_address_names,
@@ -3704,6 +3693,27 @@ fn main() -> Result<(), String> {
             std::process::exit(1);
         }
 
+        let per_core_ram_regions = {
+            let mut per_core_regions = BTreeMap::new();
+
+            // TODO: Handle discontiguous normal memory better.
+            let mut ram_start = kernel_config.normal_regions[0].start;
+
+            /* 128 MiB. TODO: Don't hardcode. */
+            const NORMAL_MEMORY_PER_CORE: u64 = 128 * 1024 * 1024;
+
+            for cpu in 0..num_multikernels as u64 {
+                let mut ram = DisjointMemoryRegion::default();
+                ram.insert_region(ram_start, ram_start + NORMAL_MEMORY_PER_CORE);
+                per_core_regions.insert(CpuCore(cpu), ram);
+
+                ram_start += NORMAL_MEMORY_PER_CORE;
+                assert!(ram_start <= kernel_config.normal_regions[0].end);
+            }
+
+            per_core_regions
+        };
+
         // Take all the memory regions used on multiple cores and make them shared.
 
         // XXX: Choosing this address is somewhat of a hack.
@@ -3724,6 +3734,7 @@ fn main() -> Result<(), String> {
         FullSystemState {
             sgi_irq_numbers,
             memory_regions,
+            per_core_ram_regions,
         }
     };
 
@@ -3788,7 +3799,7 @@ fn main() -> Result<(), String> {
                 &memory_regions_for_core,
                 &system.channels,
                 &full_system_state,
-                core,
+                CpuCore(core),
                 invocation_table_size,
                 system_cnode_size,
             )?;
@@ -4024,9 +4035,9 @@ fn main() -> Result<(), String> {
             .map(|bs| bs.reserved_region)
             .collect::<Vec<_>>(),
         loader_regions,
-        &built_systems
-            .iter()
-            .map(|bs| &bs.useable_physical_memory.regions[..])
+        &full_system_state.per_core_ram_regions
+            .values()
+            .map(|disjoint_mem| &disjoint_mem.regions[..])
             .collect::<Vec<_>>()[..],
     );
     println!("Made image");

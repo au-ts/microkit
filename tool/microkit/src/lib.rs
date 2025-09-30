@@ -160,7 +160,7 @@ impl MemoryRegion {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct DisjointMemoryRegion {
     pub regions: Vec<MemoryRegion>,
 }

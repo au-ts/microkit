@@ -160,7 +160,7 @@ impl<'a> Loader<'a> {
         initial_task_phys_base: &[u64],
         reserved_regions: &[MemoryRegion],
         system_regions: Vec<(u64, &'a [u8])>,
-        useable_physical_memory_regions: &[&[MemoryRegion]],
+        per_core_ram_regions: &[&[MemoryRegion]],
     ) -> Loader<'a> {
         // Note: If initial_task_phys_base is not None, then it just this address
         // as the base physical address of the initial task, rather than the address
@@ -369,7 +369,7 @@ impl<'a> Loader<'a> {
         ) in zip(
             initial_task_info,
             zip(
-                useable_physical_memory_regions,
+                per_core_ram_regions,
                 zip(reserved_regions, kernel_first_paddrs),
             ),
         ) {
