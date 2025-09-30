@@ -87,18 +87,31 @@ impl Riscv64 {
 
 /// Checks that each region in the given list does not overlap with any other region.
 /// Panics upon finding an overlapping region
-fn check_non_overlapping(regions: &Vec<(u64, &[u8])>) {
+fn check_non_overlapping(regions: &Vec<(u64, &[u8], String)>) {
     let mut checked: Vec<(u64, u64)> = Vec::new();
-    for (base, data) in regions {
+    for &(base, data, _) in regions {
         let end = base + data.len() as u64;
         // Check that this does not overlap with any checked regions
-        for (b, e) in &checked {
-            if !(end <= *b || *base >= *e) {
-                panic!("Overlapping regions: [{base:x}..{end:x}) overlaps [{b:x}..{e:x})");
+        for &(b, e) in checked.iter() {
+            if !(end <= b || base >= e) {
+                // XXX: internal error?
+                eprintln!("Overlapping regions: [{base:x}..{end:x}) overlaps [{b:x}..{e:x})");
+
+                for (i, &(base_i, data, ref name)) in regions.iter().enumerate() {
+                    let end_i = base_i + data.len() as u64;
+                    eprint!("{i:>4}: [{base_i:#x}..{end_i:#x}) {name:<20}");
+                    if (base == base_i && end == end_i) || (b == base_i && e == end_i) {
+                        eprintln!(" (overlapping)");
+                    } else {
+                        eprintln!();
+                    }
+                }
+
+                std::process::exit(1);
             }
         }
 
-        checked.push((*base, end));
+        checked.push((base, end));
     }
 }
 
@@ -134,7 +147,7 @@ pub struct Loader<'a> {
         Vec<seL4_KernelBoot_ReservedRegion>,
     )>,
     region_metadata: Vec<LoaderRegion64>,
-    regions: Vec<(u64, &'a [u8])>,
+    regions: Vec<(u64, &'a [u8], String)>,
 }
 
 impl<'a> Loader<'a> {
@@ -181,7 +194,7 @@ impl<'a> Loader<'a> {
         assert!(num_multikernels > 0);
 
         let mut kernel_regions = Vec::new();
-        let mut regions: Vec<(u64, &'a [u8])> = Vec::new();
+        let mut inittask_regions: Vec<(u64, &'a [u8])> = Vec::new();
 
         // Delete it.
         #[allow(unused_variables)]
@@ -231,7 +244,7 @@ impl<'a> Loader<'a> {
             let inittask_p_v_offset = inittask_first_vaddr.wrapping_sub(inittask_first_paddr);
 
             // Note: For now we include any zeroes. We could optimize in the future
-            regions.push((inittask_first_paddr, &segment.data));
+            inittask_regions.push((inittask_first_paddr, &segment.data));
 
             let pv_offset = inittask_first_paddr.wrapping_sub(inittask_first_vaddr);
 
@@ -300,22 +313,30 @@ impl<'a> Loader<'a> {
         }
 
         println!(
-            "There are {} regions and {} kernel regions and {} system regions",
-            regions.len(),
+            "There are {} inittask regions and {} kernel regions and {} system regions",
+            inittask_regions.len(),
             kernel_regions.len(),
             system_regions.len()
         );
-        let mut all_regions = Vec::with_capacity(regions.len() + system_regions.len());
-        all_regions.extend(kernel_regions);
-        for region_set in [&regions, &system_regions] {
-            for r in region_set {
-                all_regions.push(*r);
-            }
+        let mut all_regions: Vec<(u64, &[u8], String)> = Vec::with_capacity(
+            inittask_regions.len() + system_regions.len() + kernel_regions.len(),
+        );
+        all_regions.extend(
+            kernel_regions
+                .iter()
+                .enumerate()
+                .map(|(i, kr)| (kr.0, kr.1, format!("kernel {i}"))),
+        );
+        for &(base, data) in inittask_regions.iter() {
+            all_regions.push((base, data, format!("Initial task region")));
+        }
+        for (i, &(base, data)) in system_regions.iter().enumerate() {
+            all_regions.push((base, data, format!("System region {i}")));
         }
 
         let mut all_regions_with_loader = all_regions.clone();
-        println!("Image vaddr at: {:x}", image_vaddr);
-        all_regions_with_loader.push((image_vaddr, &image));
+        println!("Loader image vaddr at: {:x}", image_vaddr);
+        all_regions_with_loader.push((image_vaddr, &image, format!("Loader")));
         check_non_overlapping(&all_regions_with_loader);
 
         let flags = match config.hypervisor {
@@ -325,7 +346,7 @@ impl<'a> Loader<'a> {
 
         let mut region_metadata = Vec::new();
         let mut offset: u64 = 0;
-        for (addr, data) in &all_regions {
+        for (addr, data, _) in &all_regions {
             println!(
                 "Adding region at {:x} size {:x} and offset {:x}",
                 *addr,
@@ -347,7 +368,10 @@ impl<'a> Loader<'a> {
             (&ram_regions, (extra_device_region, kernel_first_paddr)),
         ) in zip(
             initial_task_info,
-            zip(useable_physical_memory_regions, zip(reserved_regions, kernel_first_paddrs)),
+            zip(
+                useable_physical_memory_regions,
+                zip(reserved_regions, kernel_first_paddrs),
+            ),
         ) {
             let kernel_regions = vec![seL4_KernelBoot_KernelRegion {
                 base: kernel_first_paddr,
@@ -509,7 +533,7 @@ impl<'a> Loader<'a> {
         }
 
         // Now we can write out all the region data
-        for (_, data) in &self.regions {
+        for (_, data, _) in &self.regions {
             loader_buf
                 .write_all(data)
                 .expect("Failed to write region data to loader");
