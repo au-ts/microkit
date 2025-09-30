@@ -546,7 +546,7 @@ fn kernel_partial_boot(
         //      just this one region.
 
         // XXX: What value is this?
-        let kernel_elf_sized_align = 0x1000000;
+        let kernel_elf_sized_align = 0x10000000;
         let start = kernel_config.normal_regions[0].start + (cpu) * kernel_elf_sized_align;
         physical_memory.insert_region(start, start + kernel_elf_sized_align);
 
