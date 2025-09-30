@@ -3650,7 +3650,7 @@ fn main() -> Result<(), String> {
         // TODO: 8 for GICv2, 16 for GICv3, xx: other platforms.
         const NUMBER_SGI_IRQ: u64 = 8;
 
-        let mut next_sgi_irq = NUMBER_SGI_IRQ - 1;
+        let mut prev_sgi_irq = NUMBER_SGI_IRQ;
         let mut sgi_irq_numbers = BTreeMap::<ChannelEnd, u64>::new();
         let mut failure = false;
 
@@ -3677,15 +3677,14 @@ fn main() -> Result<(), String> {
             // XXX: If the seL4 API allowed multiple targets we could do bidirectional
             //      by reusing the same SGI.
 
-            sgi_irq_numbers.insert(recv.clone(), next_sgi_irq);
-
-            next_sgi_irq = match next_sgi_irq.checked_sub(1) {
-                Some(v) => v,
-                None => {
-                    failure = true;
-                    break;
-                }
+            let Some(sgi_irq) = prev_sgi_irq.checked_sub(1) else {
+                failure = true;
+                break;
             };
+
+            sgi_irq_numbers.insert(recv.clone(), sgi_irq);
+
+            prev_sgi_irq = sgi_irq;
         }
 
         if failure {
