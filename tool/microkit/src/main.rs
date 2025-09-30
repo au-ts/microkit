@@ -300,7 +300,7 @@ impl<'a> InitSystem<'a> {
                              .unwrap_or_else(|| {
                                     let (human_size, human_size_label) = human_size_strict(alloc_size * count);
                                     let (human_max_alloc, human_max_alloc_label) = human_size_strict(self.normal_untyped.max_alloc_size());
-                                    eprintln!("ERROR: failed to allocate objects for '{}' of object type '{}'", names[0], object_type.to_str());
+                                    eprintln!("ERROR: failed to allocate {count} objects for '{}' of object type '{}'", names[0], object_type.to_str());
                                     if alloc_size * count > self.normal_untyped.max_alloc_size() {
                                         eprintln!("ERROR: allocation size ({human_size} {human_size_label}) is greater than current maximum size for a single allocation ({human_max_alloc} {human_max_alloc_label})");
                                     }
