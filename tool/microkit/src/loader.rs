@@ -365,19 +365,20 @@ impl<'a> Loader<'a> {
         let mut kernel_bootinfos = Vec::new();
         for (
             (pv_offset, ui_p_reg_start, ui_p_reg_end, root_task_entry),
-            (&ram_regions, (extra_device_region, kernel_first_paddr)),
+            (&raw_ram_regions, (extra_device_region, kernel_first_paddr)),
         ) in zip(
             initial_task_info,
             zip(
                 per_core_ram_regions,
-                zip(reserved_regions, kernel_first_paddrs),
+                zip(reserved_regions, kernel_first_paddrs.iter()),
             ),
         ) {
             let kernel_regions = vec![seL4_KernelBoot_KernelRegion {
-                base: kernel_first_paddr,
+                base: *kernel_first_paddr,
+                // TODO
                 end: 0,
             }];
-            let ram_regions = ram_regions
+            let ram_regions = raw_ram_regions
                 .iter()
                 .map(|r| seL4_KernelBoot_RamRegion {
                     base: r.base,
@@ -393,13 +394,25 @@ impl<'a> Loader<'a> {
                     _padding: [0; 8],
                 },
             ];
-            let reserved_regions = vec![
-                // TODO: kernels on other cores
-                seL4_KernelBoot_ReservedRegion {
-                    base: extra_device_region.base,
-                    end: extra_device_region.end,
-                },
-            ];
+            let mut reserved_regions = vec![seL4_KernelBoot_ReservedRegion {
+                base: extra_device_region.base,
+                end: extra_device_region.end,
+            }];
+            // "Normal memory" and "kernel memory" (usually a subset of normal), i.e. "RAM"
+            // available to each core must be reserved so that kernels don't rely on
+            // memory available to other (e.g. for kernel-internal structures)
+            for other_core_ram in per_core_ram_regions
+                .iter()
+                .filter(|&&regions| regions != raw_ram_regions)
+            {
+                for region in other_core_ram.iter() {
+                    reserved_regions.push(seL4_KernelBoot_ReservedRegion {
+                        base: region.base,
+                        end: region.end,
+                    });
+                }
+            }
+            assert!(reserved_regions.len() == 1 + per_core_ram_regions.len() - 1);
 
             let info = seL4_KernelBootInfo {
                 magic: SEL4_KERNEL_BOOT_INFO_MAGIC,

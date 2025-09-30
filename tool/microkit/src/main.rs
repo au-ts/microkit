@@ -510,6 +510,40 @@ struct KernelPartialBootInfo {
     boot_region: MemoryRegion,
 }
 
+fn kernel_calculate_phys_image(
+    kernel_elf: &ElfFile,
+    ram_regions: &DisjointMemoryRegion,
+) -> (MemoryRegion, MemoryRegion, u64) {
+    // Calculate where the kernel image region is
+    let kernel_loadable_segments = kernel_elf.loadable_segments();
+    let kernel_first_vaddr = kernel_loadable_segments
+        .first()
+        .expect("kernel has at least one loadable segment")
+        .virt_addr;
+    let (kernel_last_vaddr, _) = kernel_elf
+        .find_symbol("ki_end")
+        .expect("Could not find 'ki_end' symbol");
+
+    // nb: Picked arbitarily
+    let kernel_first_paddr = ram_regions.regions[0].base;
+    let kernel_p_v_offset = kernel_first_vaddr - kernel_first_paddr;
+
+    // Remove the kernel image.
+    let kernel_last_paddr = kernel_last_vaddr - kernel_p_v_offset;
+    let kernel_region = MemoryRegion::new(kernel_first_paddr, kernel_last_paddr);
+
+    // but get the boot region, we'll add that back later
+    // FIXME: Why calcaultae it now if we add it back later?
+    let (ki_boot_end_v, _) = kernel_elf
+        .find_symbol("ki_boot_end")
+        .expect("Could not find 'ki_boot_end' symbol");
+    assert!(ki_boot_end_v < kernel_last_vaddr);
+    let ki_boot_end_p = ki_boot_end_v - kernel_p_v_offset;
+    let boot_region = MemoryRegion::new(kernel_first_paddr, ki_boot_end_p);
+
+    (kernel_region, boot_region, kernel_p_v_offset)
+}
+
 ///
 /// Emulate what happens during a kernel boot, up to the point
 /// where the reserved region is allocated.
@@ -528,6 +562,17 @@ fn kernel_partial_boot(
     // This function follows the bkernel boot sequence.
 
     let mut reserved_regions = DisjointMemoryRegion::default();
+
+    // This mimics the arguments we pass to the kernel boot in loader.rs
+    for (_, other_core_ram) in full_system_state
+        .per_core_ram_regions
+        .iter()
+        .filter(|(&other_cpu, _)| other_cpu != cpu)
+    {
+        for region in other_core_ram.regions.iter() {
+            reserved_regions.insert_region(region.base, region.end);
+        }
+    }
 
     // =====
     //       Here we emulate init_freemem() and arch_init_freemem(), excluding
@@ -553,39 +598,8 @@ fn kernel_partial_boot(
     // XXX: Theoreticallly, the initial task size would be added to reserved regions, as well
     //    as the DTB and the extra reserved region. But it's not since this is partial()
 
-    // Calculate where the kernel image region is
-    let (kernel_region, boot_region, kernel_p_v_offset) = {
-        let kernel_loadable_segments = kernel_elf.loadable_segments();
-        let kernel_first_vaddr = kernel_loadable_segments
-            .first()
-            .expect("kernel has at least one loadable segment")
-            .virt_addr;
-        let (kernel_last_vaddr, _) = kernel_elf
-            .find_symbol("ki_end")
-            .expect("Could not find 'ki_end' symbol");
-
-        // nb: Picked from the base of the available regions computed above.
-        let kernel_first_paddr = ram_regions.regions[0].base;
-        let kernel_p_v_offset = kernel_first_vaddr - kernel_first_paddr;
-
-        println!("Kernel First Paddr: {:x}", kernel_first_paddr);
-        println!("Kernel PV Offset: {:x}", kernel_p_v_offset as i64);
-
-        // Remove the kernel image.
-        let kernel_last_paddr = kernel_last_vaddr - kernel_p_v_offset;
-        let kernel_region = MemoryRegion::new(kernel_first_paddr, kernel_last_paddr);
-
-        // but get the boot region, we'll add that back later
-        // FIXME: Why calcaultae it now if we add it back later?
-        let (ki_boot_end_v, _) = kernel_elf
-            .find_symbol("ki_boot_end")
-            .expect("Could not find 'ki_boot_end' symbol");
-        assert!(ki_boot_end_v < kernel_last_vaddr);
-        let ki_boot_end_p = ki_boot_end_v - kernel_p_v_offset;
-        let boot_region = MemoryRegion::new(kernel_first_paddr, ki_boot_end_p);
-
-        (kernel_region, boot_region, kernel_p_v_offset)
-    };
+    let (kernel_region, boot_region, kernel_p_v_offset) =
+        kernel_calculate_phys_image(kernel_elf, ram_regions);
 
     // Actually remove it.
     reserved_regions.insert_region(kernel_region.base, kernel_region.end);
@@ -4035,7 +4049,8 @@ fn main() -> Result<(), String> {
             .map(|bs| bs.reserved_region)
             .collect::<Vec<_>>(),
         loader_regions,
-        &full_system_state.per_core_ram_regions
+        &full_system_state
+            .per_core_ram_regions
             .values()
             .map(|disjoint_mem| &disjoint_mem.regions[..])
             .collect::<Vec<_>>()[..],
