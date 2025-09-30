@@ -3713,8 +3713,8 @@ fn main() -> Result<(), String> {
             // TODO: Handle discontiguous normal memory better.
             let mut ram_start = kernel_config.normal_regions[0].start;
 
-            /* 128 MiB. TODO: Don't hardcode. */
-            const NORMAL_MEMORY_PER_CORE: u64 = 128 * 1024 * 1024;
+            /* 8 MiB. TODO: Don't hardcode. */
+            const NORMAL_MEMORY_PER_CORE: u64 = 8 * 1024 * 1024;
 
             for cpu in 0..num_multikernels as u64 {
                 let mut ram = DisjointMemoryRegion::default();
