@@ -1018,7 +1018,6 @@ fn build_system(
         });
     }
 
-
     for ut in &kernel_boot_info.untyped_objects {
         let dev_str = if ut.is_device { " (device)" } else { "" };
         let ut_str = format!(
@@ -3652,9 +3651,10 @@ fn main() -> Result<(), String> {
         const NUMBER_SGI_IRQ: u64 = 8;
 
         let mut next_sgi_irq = NUMBER_SGI_IRQ - 1;
-        let mut sgi_irq_numbers = BTreeMap::new();
+        let mut sgi_irq_numbers = BTreeMap::<ChannelEnd, u64>::new();
+        let mut failure = false;
 
-        for (_, recv, _, _) in system
+        let get_sgi_channels_iter = || system
             .channels
             .iter()
             // Make both directions of the channels
@@ -3671,12 +3671,32 @@ fn main() -> Result<(), String> {
             .filter(|(_, _, send_pd, recv_pd)| send_pd.cpu != recv_pd.cpu)
             // And only look at the ones where we are the sender (not the receiver)
             //     and where the channel in the right direction
-            .filter(|(send, _, _, _)| send.notify)
-        {
+            .filter(|(send, _, _, _)| send.notify);
+
+        for (_, recv, _, _) in get_sgi_channels_iter() {
+            // XXX: If the seL4 API allowed multiple targets we could do bidirectional
+            //      by reusing the same SGI.
+
             sgi_irq_numbers.insert(recv.clone(), next_sgi_irq);
-            next_sgi_irq = next_sgi_irq.checked_sub(1).expect(&format!(
-                "more than {NUMBER_SGI_IRQ} IRQs needed for cross-core notifications"
-            ));
+
+            next_sgi_irq = match next_sgi_irq.checked_sub(1) {
+                Some(v) => v,
+                None => {
+                    failure = true;
+                    break;
+                }
+            };
+        }
+
+        if failure {
+            eprintln!("more than {NUMBER_SGI_IRQ} SGIs needed for cross-core notifications");
+
+            eprintln!("channels needing SGIs:");
+            for (send, recv, _, _) in get_sgi_channels_iter() {
+                eprintln!("   {:<30} (id: {:>2}) |-> {:<30} (id: {:>2})", send.pd, send.id, recv.pd, recv.id);
+            }
+
+            std::process::exit(1);
         }
 
         // Take all the memory regions used on multiple cores and make them shared.
