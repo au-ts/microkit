@@ -221,7 +221,7 @@ SUPPORTED_BOARDS = (
         name="qemu_virt_aarch64_multikernel",
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a53",
-        loader_link_address=0x70000000,
+        loader_link_address=0x80000000,
         kernel_options={
             "KernelPlatform": "qemu-arm-virt",
             "KernelIsMCS": True,
