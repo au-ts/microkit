@@ -3654,24 +3654,26 @@ fn main() -> Result<(), String> {
         let mut sgi_irq_numbers = BTreeMap::<ChannelEnd, u64>::new();
         let mut failure = false;
 
-        let get_sgi_channels_iter = || system
-            .channels
-            .iter()
-            // Make both directions of the channels
-            .flat_map(|cc| [(&cc.end_a, &cc.end_b), (&cc.end_b, &cc.end_a)])
-            .map(|(send, recv)| {
-                (
-                    send,
-                    recv,
-                    &system.protection_domains[&send.pd],
-                    &system.protection_domains[&recv.pd],
-                )
-            })
-            // On different cores.
-            .filter(|(_, _, send_pd, recv_pd)| send_pd.cpu != recv_pd.cpu)
-            // And only look at the ones where we are the sender (not the receiver)
-            //     and where the channel in the right direction
-            .filter(|(send, _, _, _)| send.notify);
+        let get_sgi_channels_iter = || {
+            system
+                .channels
+                .iter()
+                // Make both directions of the channels
+                .flat_map(|cc| [(&cc.end_a, &cc.end_b), (&cc.end_b, &cc.end_a)])
+                .map(|(send, recv)| {
+                    (
+                        send,
+                        recv,
+                        &system.protection_domains[&send.pd],
+                        &system.protection_domains[&recv.pd],
+                    )
+                })
+                // On different cores.
+                .filter(|(_, _, send_pd, recv_pd)| send_pd.cpu != recv_pd.cpu)
+                // And only look at the ones where we are the sender (not the receiver)
+                //     and where the channel in the right direction
+                .filter(|(send, _, _, _)| send.notify)
+        };
 
         for (_, recv, _, _) in get_sgi_channels_iter() {
             // XXX: If the seL4 API allowed multiple targets we could do bidirectional
@@ -3688,11 +3690,15 @@ fn main() -> Result<(), String> {
         }
 
         if failure {
+            // TODO: add the used SGIs to the report.
             eprintln!("more than {NUMBER_SGI_IRQ} SGIs needed for cross-core notifications");
 
             eprintln!("channels needing SGIs:");
             for (send, recv, _, _) in get_sgi_channels_iter() {
-                eprintln!("   {:<30} (id: {:>2}) |-> {:<30} (id: {:>2})", send.pd, send.id, recv.pd, recv.id);
+                eprintln!(
+                    "   {:<30} (id: {:>2}) |-> {:<30} (id: {:>2})",
+                    send.pd, send.id, recv.pd, recv.id
+                );
             }
 
             std::process::exit(1);
