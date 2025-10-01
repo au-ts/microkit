@@ -3240,7 +3240,7 @@ fn pick_sgi_channels(
 ) -> BTreeMap<ChannelEnd, u64> {
     // TODO: other platforms.
     assert!(kernel_config.arch == Arch::Aarch64);
-    let total_number_sgi_irqs: u64 = match kernel_config
+    let num_sgi_irqs_per_core = match kernel_config
         .arm_gic_version
         .expect("INTERNAL: arm_gic_version specified on arm")
     {
@@ -3249,58 +3249,81 @@ fn pick_sgi_channels(
         sel4::ArmGicVersion::GICv3 => 16,
     };
 
-    let mut prev_sgi_irq = total_number_sgi_irqs;
+    // Because when we issue an SGI sender cap, we can specify a singular target,
+    // seL4 gives us the ability for each core to have {NUM_SGI} receivers and
+    // be able to distinguish between them.
+
+    // Storing only the receiver is necessary, but to be able to print a good error message we store (send, recv).
+    let mut sgi_receivers_by_core = BTreeMap::<CpuCore, Vec<(&ChannelEnd, &ChannelEnd)>>::new();
+
+    for (send, recv, _, recv_pd) in system
+        .channels
+        .iter()
+        // Make both directions of the channels
+        .flat_map(|cc| [(&cc.end_a, &cc.end_b), (&cc.end_b, &cc.end_a)])
+        .map(|(send, recv)| {
+            (
+                send,
+                recv,
+                &system.protection_domains[&send.pd],
+                &system.protection_domains[&recv.pd],
+            )
+        })
+        // On different cores.
+        .filter(|(_, _, send_pd, recv_pd)| send_pd.cpu != recv_pd.cpu)
+        // And only look at the ones where the sender can notify
+        //     and where the channel in the right direction
+        .filter(|(send, _, _, _)| send.notify)
+    {
+        sgi_receivers_by_core
+            .entry(recv_pd.cpu)
+            .or_default()
+            .push((send, recv));
+    }
+
     let mut sgi_irq_numbers = BTreeMap::<ChannelEnd, u64>::new();
     let mut failure = false;
 
-    let get_sgi_channels_iter = || {
-        system
-            .channels
-            .iter()
-            // Make both directions of the channels
-            .flat_map(|cc| [(&cc.end_a, &cc.end_b), (&cc.end_b, &cc.end_a)])
-            .map(|(send, recv)| {
-                (
-                    send,
-                    recv,
-                    &system.protection_domains[&send.pd],
-                    &system.protection_domains[&recv.pd],
-                )
-            })
-            // On different cores.
-            .filter(|(_, _, send_pd, recv_pd)| send_pd.cpu != recv_pd.cpu)
-            // And only look at the ones where we are the sender (not the receiver)
-            //     and where the channel in the right direction
-            .filter(|(send, _, _, _)| send.notify)
-    };
-
-    for (_, recv, _, _) in get_sgi_channels_iter() {
-        // XXX: If the seL4 API allowed multiple targets we could do bidirectional
-        //      by reusing the same SGI.
-
-        let Some(sgi_irq) = prev_sgi_irq.checked_sub(1) else {
+    for (_, channels) in sgi_receivers_by_core.iter() {
+        if channels.len() > num_sgi_irqs_per_core {
             failure = true;
-            break;
-        };
+            continue;
+        }
 
-        sgi_irq_numbers.insert(recv.clone(), sgi_irq);
-
-        prev_sgi_irq = sgi_irq;
+        for (sgi_irq, &(_, recv)) in channels.iter().enumerate() {
+            sgi_irq_numbers.insert(recv.clone(), sgi_irq.try_into().expect("IRQ fits in u64"));
+        }
     }
 
     if failure {
-        // TODO: add the used SGIs to the report.
-        eprintln!("more than {total_number_sgi_irqs} SGIs needed for cross-core notifications");
-
+        eprintln!("at least one core needed more than {num_sgi_irqs_per_core} SGI IRQs");
         eprintln!("channels needing SGIs:");
-        for (send, recv, _, _) in get_sgi_channels_iter() {
-            eprintln!(
-                "   {:<30} (id: {:>2}) |-> {:<30} (id: {:>2})",
-                send.pd, send.id, recv.pd, recv.id
-            );
+        for (cpu, channels) in sgi_receivers_by_core.iter() {
+            eprintln!("    receiver {cpu}; count: {}:", channels.len());
+            for &(send, recv) in channels.iter() {
+                eprintln!(
+                    "       {:<30} (id: {:>2}) |-> {:<30} (id: {:>2})",
+                    send.pd, send.id, recv.pd, recv.id,
+                );
+            }
         }
 
         std::process::exit(1);
+    }
+
+    // TODO: add the used SGIs to the report.
+    for (cpu, channels) in sgi_receivers_by_core.iter() {
+        eprintln!("    receiver {cpu}; count: {}:", channels.len());
+        for &(send, recv) in channels.iter() {
+            eprintln!(
+                "       {:<30} (id: {:>2}) |-> {:<30} (id: {:>2}) ==> SGI {:>2}",
+                send.pd,
+                send.id,
+                recv.pd,
+                recv.id,
+                sgi_irq_numbers[recv],
+            );
+        }
     }
 
     sgi_irq_numbers

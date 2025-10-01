@@ -187,7 +187,7 @@ pub struct CpuCore(pub u8);
 
 impl Display for CpuCore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("cpu{}", self.0))
+        f.write_fmt(format_args!("cpu{:02}", self.0))
     }
 }
 
