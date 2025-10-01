@@ -10,6 +10,7 @@
 use elf::ElfFile;
 use loader::Loader;
 use microkit_tool::sdf::{ChannelEnd, SysIrq};
+use microkit_tool::sel4::ArmGicVersion;
 use microkit_tool::{
     elf, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError, MemoryRegion,
     ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH,
@@ -3236,16 +3237,22 @@ fn write_report<W: std::io::Write>(
     Ok(())
 }
 
-fn build_full_system_state(
+fn pick_sgi_channels(
     system: &sdf::SystemDescription,
     kernel_config: &Config,
-    kernel_virt_image: MemoryRegion,
-    num_multikernels: usize,
-) -> FullSystemState {
-    // TODO: 8 for GICv2, 16 for GICv3, xx: other platforms.
-    const NUMBER_SGI_IRQ: u64 = 8;
+) -> BTreeMap<ChannelEnd, u64> {
+    // TODO: other platforms.
+    assert!(kernel_config.arch == Arch::Aarch64);
+    let total_number_sgi_irqs: u64 = match kernel_config
+        .arm_gic_version
+        .expect("INTERNAL: arm_gic_version specified on arm")
+    {
+        // TODO: Source document?
+        sel4::ArmGicVersion::GICv2 => 8,
+        sel4::ArmGicVersion::GICv3 => 16,
+    };
 
-    let mut prev_sgi_irq = NUMBER_SGI_IRQ;
+    let mut prev_sgi_irq = total_number_sgi_irqs;
     let mut sgi_irq_numbers = BTreeMap::<ChannelEnd, u64>::new();
     let mut failure = false;
 
@@ -3286,7 +3293,7 @@ fn build_full_system_state(
 
     if failure {
         // TODO: add the used SGIs to the report.
-        eprintln!("more than {NUMBER_SGI_IRQ} SGIs needed for cross-core notifications");
+        eprintln!("more than {total_number_sgi_irqs} SGIs needed for cross-core notifications");
 
         eprintln!("channels needing SGIs:");
         for (send, recv, _, _) in get_sgi_channels_iter() {
@@ -3298,6 +3305,17 @@ fn build_full_system_state(
 
         std::process::exit(1);
     }
+
+    sgi_irq_numbers
+}
+
+fn build_full_system_state(
+    system: &sdf::SystemDescription,
+    kernel_config: &Config,
+    kernel_virt_image: MemoryRegion,
+    num_multikernels: usize,
+) -> FullSystemState {
+    let sgi_irq_numbers = pick_sgi_channels(system, kernel_config);
 
     // Take all the memory regions used on multiple cores and make them shared.
     // XXX: Choosing this address is somewhat of a hack.
@@ -3760,6 +3778,17 @@ fn main() -> Result<(), String> {
         _ => None,
     };
 
+    let arm_gic_version = match arch {
+        Arch::Aarch64 => Some(
+            if json_str_as_bool(&kernel_config_json, "ARM_GIC_V3_SUPPORT")? {
+                ArmGicVersion::GICv3
+            } else {
+                ArmGicVersion::GICv2
+            },
+        ),
+        _ => None,
+    };
+
     let kernel_frame_size = match arch {
         Arch::Aarch64 => 1 << 12,
         Arch::Riscv64 => 1 << 21,
@@ -3779,6 +3808,7 @@ fn main() -> Result<(), String> {
         fpu: json_str_as_bool(&kernel_config_json, "HAVE_FPU")?,
         arm_pa_size_bits,
         arm_smc,
+        arm_gic_version,
         riscv_pt_levels: Some(RiscvVirtualMemory::Sv39),
         invocations_labels,
         kernel_devices: kernel_platform_config.kernel_devs,

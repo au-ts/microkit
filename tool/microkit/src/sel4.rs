@@ -77,6 +77,8 @@ pub struct Config {
     /// False if the kernel config option has not been enabled.
     /// None on any non-ARM architecture.
     pub arm_smc: Option<bool>,
+    /// ARM-specific, the GIC version.
+    pub arm_gic_version: Option<ArmGicVersion>,
     /// RISC-V specific, what kind of virtual memory system (e.g Sv39)
     pub riscv_pt_levels: Option<RiscvVirtualMemory>,
     pub invocations_labels: serde_json::Value,
@@ -160,6 +162,7 @@ impl Config {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Arch {
     Aarch64,
     Riscv64,
@@ -179,6 +182,12 @@ impl RiscvVirtualMemory {
             RiscvVirtualMemory::Sv39 => 3,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArmGicVersion {
+    GICv2,
+    GICv3,
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
