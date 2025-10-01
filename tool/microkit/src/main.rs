@@ -3236,6 +3236,173 @@ fn write_report<W: std::io::Write>(
     Ok(())
 }
 
+fn build_full_system_state(
+    system: &sdf::SystemDescription,
+    kernel_config: &Config,
+    kernel_virt_image: MemoryRegion,
+    num_multikernels: usize,
+) -> FullSystemState {
+    // TODO: 8 for GICv2, 16 for GICv3, xx: other platforms.
+    const NUMBER_SGI_IRQ: u64 = 8;
+
+    let mut prev_sgi_irq = NUMBER_SGI_IRQ;
+    let mut sgi_irq_numbers = BTreeMap::<ChannelEnd, u64>::new();
+    let mut failure = false;
+
+    let get_sgi_channels_iter = || {
+        system
+            .channels
+            .iter()
+            // Make both directions of the channels
+            .flat_map(|cc| [(&cc.end_a, &cc.end_b), (&cc.end_b, &cc.end_a)])
+            .map(|(send, recv)| {
+                (
+                    send,
+                    recv,
+                    &system.protection_domains[&send.pd],
+                    &system.protection_domains[&recv.pd],
+                )
+            })
+            // On different cores.
+            .filter(|(_, _, send_pd, recv_pd)| send_pd.cpu != recv_pd.cpu)
+            // And only look at the ones where we are the sender (not the receiver)
+            //     and where the channel in the right direction
+            .filter(|(send, _, _, _)| send.notify)
+    };
+
+    for (_, recv, _, _) in get_sgi_channels_iter() {
+        // XXX: If the seL4 API allowed multiple targets we could do bidirectional
+        //      by reusing the same SGI.
+
+        let Some(sgi_irq) = prev_sgi_irq.checked_sub(1) else {
+            failure = true;
+            break;
+        };
+
+        sgi_irq_numbers.insert(recv.clone(), sgi_irq);
+
+        prev_sgi_irq = sgi_irq;
+    }
+
+    if failure {
+        // TODO: add the used SGIs to the report.
+        eprintln!("more than {NUMBER_SGI_IRQ} SGIs needed for cross-core notifications");
+
+        eprintln!("channels needing SGIs:");
+        for (send, recv, _, _) in get_sgi_channels_iter() {
+            eprintln!(
+                "   {:<30} (id: {:>2}) |-> {:<30} (id: {:>2})",
+                send.pd, send.id, recv.pd, recv.id
+            );
+        }
+
+        std::process::exit(1);
+    }
+
+    // Take all the memory regions used on multiple cores and make them shared.
+    // XXX: Choosing this address is somewhat of a hack.
+    let last_ram_region = kernel_config
+        .normal_regions
+        .last()
+        .expect("kernel should have one memory region");
+    let mut shared_phys_addr_prev = last_ram_region.end;
+    let mut memory_regions = vec![];
+    for mut mr in system.memory_regions.iter().cloned() {
+        if mr.used_cores.len() > 1 {
+            shared_phys_addr_prev -= mr.size;
+            // FIXME: Support allocated shared from more than one memory region.
+            assert!(shared_phys_addr_prev >= last_ram_region.start);
+
+            // FIXME: These might conflict if you specify regions in phys mem.
+            if mr.phys_addr.is_none() {
+                mr.phys_addr = Some(shared_phys_addr_prev);
+            }
+        }
+
+        memory_regions.push(mr);
+    }
+
+    let shared_memory_region = MemoryRegion::new(shared_phys_addr_prev, last_ram_region.end);
+
+    let per_core_ram_regions = {
+        let mut per_core_regions = BTreeMap::new();
+
+        let mut available_normal_memory = DisjointMemoryRegion::default();
+        for region in kernel_config.normal_regions.iter() {
+            available_normal_memory.insert_region(region.start, region.end);
+        }
+
+        // remove the shared addresses
+        available_normal_memory.remove_region(shared_memory_region.base, shared_memory_region.end);
+
+        println!("available memory:");
+        for r in available_normal_memory.regions.iter() {
+            println!("    [{:x}..{:x})", r.base, r.end);
+        }
+
+        // TODO: I'm not convinced of this algorithm's correctness of always working.
+        //       It might not be the most efficient, but I don't know if it will always work.
+
+        let kernel_size = kernel_virt_image.size();
+
+        for cpu in 0..num_multikernels as u64 {
+            let mut normal_memory = DisjointMemoryRegion::default();
+
+            // FIXME: ARM64 requires LargePage alignment, what about others?
+            let kernel_mem = available_normal_memory.allocate_aligned(
+                kernel_size,
+                ObjectType::LargePage.fixed_size(&kernel_config).unwrap(),
+            );
+
+            println!(
+                "cpu({cpu}) kernel ram: [{:x}..{:x})",
+                kernel_mem.base, kernel_mem.end,
+            );
+
+            normal_memory.insert_region(kernel_mem.base, kernel_mem.end);
+            per_core_regions.insert(CpuCore(cpu), normal_memory);
+        }
+
+        println!("available memory after allocating kernels:");
+        for r in available_normal_memory.regions.iter() {
+            println!("    [{:x}..{:x})", r.base, r.end);
+        }
+
+        let total_ram_size: u64 = available_normal_memory
+            .regions
+            .iter()
+            .map(|mr| mr.size())
+            .sum();
+
+        let per_core_ram_size = util::round_down(
+            total_ram_size / num_multikernels as u64,
+            ObjectType::SmallPage.fixed_size(&kernel_config).unwrap(),
+        );
+
+        for (&cpu, core_normal_memory) in per_core_regions.iter_mut() {
+            let ram_mem = available_normal_memory
+                .allocate_non_contiguous(per_core_ram_size)
+                .expect("should have been able to allocate part of the RAM we chose");
+
+            println!("cpu({}) normal ram: ", cpu.0);
+            for r in ram_mem.regions.iter() {
+                println!("    [{:x}..{:x})", r.base, r.end);
+            }
+
+            core_normal_memory.extend(&ram_mem);
+        }
+
+        per_core_regions
+    };
+
+    FullSystemState {
+        sgi_irq_numbers,
+        memory_regions,
+        per_core_ram_regions,
+        shared_memory_region,
+    }
+}
+
 fn print_usage() {
     println!("usage: microkit [-h] [-o OUTPUT] [-r REPORT] --board BOARD --config CONFIG [--search-path [SEARCH_PATH ...]] system")
 }
@@ -3661,168 +3828,10 @@ fn main() -> Result<(), String> {
     let mut monitor_elfs_by_core = Vec::with_capacity(num_multikernels);
     let mut bootstrap_invocation_datas = vec![];
 
-    let full_system_state = {
-        // TODO: 8 for GICv2, 16 for GICv3, xx: other platforms.
-        const NUMBER_SGI_IRQ: u64 = 8;
+    let kernel_virt_image = kernel_calculate_virt_image(&kernel_elf);
 
-        let mut prev_sgi_irq = NUMBER_SGI_IRQ;
-        let mut sgi_irq_numbers = BTreeMap::<ChannelEnd, u64>::new();
-        let mut failure = false;
-
-        let get_sgi_channels_iter = || {
-            system
-                .channels
-                .iter()
-                // Make both directions of the channels
-                .flat_map(|cc| [(&cc.end_a, &cc.end_b), (&cc.end_b, &cc.end_a)])
-                .map(|(send, recv)| {
-                    (
-                        send,
-                        recv,
-                        &system.protection_domains[&send.pd],
-                        &system.protection_domains[&recv.pd],
-                    )
-                })
-                // On different cores.
-                .filter(|(_, _, send_pd, recv_pd)| send_pd.cpu != recv_pd.cpu)
-                // And only look at the ones where we are the sender (not the receiver)
-                //     and where the channel in the right direction
-                .filter(|(send, _, _, _)| send.notify)
-        };
-
-        for (_, recv, _, _) in get_sgi_channels_iter() {
-            // XXX: If the seL4 API allowed multiple targets we could do bidirectional
-            //      by reusing the same SGI.
-
-            let Some(sgi_irq) = prev_sgi_irq.checked_sub(1) else {
-                failure = true;
-                break;
-            };
-
-            sgi_irq_numbers.insert(recv.clone(), sgi_irq);
-
-            prev_sgi_irq = sgi_irq;
-        }
-
-        if failure {
-            // TODO: add the used SGIs to the report.
-            eprintln!("more than {NUMBER_SGI_IRQ} SGIs needed for cross-core notifications");
-
-            eprintln!("channels needing SGIs:");
-            for (send, recv, _, _) in get_sgi_channels_iter() {
-                eprintln!(
-                    "   {:<30} (id: {:>2}) |-> {:<30} (id: {:>2})",
-                    send.pd, send.id, recv.pd, recv.id
-                );
-            }
-
-            std::process::exit(1);
-        }
-
-        // Take all the memory regions used on multiple cores and make them shared.
-        // XXX: Choosing this address is somewhat of a hack.
-        let last_ram_region = kernel_config
-            .normal_regions
-            .last()
-            .expect("kernel should have one memory region");
-        let mut shared_phys_addr_prev = last_ram_region.end;
-        let mut memory_regions = vec![];
-        for mut mr in system.memory_regions {
-            if mr.used_cores.len() > 1 {
-                shared_phys_addr_prev -= mr.size;
-                // FIXME: Support allocated shared from more than one memory region.
-                assert!(shared_phys_addr_prev >= last_ram_region.start);
-
-                // FIXME: These might conflict if you specify regions in phys mem.
-                if mr.phys_addr.is_none() {
-                    mr.phys_addr = Some(shared_phys_addr_prev);
-                }
-            }
-
-            memory_regions.push(mr);
-        }
-
-        let shared_memory_region = MemoryRegion::new(shared_phys_addr_prev, last_ram_region.end);
-
-        let per_core_ram_regions = {
-            let mut per_core_regions = BTreeMap::new();
-
-            let mut available_normal_memory = DisjointMemoryRegion::default();
-            for region in kernel_config.normal_regions.iter() {
-                available_normal_memory.insert_region(region.start, region.end);
-            }
-
-            // remove the shared addresses
-            available_normal_memory
-                .remove_region(shared_memory_region.base, shared_memory_region.end);
-
-            println!("available memory:");
-            for r in available_normal_memory.regions.iter() {
-                println!("    [{:x}..{:x})", r.base, r.end);
-            }
-
-            // TODO: I'm not convinced of this algorithm's correctness of always working.
-            //       It might not be the most efficient, but I don't know if it will always work.
-
-            let kernel_size = kernel_calculate_virt_image(&kernel_elf).size();
-
-            for cpu in 0..num_multikernels as u64 {
-                let mut normal_memory = DisjointMemoryRegion::default();
-
-                // FIXME: ARM64 requires LargePage alignment, what about others?
-                let kernel_mem = available_normal_memory.allocate_aligned(
-                    kernel_size,
-                    ObjectType::LargePage.fixed_size(&kernel_config).unwrap(),
-                );
-
-                println!(
-                    "cpu({cpu}) kernel ram: [{:x}..{:x})",
-                    kernel_mem.base, kernel_mem.end,
-                );
-
-                normal_memory.insert_region(kernel_mem.base, kernel_mem.end);
-                per_core_regions.insert(CpuCore(cpu), normal_memory);
-            }
-
-            println!("available memory after allocating kernels:");
-            for r in available_normal_memory.regions.iter() {
-                println!("    [{:x}..{:x})", r.base, r.end);
-            }
-
-            let total_ram_size: u64 = available_normal_memory
-                .regions
-                .iter()
-                .map(|mr| mr.size())
-                .sum();
-
-            let per_core_ram_size = util::round_down(
-                total_ram_size / num_multikernels as u64,
-                ObjectType::SmallPage.fixed_size(&kernel_config).unwrap(),
-            );
-
-            for (&cpu, core_normal_memory) in per_core_regions.iter_mut() {
-                let ram_mem = available_normal_memory
-                    .allocate_non_contiguous(per_core_ram_size)
-                    .expect("should have been able to allocate part of the RAM we chose");
-
-                println!("cpu({}) normal ram: ", cpu.0);
-                for r in ram_mem.regions.iter() {
-                    println!("    [{:x}..{:x})", r.base, r.end);
-                }
-
-                core_normal_memory.extend(&ram_mem);
-            }
-
-            per_core_regions
-        };
-
-        FullSystemState {
-            sgi_irq_numbers,
-            memory_regions,
-            per_core_ram_regions,
-            shared_memory_region,
-        }
-    };
+    let full_system_state =
+        build_full_system_state(&system, &kernel_config, kernel_virt_image, num_multikernels);
 
     for multikernel_idx in 0..num_multikernels {
         let mut invocation_table_size = kernel_config.minimum_page_size;
