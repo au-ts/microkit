@@ -71,6 +71,7 @@ pub struct Config {
     pub hypervisor: bool,
     pub benchmark: bool,
     pub fpu: bool,
+    pub num_multikernels: u8,
     /// ARM-specific, number of physical address bits
     pub arm_pa_size_bits: Option<usize>,
     /// ARM-specific, where or not SMC forwarding is allowed

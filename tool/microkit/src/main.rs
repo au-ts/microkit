@@ -17,8 +17,8 @@ use microkit_tool::{
     VM_MAX_NAME_LENGTH,
 };
 use sdf::{
-    parse, Channel, ProtectionDomain, SysMap, SysMapPerms, SysMemoryRegion, SysMemoryRegionKind,
-    VirtualMachine,
+    parse, Channel, CpuCore, ProtectionDomain, SysMap, SysMapPerms, SysMemoryRegion,
+    SysMemoryRegionKind, VirtualMachine,
 };
 use sel4::{
     default_vm_attr, Aarch64Regs, Arch, ArmVmAttributes, BootInfo, Config, Invocation,
@@ -903,9 +903,6 @@ fn emulate_kernel_boot(
         untyped_objects,
     }
 }
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct CpuCore(u64);
 
 #[derive(Debug)]
 struct FullSystemState {
@@ -2644,7 +2641,7 @@ fn build_system(
             InvocationArgs::IrqControlIssueSGICap {
                 irq_control: IRQ_CONTROL_CAP_ADDRESS,
                 irq: recv_irq_number,
-                target: recv_pd.cpu.try_into().expect("core # fits in u8"),
+                target: recv_pd.cpu.0,
                 dest_root: send_cnode_obj.cap_addr,
                 dest_index: send_cap_idx,
                 dest_depth: PD_CAP_BITS,
@@ -3313,7 +3310,6 @@ fn build_full_system_state(
     system: &sdf::SystemDescription,
     kernel_config: &Config,
     kernel_virt_image: MemoryRegion,
-    num_multikernels: usize,
 ) -> FullSystemState {
     let sgi_irq_numbers = pick_sgi_channels(system, kernel_config);
 
@@ -3363,7 +3359,7 @@ fn build_full_system_state(
 
         let kernel_size = kernel_virt_image.size();
 
-        for cpu in 0..num_multikernels as u64 {
+        for cpu in 0..kernel_config.num_multikernels {
             let mut normal_memory = DisjointMemoryRegion::default();
 
             // FIXME: ARM64 requires LargePage alignment, what about others?
@@ -3393,7 +3389,7 @@ fn build_full_system_state(
             .sum();
 
         let per_core_ram_size = util::round_down(
-            total_ram_size / num_multikernels as u64,
+            total_ram_size / u64::from(kernel_config.num_multikernels),
             ObjectType::SmallPage.fixed_size(&kernel_config).unwrap(),
         );
 
@@ -3794,6 +3790,16 @@ fn main() -> Result<(), String> {
         Arch::Riscv64 => 1 << 21,
     };
 
+    // TODO: More code should be conditional based on ENABLE_MULTIKERNEL_SUPPORT.
+    let num_multikernels: u8 =
+        if json_str_as_bool(&kernel_config_json, "ENABLE_MULTIKERNEL_SUPPORT")? {
+            json_str_as_u64(&kernel_config_json, "MAX_NUM_NODES")?
+                .try_into()
+                .expect("number of multikernels fits in u8")
+        } else {
+            1
+        };
+
     let kernel_config = Config {
         arch,
         word_size: json_str_as_u64(&kernel_config_json, "WORD_SIZE")?,
@@ -3806,6 +3812,7 @@ fn main() -> Result<(), String> {
         hypervisor,
         benchmark: args.config == "benchmark",
         fpu: json_str_as_bool(&kernel_config_json, "HAVE_FPU")?,
+        num_multikernels,
         arm_pa_size_bits,
         arm_smc,
         arm_gic_version,
@@ -3849,21 +3856,19 @@ fn main() -> Result<(), String> {
         search_paths.push(PathBuf::from(path));
     }
 
-    // TODO: Are these the same?
-    let num_multikernels: usize = json_str_as_u64(&kernel_config_json, "MAX_NUM_NODES")? as usize;
-
     // Get the elf files for each pd:
-    let mut pd_elf_files_by_core = Vec::with_capacity(num_multikernels);
+    let mut pd_elf_files_by_core = Vec::with_capacity(num_multikernels.try_into().unwrap());
     let mut built_systems = vec![];
-    let mut monitor_elfs_by_core = Vec::with_capacity(num_multikernels);
+    let mut monitor_elfs_by_core = Vec::with_capacity(num_multikernels.try_into().unwrap());
     let mut bootstrap_invocation_datas = vec![];
 
     let kernel_virt_image = kernel_calculate_virt_image(&kernel_elf);
 
-    let full_system_state =
-        build_full_system_state(&system, &kernel_config, kernel_virt_image, num_multikernels);
+    let full_system_state = build_full_system_state(&system, &kernel_config, kernel_virt_image);
 
-    for multikernel_idx in 0..num_multikernels {
+    for multikernel_idx in 0..(usize::from(num_multikernels)) {
+        let cpu = CpuCore(multikernel_idx as u8);
+
         let mut invocation_table_size = kernel_config.minimum_page_size;
         let mut system_cnode_size = 2;
         let mut built_system;
@@ -3881,13 +3886,11 @@ fn main() -> Result<(), String> {
             std::process::exit(1);
         }
 
-        let core = multikernel_idx as u64;
-
         let core_local_protection_domains: BTreeMap<String, ProtectionDomain> = system
             .protection_domains
             .clone()
             .into_iter()
-            .filter(|(_, pd)| pd.cpu == core)
+            .filter(|(_, pd)| pd.cpu == cpu)
             .collect();
 
         pd_elf_files_by_core.push(BTreeMap::new());
@@ -3910,7 +3913,7 @@ fn main() -> Result<(), String> {
         let memory_regions_for_core: Vec<_> = full_system_state
             .memory_regions
             .iter()
-            .filter(|&mr| mr.used_cores.contains(&(multikernel_idx as u64)))
+            .filter(|&mr| mr.used_cores.contains(&cpu))
             .collect();
 
         loop {
@@ -3924,12 +3927,12 @@ fn main() -> Result<(), String> {
                 &memory_regions_for_core,
                 &system.channels,
                 &full_system_state,
-                CpuCore(core),
+                cpu,
                 invocation_table_size,
                 system_cnode_size,
             )?;
             println!("BUILT(cpu={}): system_cnode_size={} built_system.number_of_system_caps={} invocation_table_size={} built_system.invocation_data_size={}",
-                     core, system_cnode_size, built_system.number_of_system_caps, invocation_table_size, built_system.invocation_data_size);
+                     cpu, system_cnode_size, built_system.number_of_system_caps, invocation_table_size, built_system.invocation_data_size);
 
             if built_system.number_of_system_caps <= system_cnode_size
                 && built_system.invocation_data_size <= invocation_table_size

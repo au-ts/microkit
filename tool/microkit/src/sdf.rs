@@ -21,6 +21,7 @@ use crate::util::str_to_bool;
 use crate::MAX_PDS;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Display;
 use std::path::{Path, PathBuf};
 
 /// Events that come through entry points (e.g notified or protected) are given an
@@ -110,7 +111,7 @@ pub struct SysMemoryRegion {
     /// due to the user's SDF or created by the tool for setting up the
     /// stack, ELF, etc.
     pub kind: SysMemoryRegionKind,
-    pub used_cores: Vec<u64>,
+    pub used_cores: Vec<CpuCore>,
 }
 
 impl Ord for SysMemoryRegion {
@@ -181,6 +182,15 @@ pub struct Channel {
     pub end_b: ChannelEnd,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CpuCore(pub u8);
+
+impl Display for CpuCore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("cpu{}", self.0))
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ProtectionDomain {
     /// Only populated for child protection domains
@@ -192,7 +202,7 @@ pub struct ProtectionDomain {
     pub passive: bool,
     pub stack_size: u64,
     pub smc: bool,
-    pub cpu: u64,
+    pub cpu: CpuCore,
     pub program_image: PathBuf,
     pub maps: Vec<SysMap>,
     pub irqs: Vec<SysIrq>,
@@ -491,7 +501,11 @@ impl ProtectionDomain {
             }
         }
 
-        let cpu = sdf_parse_number(node.attribute("cpu").unwrap_or("0"), node)?;
+        let cpu = CpuCore(
+            sdf_parse_number(node.attribute("cpu").unwrap_or("0"), node)?
+                .try_into()
+                .expect("cpu # fits in u8"),
+        );
 
         #[allow(clippy::manual_range_contains)]
         if stack_size < PD_MIN_STACK_SIZE || stack_size > PD_MAX_STACK_SIZE {
@@ -667,7 +681,7 @@ impl ProtectionDomain {
                     if child_pd.cpu != cpu {
                         return Err(format!(
                             "Error: children of a parent are not allowed to exist on a different system on multikernel; \
-                                found child {} (cpu: {}) underneath parent {} (cpu: {})", child_pd.name, child_pd.cpu, name, cpu));
+                                found child {} ({}) underneath parent {} ({})", child_pd.name, child_pd.cpu, name, cpu));
                     }
 
                     child_pds.push(child_pd);
@@ -1409,13 +1423,13 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         } else if ch.end_a.pp && pd_a.cpu != pd_b.cpu {
             return Err(format!(
                 "Error: PPCs are not allowed across cores on multikernels; \
-                        channel with PPC exists from pd {} (cpu: {}) to pd {} (cpu: {})",
+                        channel with PPC exists from pd {} ({}) to pd {} ({})",
                 pd_a.name, pd_a.cpu, pd_b.name, pd_b.cpu,
             ));
         } else if ch.end_b.pp && pd_a.cpu != pd_b.cpu {
             return Err(format!(
                 "Error: PPCs are not allowed across cores on multikernels; \
-                        channel with PPC exists from pd {} (cpu: {}) to pd {} (cpu: {})",
+                        channel with PPC exists from pd {} ({}) to pd {} ({})",
                 pd_b.name, pd_b.cpu, pd_a.name, pd_a.cpu,
             ));
         }
@@ -1465,7 +1479,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         }
     }
 
-    let mut cores_using_mr = BTreeMap::<&str, BTreeSet<u64>>::new();
+    let mut cores_using_mr = BTreeMap::<&str, BTreeSet<CpuCore>>::new();
     for pd in pds.values() {
         // TODO: don't duplicate.
         for map in pd.maps.iter() {
