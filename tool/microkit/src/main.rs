@@ -3346,10 +3346,9 @@ fn build_full_system_state(
             // FIXME: Support allocated shared from more than one memory region.
             assert!(shared_phys_addr_prev >= last_ram_region.start);
 
-            // FIXME: These might conflict if you specify regions in phys mem.
-            if mr.phys_addr.is_none() {
-                mr.phys_addr = Some(shared_phys_addr_prev);
-            }
+            // FIXME: These might conflict if you specify regions in phys mem shared across cores.
+            assert!(mr.phys_addr.is_none());
+            mr.phys_addr = Some(shared_phys_addr_prev);
         }
 
         memory_regions.push(mr);
