@@ -72,6 +72,8 @@ struct loader_data {
     uintptr_t magic;
     uintptr_t size;
     uintptr_t flags;
+    uintptr_t shared_region_to_zero_base;
+    uintptr_t shared_region_to_zero_end;
     uintptr_t num_kernels;
     uintptr_t num_regions;
     uintptr_t kernel_v_entry;
@@ -1054,6 +1056,16 @@ int main(void)
      * fail label; it's not possible to return to U-boot
      */
     copy_data();
+
+    puts("LDR|INFO: zeroing out the shared data pre-kernel boot\n");
+    puts("LDR|INFO: region is: [");
+    puthex64(loader_data->shared_region_to_zero_base);
+    puts("..");
+    puthex64(loader_data->shared_region_to_zero_end);
+    puts(")\n");
+    for (uintptr_t addr = loader_data->shared_region_to_zero_base; addr < loader_data->shared_region_to_zero_end; addr += sizeof(uint64_t)) {
+        *(volatile uint64_t *)(addr) = 0;
+    }
 
 #if defined(BOARD_zcu102) || defined(BOARD_ultra96v2) || defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel) || defined(BOARD_qemu_virt_aarch64_multikernel) || defined(BOARD_qemu_virt_aarch64)
     configure_gicv2();

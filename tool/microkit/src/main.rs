@@ -911,6 +911,7 @@ struct FullSystemState {
     sgi_irq_numbers: BTreeMap<ChannelEnd, u64>,
     memory_regions: Vec<SysMemoryRegion>,
     per_core_ram_regions: BTreeMap<CpuCore, DisjointMemoryRegion>,
+    shared_memory_region: MemoryRegion,
 }
 
 fn build_system(
@@ -3741,6 +3742,8 @@ fn main() -> Result<(), String> {
             memory_regions.push(mr);
         }
 
+        let shared_memory_region = MemoryRegion::new(shared_phys_addr_prev, last_ram_region.end);
+
         let per_core_ram_regions = {
             let mut per_core_regions = BTreeMap::new();
 
@@ -3748,8 +3751,10 @@ fn main() -> Result<(), String> {
             for region in kernel_config.normal_regions.iter() {
                 available_normal_memory.insert_region(region.start, region.end);
             }
+
             // remove the shared addresses
-            available_normal_memory.remove_region(shared_phys_addr_prev, last_ram_region.end);
+            available_normal_memory
+                .remove_region(shared_memory_region.base, shared_memory_region.end);
 
             println!("available memory:");
             for r in available_normal_memory.regions.iter() {
@@ -3815,6 +3820,7 @@ fn main() -> Result<(), String> {
             sgi_irq_numbers,
             memory_regions,
             per_core_ram_regions,
+            shared_memory_region,
         }
     };
 
@@ -4120,6 +4126,7 @@ fn main() -> Result<(), String> {
             .values()
             .map(|disjoint_mem| &disjoint_mem.regions[..])
             .collect::<Vec<_>>()[..],
+        &full_system_state.shared_memory_region,
     );
     println!("Made image");
     loader.write_image(Path::new(args.output));

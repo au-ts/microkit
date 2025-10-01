@@ -130,6 +130,8 @@ struct LoaderHeader64 {
     magic: u64,
     size: u64,
     flags: u64,
+    shared_region_to_zero_base: u64,
+    shared_region_to_zero_end: u64,
     num_multikernels: u64,
     num_regions: u64,
     kernel_v_entry: u64,
@@ -161,6 +163,7 @@ impl<'a> Loader<'a> {
         reserved_regions: &[MemoryRegion],
         system_regions: Vec<(u64, &'a [u8])>,
         per_core_ram_regions: &[&[MemoryRegion]],
+        shared_memory_region: &MemoryRegion,
     ) -> Loader<'a> {
         // Note: If initial_task_phys_base is not None, then it just this address
         // as the base physical address of the initial task, rather than the address
@@ -455,6 +458,8 @@ impl<'a> Loader<'a> {
             magic,
             size,
             flags,
+            shared_region_to_zero_base: shared_memory_region.base,
+            shared_region_to_zero_end: shared_memory_region.end,
             num_multikernels: num_multikernels as u64,
             num_regions: region_metadata.len() as u64,
             kernel_v_entry: kernel_elf.entry,
