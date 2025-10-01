@@ -19,8 +19,10 @@ const DEFAULT_KERNEL_CONFIG: sel4::Config = sel4::Config {
     hypervisor: true,
     benchmark: false,
     fpu: true,
+    num_multikernels: 2,
     arm_pa_size_bits: Some(40),
     arm_smc: None,
+    arm_gic_version: Some(sel4::ArmGicVersion::GICv2),
     riscv_pt_levels: None,
     // Not necessary for SDF parsing
     invocations_labels: json!(null),
@@ -548,7 +550,7 @@ mod multikernel {
     fn test_cross_core_ppcs() {
         check_error(
             "multikernel_cross_core_ppc.system",
-            "Error: PPCs are not allowed across cores on multikernels; channel with PPC exists from pd test2 (cpu: 1) to pd test1 (cpu: 0)",
+            "Error: PPCs are not allowed across cores on multikernels; channel with PPC exists from pd test2 (cpu01) to pd test1 (cpu00)",
         )
     }
 
@@ -556,7 +558,7 @@ mod multikernel {
     fn test_cross_core_parenthood() {
         check_error(
             "multikernel_cross_core_parenthood.system",
-            "Error: children of a parent are not allowed to exist on a different system on multikernel; found child test2 (cpu: 1) underneath parent test1 (cpu: 0)",
+            "Error: children of a parent are not allowed to exist on a different system on multikernel; found child test2 (cpu01) underneath parent test1 (cpu00)",
         )
     }
 }
