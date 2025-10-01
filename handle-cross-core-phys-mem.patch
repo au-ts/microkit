@@ -1,0 +1,67 @@
+diff --git a/tool/microkit/src/main.rs b/tool/microkit/src/main.rs
+index 8709b91..9edb668 100644
+--- a/tool/microkit/src/main.rs
++++ b/tool/microkit/src/main.rs
+@@ -3332,6 +3332,11 @@ fn build_full_system_state(
+ ) -> FullSystemState {
+     let sgi_irq_numbers = pick_sgi_channels(system, kernel_config);
+ 
++    let mut available_normal_memory = DisjointMemoryRegion::default();
++    for region in kernel_config.normal_regions.iter() {
++        available_normal_memory.insert_region(region.start, region.end);
++    }
++
+     // Take all the memory regions used on multiple cores and make them shared.
+     // XXX: Choosing this address is somewhat of a hack.
+     let last_ram_region = kernel_config
+@@ -3342,31 +3347,36 @@ fn build_full_system_state(
+     let mut memory_regions = vec![];
+     for mut mr in system.memory_regions.iter().cloned() {
+         if mr.used_cores.len() > 1 {
+-            shared_phys_addr_prev -= mr.size;
+-            // FIXME: Support allocated shared from more than one memory region.
+-            assert!(shared_phys_addr_prev >= last_ram_region.start);
++            match mr.phys_addr {
++                Some(phys_addr) => {
+ 
+-            // FIXME: These might conflict if you specify regions in phys mem shared across cores.
+-            assert!(mr.phys_addr.is_none());
+-            mr.phys_addr = Some(shared_phys_addr_prev);
++                    // Mark this memory as reserved so that it can become device.
++                    // This is really just another instance of shared_memory_region
++                    // FIXME: This could overlap with our shared_phys_addr.
++
++                    available_normal_memory.remove_region(phys_addr, phys_addr + mr.size);
++                }
++
++                // Pick a value in the shared region.
++                None => {
++                    shared_phys_addr_prev -= mr.size;
++                    // FIXME: Support allocated shared from more than one memory region.
++                    assert!(shared_phys_addr_prev >= last_ram_region.start);
++
++                    mr.phys_addr = Some(shared_phys_addr_prev);
++                }
++            }
+         }
+ 
+         memory_regions.push(mr);
+     }
+ 
+     let shared_memory_region = MemoryRegion::new(shared_phys_addr_prev, last_ram_region.end);
++    available_normal_memory.remove_region(shared_memory_region.base, shared_memory_region.end);
+ 
+     let per_core_ram_regions = {
+         let mut per_core_regions = BTreeMap::new();
+ 
+-        let mut available_normal_memory = DisjointMemoryRegion::default();
+-        for region in kernel_config.normal_regions.iter() {
+-            available_normal_memory.insert_region(region.start, region.end);
+-        }
+-
+-        // remove the shared addresses
+-        available_normal_memory.remove_region(shared_memory_region.base, shared_memory_region.end);
+-
+         println!("available memory:");
+         for r in available_normal_memory.regions.iter() {
+             println!("    [{:x}..{:x})", r.base, r.end);
