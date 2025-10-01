@@ -5,11 +5,11 @@
 //
 
 pub mod elf;
+pub mod kernel_bootinfo;
 pub mod loader;
 pub mod sdf;
 pub mod sel4;
 pub mod util;
-pub mod kernel_bootinfo;
 
 use std::cmp::min;
 use std::fmt;
@@ -171,25 +171,44 @@ impl DisjointMemoryRegion {
         let mut last_end: Option<u64> = None;
         for region in &self.regions {
             if last_end.is_some() {
-                assert!(region.base >= last_end.unwrap());
+
+                if region.base < last_end.unwrap() {
+                    eprintln!("check() failure");
+                    for r in &self.regions {
+                        eprintln!("[{:x}..{:x})", r.base, r.end);
+                    }
+
+                    assert!(region.base >= last_end.unwrap());
+                }
             }
             last_end = Some(region.end)
         }
     }
 
     pub fn insert_region(&mut self, base: u64, end: u64) {
+        if base == end { return }
+
         let mut insert_idx = self.regions.len();
         for (idx, region) in self.regions.iter().enumerate() {
+            // println!("checking {idx} {region:x?}");
             if end <= region.base {
+                // println!("end less than region base {idx} {end} {} and prev {insert_idx}", region.base);
                 insert_idx = idx;
                 break;
             }
         }
+        // println!("inserting {base:x}..{end:x} at {insert_idx}");
         // FIXME: Should extend here if adjacent rather than
         // inserting now
         self.regions
             .insert(insert_idx, MemoryRegion::new(base, end));
         self.check();
+    }
+
+    pub fn extend(&mut self, other: &Self) {
+        for r in other.regions.iter() {
+            self.insert_region(r.base, r.end);
+        }
     }
 
     pub fn remove_region(&mut self, base: u64, end: u64) {
@@ -266,6 +285,34 @@ impl DisjointMemoryRegion {
         }
     }
 
+    pub fn allocate_aligned(&mut self, size: u64, align: u64) -> MemoryRegion {
+        let mut region_to_remove: Option<MemoryRegion> = None;
+        for region in &self.regions {
+            if size <= region.size() {
+                if region.base % align == 0 {
+                    // maybe partially remove this region.
+                    region_to_remove = Some(MemoryRegion::new(region.base, region.base + size));
+                    break;
+                }
+
+                let new_base = util::round_up(region.base, align);
+                let new_end = new_base + size;
+                if new_base < region.end && new_end <= region.end {
+                    region_to_remove = Some(MemoryRegion::new(new_base, new_end));
+                    break;
+                }
+            }
+        }
+
+        match region_to_remove {
+            Some(region) => {
+                self.remove_region(region.base, region.end);
+                region
+            }
+            None => panic!("Unable to allocate {size} bytes"),
+        }
+    }
+
     pub fn allocate_from(&mut self, size: u64, lower_bound: u64) -> u64 {
         let mut region_to_remove = None;
         for region in &self.regions {
@@ -282,6 +329,31 @@ impl DisjointMemoryRegion {
             }
             None => panic!("Unable to allocate {size} bytes from lower_bound 0x{lower_bound:x}"),
         }
+    }
+
+    pub fn allocate_non_contiguous(&mut self, size: u64) -> Result<Self, String> {
+        let mut new = Self::default();
+
+        let mut allocated_amount = 0;
+        while allocated_amount < size {
+            let Some(first_region) = self.regions.first() else {
+                // No memory left.
+                return Err(format!(
+                    "allocated {allocated_amount:x} of {size:x} before running out of memory"
+                ));
+            };
+
+            let amount_left_needed = size - allocated_amount;
+            let to_allocate = std::cmp::min(first_region.size(), amount_left_needed);
+
+            let base = self.allocate(to_allocate);
+            allocated_amount += to_allocate;
+            new.insert_region(base, base + to_allocate);
+        }
+
+        new.check();
+
+        Ok(new)
     }
 }
 

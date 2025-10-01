@@ -219,7 +219,6 @@ impl<'a> Loader<'a> {
 
         // Remove mut.
         let kernel_first_paddrs = kernel_first_paddrs;
-        println!("{:x?}", kernel_first_paddrs);
 
         // Note: This could be extended to support multi-segment ELF files
         // (and indeed initial did support multi-segment ELF files). However
@@ -412,7 +411,6 @@ impl<'a> Loader<'a> {
                     });
                 }
             }
-            assert!(reserved_regions.len() == 1 + per_core_ram_regions.len() - 1);
 
             let info = seL4_KernelBootInfo {
                 magic: SEL4_KERNEL_BOOT_INFO_MAGIC,

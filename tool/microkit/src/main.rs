@@ -510,13 +510,9 @@ struct KernelPartialBootInfo {
     boot_region: MemoryRegion,
 }
 
-fn kernel_calculate_phys_image(
-    kernel_elf: &ElfFile,
-    ram_regions: &DisjointMemoryRegion,
-) -> (MemoryRegion, MemoryRegion, u64) {
-    // Calculate where the kernel image region is
-    let kernel_loadable_segments = kernel_elf.loadable_segments();
-    let kernel_first_vaddr = kernel_loadable_segments
+fn kernel_calculate_virt_image(kernel_elf: &ElfFile) -> MemoryRegion {
+    let kernel_first_vaddr = kernel_elf
+        .loadable_segments()
         .first()
         .expect("kernel has at least one loadable segment")
         .virt_addr;
@@ -524,24 +520,34 @@ fn kernel_calculate_phys_image(
         .find_symbol("ki_end")
         .expect("Could not find 'ki_end' symbol");
 
+    MemoryRegion::new(kernel_first_vaddr, kernel_last_vaddr)
+}
+
+fn kernel_calculate_phys_image(
+    kernel_elf: &ElfFile,
+    ram_regions: &DisjointMemoryRegion,
+) -> (MemoryRegion, MemoryRegion, u64) {
+    // Calculate where the kernel image region is
+    let kernel_virt_image = kernel_calculate_virt_image(kernel_elf);
+
     // nb: Picked arbitarily
     let kernel_first_paddr = ram_regions.regions[0].base;
-    let kernel_p_v_offset = kernel_first_vaddr - kernel_first_paddr;
+    let kernel_p_v_offset = kernel_virt_image.base - kernel_first_paddr;
 
     // Remove the kernel image.
-    let kernel_last_paddr = kernel_last_vaddr - kernel_p_v_offset;
-    let kernel_region = MemoryRegion::new(kernel_first_paddr, kernel_last_paddr);
+    let kernel_last_paddr = kernel_virt_image.end - kernel_p_v_offset;
+    let kernel_phys_image = MemoryRegion::new(kernel_first_paddr, kernel_last_paddr);
 
     // but get the boot region, we'll add that back later
     // FIXME: Why calcaultae it now if we add it back later?
     let (ki_boot_end_v, _) = kernel_elf
         .find_symbol("ki_boot_end")
         .expect("Could not find 'ki_boot_end' symbol");
-    assert!(ki_boot_end_v < kernel_last_vaddr);
+    assert!(ki_boot_end_v < kernel_virt_image.end);
     let ki_boot_end_p = ki_boot_end_v - kernel_p_v_offset;
     let boot_region = MemoryRegion::new(kernel_first_paddr, ki_boot_end_p);
 
-    (kernel_region, boot_region, kernel_p_v_offset)
+    (kernel_phys_image, boot_region, kernel_p_v_offset)
 }
 
 ///
@@ -570,6 +576,10 @@ fn kernel_partial_boot(
         .filter(|(&other_cpu, _)| other_cpu != cpu)
     {
         for region in other_core_ram.regions.iter() {
+            // println!(
+            //     "reserve {} (cur: {}) other core ram region {:x?}",
+            //     other_cpu.0, cpu.0, region
+            // );
             reserved_regions.insert_region(region.base, region.end);
         }
     }
@@ -602,6 +612,7 @@ fn kernel_partial_boot(
         kernel_calculate_phys_image(kernel_elf, ram_regions);
 
     // Actually remove it.
+    // println!("reserving {:x?}", kernel_region);
     reserved_regions.insert_region(kernel_region.base, kernel_region.end);
 
     let mut available_regions = ram_regions.clone();
@@ -678,7 +689,7 @@ fn kernel_partial_boot(
             a += 1;
         }
 
-        println!("{:x?}\n{:x?}", reserved_regions.regions, reserved2.regions);
+        // println!("{:x?}\n{:x?}", reserved_regions.regions, reserved2.regions);
 
         reserved2
     };
@@ -712,7 +723,7 @@ fn kernel_partial_boot(
         normal_memory.insert_region(free_memory.base, free_memory.end);
     }
 
-    println!("{:x?}\n{:x?}", normal_memory.regions, device_memory.regions);
+    // println!("{:x?}\n{:x?}", normal_memory.regions, device_memory.regions);
 
     KernelPartialBootInfo {
         device_memory,
@@ -3707,36 +3718,21 @@ fn main() -> Result<(), String> {
             std::process::exit(1);
         }
 
-        let per_core_ram_regions = {
-            let mut per_core_regions = BTreeMap::new();
-
-            // TODO: Handle discontiguous normal memory better.
-            let mut ram_start = kernel_config.normal_regions[0].start;
-
-            /* 8 MiB. TODO: Don't hardcode. */
-            const NORMAL_MEMORY_PER_CORE: u64 = 8 * 1024 * 1024;
-
-            for cpu in 0..num_multikernels as u64 {
-                let mut ram = DisjointMemoryRegion::default();
-                ram.insert_region(ram_start, ram_start + NORMAL_MEMORY_PER_CORE);
-                per_core_regions.insert(CpuCore(cpu), ram);
-
-                ram_start += NORMAL_MEMORY_PER_CORE;
-                assert!(ram_start <= kernel_config.normal_regions[0].end);
-            }
-
-            per_core_regions
-        };
-
         // Take all the memory regions used on multiple cores and make them shared.
-
         // XXX: Choosing this address is somewhat of a hack.
-        let mut shared_phys_addr_prev = kernel_config.normal_regions[0].end;
+        let last_ram_region = kernel_config
+            .normal_regions
+            .last()
+            .expect("kernel should have one memory region");
+        let mut shared_phys_addr_prev = last_ram_region.end;
         let mut memory_regions = vec![];
         for mut mr in system.memory_regions {
             if mr.used_cores.len() > 1 {
                 shared_phys_addr_prev -= mr.size;
-                // XXXX: These might conflict if you specify regions in phys mem.
+                // FIXME: Support allocated shared from more than one memory region.
+                assert!(shared_phys_addr_prev >= last_ram_region.start);
+
+                // FIXME: These might conflict if you specify regions in phys mem.
                 if mr.phys_addr.is_none() {
                     mr.phys_addr = Some(shared_phys_addr_prev);
                 }
@@ -3744,6 +3740,76 @@ fn main() -> Result<(), String> {
 
             memory_regions.push(mr);
         }
+
+        let per_core_ram_regions = {
+            let mut per_core_regions = BTreeMap::new();
+
+            let mut available_normal_memory = DisjointMemoryRegion::default();
+            for region in kernel_config.normal_regions.iter() {
+                available_normal_memory.insert_region(region.start, region.end);
+            }
+            // remove the shared addresses
+            available_normal_memory.remove_region(shared_phys_addr_prev, last_ram_region.end);
+
+            println!("available memory:");
+            for r in available_normal_memory.regions.iter() {
+                println!("    [{:x}..{:x})", r.base, r.end);
+            }
+
+            // TODO: I'm not convinced of this algorithm's correctness of always working.
+            //       It might not be the most efficient, but I don't know if it will always work.
+
+            let kernel_size = kernel_calculate_virt_image(&kernel_elf).size();
+
+            for cpu in 0..num_multikernels as u64 {
+                let mut normal_memory = DisjointMemoryRegion::default();
+
+                // FIXME: ARM64 requires LargePage alignment, what about others?
+                let kernel_mem = available_normal_memory.allocate_aligned(
+                    kernel_size,
+                    ObjectType::LargePage.fixed_size(&kernel_config).unwrap(),
+                );
+
+                println!(
+                    "cpu({cpu}) kernel ram: [{:x}..{:x})",
+                    kernel_mem.base, kernel_mem.end,
+                );
+
+                normal_memory.insert_region(kernel_mem.base, kernel_mem.end);
+                per_core_regions.insert(CpuCore(cpu), normal_memory);
+            }
+
+            println!("available memory after allocating kernels:");
+            for r in available_normal_memory.regions.iter() {
+                println!("    [{:x}..{:x})", r.base, r.end);
+            }
+
+            let total_ram_size: u64 = available_normal_memory
+                .regions
+                .iter()
+                .map(|mr| mr.size())
+                .sum();
+
+            let per_core_ram_size = util::round_down(
+                total_ram_size / num_multikernels as u64,
+                ObjectType::SmallPage.fixed_size(&kernel_config).unwrap(),
+            );
+
+            for (&cpu, core_normal_memory) in per_core_regions.iter_mut() {
+                let ram_mem = available_normal_memory
+                    .allocate_non_contiguous(per_core_ram_size)
+                    .expect("should have been able to allocate part of the RAM we chose");
+
+                println!("cpu({}) normal ram: ", cpu.0);
+                for r in ram_mem.regions.iter() {
+                    println!("    [{:x}..{:x})", r.base, r.end);
+                }
+
+                core_normal_memory.extend(&ram_mem);
+            }
+
+            per_core_regions
+        };
 
         FullSystemState {
             sgi_irq_numbers,
