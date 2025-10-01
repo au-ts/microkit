@@ -507,6 +507,14 @@ impl ProtectionDomain {
                 .expect("cpu # fits in u8"),
         );
 
+        if cpu.0 >= config.num_multikernels {
+            return Err(value_error(
+                xml_sdf,
+                node,
+                format!("cpu core must be less than {}, got {}", config.num_multikernels, cpu),
+            ));
+        }
+
         #[allow(clippy::manual_range_contains)]
         if stack_size < PD_MIN_STACK_SIZE || stack_size > PD_MAX_STACK_SIZE {
             return Err(value_error(

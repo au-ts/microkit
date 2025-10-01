@@ -3317,11 +3317,7 @@ fn pick_sgi_channels(
         for &(send, recv) in channels.iter() {
             eprintln!(
                 "       {:<30} (id: {:>2}) |-> {:<30} (id: {:>2}) ==> SGI {:>2}",
-                send.pd,
-                send.id,
-                recv.pd,
-                recv.id,
-                sgi_irq_numbers[recv],
+                send.pd, send.id, recv.pd, recv.id, sgi_irq_numbers[recv],
             );
         }
     }
