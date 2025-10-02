@@ -717,47 +717,55 @@ static void start_kernel(int id)
         ( ((CPU)&0xff)<<24u ) \
     )
 
-/* Memory map for GIC distributor */
+/* Memory map for GICv1/v2 distributor */
 struct gic_dist_map {
-    uint32_t enable;                /* 0x000 */
-    uint32_t ic_type;               /* 0x004 */
-    uint32_t dist_ident;            /* 0x008 */
-    uint32_t res1[29];              /* [0x00C, 0x080) */
+    uint32_t CTLR;                  /* 0x000 Distributor Control Register (RW) */
+    uint32_t TYPER;                 /* 0x004 Interrupt Controller Type Register (RO) */
+    uint32_t IIDR;                  /* 0x008 Distributor Implementer Identification Register (RO) */
+    uint32_t _res1[29];             /* 0x00C--0x07C */
+    uint32_t IGROUPRn[32];          /* 0x080--0x0FC Interrupt Group Registers (RW) */
 
-    uint32_t security[32];          /* [0x080, 0x100) */
+    uint32_t ISENABLERn[32];        /* 0x100--0x17C Interrupt Set-Enable Registers (RW) */
+    uint32_t ICENABLERn[32];        /* 0x180--0x1FC Interrupt Clear-Enable Registers (RW)*/
 
-    uint32_t enable_set[32];        /* [0x100, 0x180) */
-    uint32_t enable_clr[32];        /* [0x180, 0x200) */
-    uint32_t pending_set[32];       /* [0x200, 0x280) */
-    uint32_t pending_clr[32];       /* [0x280, 0x300) */
-    uint32_t active[32];            /* [0x300, 0x380) */
-    uint32_t res2[32];              /* [0x380, 0x400) */
+    uint32_t ISPENDRn[32];          /* 0x200--0x27C Interrupt Set-Pending Registers (RW) */
+    uint32_t ICPENDRn[32];          /* 0x280--0x2FC Interrupt Clear-Pending Registers (RW) */
 
-    uint32_t priority[255];         /* [0x400, 0x7FC) */
-    uint32_t res3;                  /* 0x7FC */
+    uint32_t ISACTIVERn[32];        /* 0x300--0x37C GICv2 Interrupt Set-Active Registers (RW) */
+    uint32_t ICACTIVERn[32];        /* 0x380--0x3FC GICv2 Interrupt Clear-Active Registers (RW) */
 
-    uint32_t targets[255];            /* [0x800, 0xBFC) */
-    uint32_t res4;                  /* 0xBFC */
+    uint32_t IPRIORITYRn[255];      /* 0x400--0x7F8 Interrupt Priority Registers (RW) */
+    uint32_t _res3;                 /* 0x7FC */
 
-    uint32_t config[64];             /* [0xC00, 0xD00) */
+    uint32_t ITARGETSRn[255];       /* 0x800--0xBF8 Interrupt Processor Targets Registers (RO) */
+    uint32_t _res4;                 /* 0xBFC */
 
-    uint32_t spi[32];               /* [0xD00, 0xD80) */
-    uint32_t res5[20];              /* [0xD80, 0xDD0) */
-    uint32_t res6;                  /* 0xDD0 */
-    uint32_t legacy_int;            /* 0xDD4 */
-    uint32_t res7[2];               /* [0xDD8, 0xDE0) */
-    uint32_t match_d;               /* 0xDE0 */
-    uint32_t enable_d;              /* 0xDE4 */
-    uint32_t res8[70];               /* [0xDE8, 0xF00) */
+    uint32_t ICFGRn[64];            /* 0xC00--0xCFC Interrupt Configuration Registers (RW) */
 
-    uint32_t sgi_control;           /* 0xF00 */
-    uint32_t res9[3];               /* [0xF04, 0xF10) */
-    uint32_t sgi_pending_clr[4];    /* [0xF10, 0xF20) */
-    uint32_t res10[40];             /* [0xF20, 0xFC0) */
+    uint32_t _res5[64];             /* 0xD00--0xDFC IMPLEMENTATION DEFINED registers */
 
-    uint32_t periph_id[12];         /* [0xFC0, 0xFF0) */
-    uint32_t component_id[4];       /* [0xFF0, 0xFFF] */
+    uint32_t NSACRn[64];            /* 0xE00--0xEFC GICv2 Non-secure Access Control Registers, optional (RW) */
+
+    uint32_t SGIR;                  /* 0xF00 Software Generated Interrupt Register (WO) */
+    uint32_t _res6[3];              /* 0xF04--0xF0C */
+    uint32_t CPENDSGIRn[4];         /* 0xF10--0xF1C GICv2 SGI Clear-Pending Registers (RW) */
+    uint32_t SPENDSGIRn[4];         /* 0xF20--0xF2C GICv2 SGI Set-Pending Registers (RW) */
+    uint32_t _res7[40];             /* 0xF30--0xFCC */
+
+    // These are actually defined as "ARM implementation of the GIC Identificiation Registers" (p4-120)
+    // but we never read them so let's just marked them as implementation defined.
+    uint32_t _res8[6];              /* 0xFD0--0xFE4 IMPLEMENTATION DEFINED registers (RO) */
+    uint32_t ICPIDR2;               /* 0xFE8 Peripheral ID2 Register (RO) */
+    uint32_t _res9[5];              /* 0xFEC--0xFFC IMPLEMENTATION DEFINED registers (RO) */
 };
+
+_Static_assert(__builtin_offsetof(struct gic_dist_map, IGROUPRn) == 0x080);
+_Static_assert(__builtin_offsetof(struct gic_dist_map, IPRIORITYRn) == 0x400);
+_Static_assert(__builtin_offsetof(struct gic_dist_map, ICFGRn) == 0xC00);
+_Static_assert(__builtin_offsetof(struct gic_dist_map, NSACRn) == 0xE00);
+_Static_assert(__builtin_offsetof(struct gic_dist_map, SGIR) == 0xF00);
+_Static_assert(__builtin_offsetof(struct gic_dist_map, _res8) == 0xFD0);
+_Static_assert(__builtin_offsetof(struct gic_dist_map, ICPIDR2) == 0xFE8);
 
 static uint8_t infer_cpu_gic_id(int nirqs)
 {
@@ -766,7 +774,7 @@ static uint8_t infer_cpu_gic_id(int nirqs)
     uint64_t i;
     uint32_t target = 0;
     for (i = 0; i < nirqs; i += 4) {
-        target = gic_dist->targets[i >> 2];
+        target = gic_dist->ITARGETSRn[i >> 2];
         target |= target >> 16;
         target |= target >> 8;
         if (target) {
@@ -814,22 +822,23 @@ static void configure_gicv2(void)
     volatile struct gic_dist_map *gic_dist = (volatile void *)(GICD_BASE);
 
     uint64_t i;
-    int nirqs = 32 * ((gic_dist->ic_type & 0x1f) + 1);
-    gic_dist->enable = 0;
+    int nirqs = 32 * ((gic_dist->TYPER & 0x1f) + 1);
+    /* Bit 0 is enable; so disable */
+    gic_dist->CTLR = 0;
 
     for (i = 0; i < nirqs; i += 32) {
-        /* disable */
-        gic_dist->enable_clr[i >> 5] = IRQ_SET_ALL;
+        /* clear enable */
+        gic_dist->ICENABLERn[i >> 5] = IRQ_SET_ALL;
         /* clear pending */
-        gic_dist->pending_clr[i >> 5] = IRQ_SET_ALL;
+        gic_dist->ICPENDRn[i >> 5] = IRQ_SET_ALL;
     }
 
     /* reset interrupts priority */
     for (i = 32; i < nirqs; i += 4) {
         if (loader_data->flags & FLAG_SEL4_HYP) {
-            gic_dist->priority[i >> 2] = 0x80808080;
+            gic_dist->IPRIORITYRn[i >> 2] = 0x80808080;
         } else {
-            gic_dist->priority[i >> 2] = 0;
+            gic_dist->IPRIORITYRn[i >> 2] = 0;
         }
     }
     /*
@@ -837,21 +846,24 @@ static void configure_gicv2(void)
      * We query which id that the GIC uses for us and use that.
      */
     uint8_t target = infer_cpu_gic_id(nirqs);
+    puts("GIC target of loader: ");
+    puthex32(target);
+    puts("\n");
     for (i = 0; i < nirqs; i += 4) {
-        gic_dist->targets[i >> 2] = TARGET_CPU_ALLINT(target);
+        gic_dist->ITARGETSRn[i >> 2] = TARGET_CPU_ALLINT(target);
     }
 
     /* level-triggered, 1-N */
     for (i = 32; i < nirqs; i += 32) {
-        gic_dist->config[i >> 5] = 0x55555555;
+        gic_dist->ICFGRn[i >> 5] = 0x55555555;
     }
 
     /* group 0 for secure; group 1 for non-secure */
     for (i = 0; i < nirqs; i += 32) {
         if (loader_data->flags & FLAG_SEL4_HYP && !is_set(BOARD_qemu_virt_aarch64)) {
-            gic_dist->security[i >> 5] = 0xffffffff;
+            gic_dist->IGROUPRn[i >> 5] = 0xffffffff;
         } else {
-            gic_dist->security[i >> 5] = 0;
+            gic_dist->IGROUPRn[i >> 5] = 0;
         }
     }
 
@@ -865,7 +877,8 @@ static void configure_gicv2(void)
     *((volatile uint32_t *)(GICC_BASE + 0x4)) = 0xf0;
 
 
-    gic_dist->enable = 1;
+    /* BIT 0 is enable; so enable */
+    gic_dist->CTLR = 1;
 }
 #endif
 
