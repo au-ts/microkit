@@ -33,14 +33,16 @@ void notified(microkit_channel ch)
         // see also: https://github.com/seL4/seL4/issues/1185
         //
         //
-        // GIC-400 defines it:
+        // GIC-400 (GICv2) defines it:
         // "The reset value for the register that contains the SGI and PPI interrupts is 0x0000FFFF because SGIs are always enabled."
-        // Cortex A-15 defines it:
+        // Cortex A-15 (GICv2) defines it:
         // "The reset value for the register that contains the SGI and PPI interrupts is 0x0000FFFF because SGIs are always enabled."
-        // Cortex A-9 defines it:
+        // Cortex A-9 (GICv2) defines it:
         // "In the Cortex-A9 MPCore, SGIs are always enabled. The corresponding bits in the ICDISERn are read as one, write ignored."
-        // Cortex A-7 defines it:
-        // "The reset value for the register that contains the SGI and PPI interrupts is 0x0000FFFF because SGIs are always enabled".
+        // Cortex A-7 (GICv2) defines it:
+        // "The reset value for the register that contains the SGI and PPI interrupts is 0x0000FFFF because SGIs are always enabled."
+        // GIC-500 (GICv3) defines it:
+        // "The reset value for the register that contains the SGI and PPI interrupts is 0x0000FFFF because SGIs are always enabled."
 
         if (notified_count > 0) {
             print("replying from core 1 to core 0\n");
