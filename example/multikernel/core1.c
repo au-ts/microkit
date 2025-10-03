@@ -31,6 +31,10 @@ void notified(microkit_channel ch)
         // for the GICD_ICENABLER bit.
         // ... slightly concerning that this is how it works though
         // see also: https://github.com/seL4/seL4/issues/1185
+        //
+        //
+        // GIC-400 defines it:
+        // "The reset value for the register that contains the SGI and PPI interrupts is 0x0000FFFF because SGIs are always enabled."
 
         if (notified_count > 0) {
             print("replying from core 1 to core 0\n");
