@@ -69,11 +69,11 @@ seL4_Word pd_stack_bottom_addrs[MAX_PDS];
 #error "No architecture flag was defined, double check your CC flags"
 #endif
 
+#ifdef ARCH_riscv64
 /*
  * Convert the fault status register given by the kernel into a string describing
- * what fault happened. The FSR is the 'cause' register.
+ * what fault happened. The FSR is the 'scause' register.
  */
-#ifdef ARCH_riscv64
 static char *riscv_fsr_to_string(seL4_Word fsr)
 {
     switch (fsr) {
