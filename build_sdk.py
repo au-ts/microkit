@@ -89,7 +89,7 @@ class KernelArch(IntEnum):
 
     def is_arm(self) -> bool:
         return self == KernelArch.AARCH64
-    
+
     def is_x86(self) -> bool:
         return self == KernelArch.X86_64
 

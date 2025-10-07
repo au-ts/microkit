@@ -670,7 +670,7 @@ static void x86_64_print_vm_fault() {
     puts("  ");
     puts(is_instruction ? "(instruction fault)" : "(data fault)");
     puts("\n");
-    
+
     puts("MON|ERROR: description of fault: ");
     puts(page_fault_to_string(fsr));
     puts("\n");

@@ -10,4 +10,3 @@
         <ioport id="0" addr="0x3f8" size="8" />
     </protection_domain>
 </system>
-

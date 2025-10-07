@@ -70,4 +70,3 @@ qemu:
 			-serial mon:stdio               \
 		-kernel $(COPIED_KERNEL) \
 		-initrd $(INITIAL_TASK)
-
