@@ -473,6 +473,7 @@ enum InvocationLabel {
     // ARM IRQ
     ARMIRQIssueIRQHandlerTrigger,
     ARMIRQIssueSGISignal,
+    ARMIRQSetIrqTargetCore,
     // RISC-V Page Table
     RISCVPageTableMap,
     RISCVPageTableUnmap,
@@ -728,7 +729,7 @@ impl Invocation {
             label,
             label_raw: config.invocations_labels[label.to_string()]
                 .as_number()
-                .expect("Invocation is not a number")
+                .expect(&format!("Invocation '{}' is not a number", label.to_string()))
                 .as_u64()
                 .expect("Invocation is not u64")
                 .try_into()
@@ -1016,6 +1017,15 @@ impl Invocation {
                 arg_strs.push(Invocation::fmt_field("dest_depth", dest_depth));
                 (irq_control, &cap_lookup[&irq_control])
             }
+            InvocationArgs::IrqControlSetTargetCore {
+                irq_control,
+                irq,
+                target,
+            } => {
+                arg_strs.push(Invocation::fmt_field("irq", irq));
+                arg_strs.push(Invocation::fmt_field("target", target as u64));
+                (irq_control, &cap_lookup[&irq_control])
+            }
             InvocationArgs::IrqHandlerSetNotification {
                 irq_handler,
                 notification,
@@ -1142,6 +1152,7 @@ impl Invocation {
             InvocationLabel::ARMIRQIssueIRQHandlerTrigger
             | InvocationLabel::RISCVIRQIssueIRQHandlerTrigger => "IRQ Control",
             InvocationLabel::ARMIRQIssueSGISignal => "IRQ Control",
+            InvocationLabel::ARMIRQSetIrqTargetCore => "IRQ Control",
             InvocationLabel::IRQSetIRQHandler => "IRQ Handler",
             InvocationLabel::ARMPageTableMap | InvocationLabel::RISCVPageTableMap => "Page Table",
             InvocationLabel::ARMPageMap | InvocationLabel::RISCVPageMap => "Page",
@@ -1168,6 +1179,7 @@ impl Invocation {
             InvocationLabel::ARMIRQIssueIRQHandlerTrigger
             | InvocationLabel::RISCVIRQIssueIRQHandlerTrigger => "Get",
             InvocationLabel::ARMIRQIssueSGISignal => "IssueSGISignal",
+            InvocationLabel::ARMIRQSetIrqTargetCore => "SetIrqTargetCore",
             InvocationLabel::IRQSetIRQHandler => "SetNotification",
             InvocationLabel::ARMPageTableMap
             | InvocationLabel::ARMPageMap
@@ -1206,6 +1218,10 @@ impl InvocationArgs {
             InvocationArgs::IrqControlIssueSGICap { .. } => match config.arch {
                 Arch::Aarch64 => InvocationLabel::ARMIRQIssueSGISignal,
                 Arch::Riscv64 => panic!("SGIs are not supported on RISC-V yet"),
+            },
+            InvocationArgs::IrqControlSetTargetCore { .. } => match config.arch {
+                Arch::Aarch64 => InvocationLabel::ARMIRQSetIrqTargetCore,
+                Arch::Riscv64 => todo!(),
             },
             InvocationArgs::IrqHandlerSetNotification { .. } => InvocationLabel::IRQSetIRQHandler,
             InvocationArgs::PageTableMap { .. } => match config.arch {
@@ -1327,6 +1343,11 @@ impl InvocationArgs {
                 vec![irq, target.into(), dest_index, dest_depth],
                 vec![dest_root],
             ),
+            InvocationArgs::IrqControlSetTargetCore {
+                irq_control,
+                irq,
+                target,
+            } => (irq_control, vec![irq, target.into()], vec![]),
             InvocationArgs::IrqHandlerSetNotification {
                 irq_handler,
                 notification,
@@ -1454,11 +1475,17 @@ pub enum InvocationArgs {
         irq_control: u64,
         // The SGI INTID (0-15) that can be signalled.
         irq: u64,
+        // XXX: why does the seL4 docs say 0-31 here? GICv3 docs is 0-16, so is implementation...
         // The node ID that will be targeted. 0-7 for GICv2 and 0-31 for GICv3.
         target: u8,
         dest_root: u64,
         dest_index: u64,
         dest_depth: u64,
+    },
+    IrqControlSetTargetCore {
+        irq_control: u64,
+        irq: u64,
+        target: u8,
     },
     IrqHandlerSetNotification {
         irq_handler: u64,
