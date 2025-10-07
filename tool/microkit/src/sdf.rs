@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 const PD_MAX_ID: u64 = 61;
 const VCPU_MAX_ID: u64 = PD_MAX_ID;
 
-const PD_MAX_PRIORITY: u8 = 254;
+const PD_MAX_PRIORITY: u8 = 253;
 /// In microseconds
 pub const BUDGET_DEFAULT: u64 = 1000;
 
