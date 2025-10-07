@@ -36,6 +36,7 @@ pub struct UntypedObject {
 
 pub const UNTYPED_DESC_PADDING: usize = size_of::<u64>() - (2 * size_of::<u8>());
 /// Getting a `seL4_UntypedDesc` for patching into the initialiser
+// @merge: should just Repr(C) this and call struct_to_bytes
 pub fn serialise_ut(ut: &UntypedObject) -> Vec<u8> {
     let mut bytes = Vec::new();
 

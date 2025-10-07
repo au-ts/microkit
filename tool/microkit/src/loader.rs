@@ -173,13 +173,15 @@ impl Loader {
                     panic!("Kernel does not have a consistent physical to virtual offset");
                 }
 
+                // @merge: this used to be .as_slice, unsure why it's a clone. For large ELFs
+                // this will have an impact.
                 regions.push((segment.phys_addr, segment.data().clone()));
             }
         }
 
         assert!(kernel_first_paddr.is_some());
 
-        // We support initial task ELF with multiple segments. This is implemented by amalgamating all the segments
+        // We support an initial task ELF with multiple segments. This is implemented by amalgamating all the segments
         // into 1 segment, so if your segments are sparse, a lot of memory will be wasted.
         let initial_task_segments = initial_task_elf.loadable_segments();
 
@@ -196,10 +198,7 @@ impl Loader {
             initial_task_size - initial_task_segments.last().unwrap().mem_size();
         let mut initial_task_data: Vec<u8> = vec![0; initial_task_actual_size as usize];
         // Skip heap segment
-        for segment in initial_task_segments
-            .iter()
-            .take(initial_task_segments.len().saturating_sub(1))
-        {
+        for segment in initial_task_segments[..initial_task_segments.len() - 1].iter() {
             let buf_off = segment.virt_addr - initial_task_vaddr_range.start;
             initial_task_data[buf_off as usize..(buf_off + segment.mem_size()) as usize]
                 .copy_from_slice(segment.data());
@@ -231,6 +230,7 @@ impl Loader {
             .find(|segment| segment.loadable)
             .expect("Did not find loadable segment");
         let image_vaddr = image_segment.virt_addr;
+        // @merge: sus clone again
         let mut image = image_segment.data().clone();
 
         if image_vaddr != loader_elf.entry {

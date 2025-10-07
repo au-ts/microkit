@@ -782,7 +782,7 @@ def main() -> None:
     sel4_dir = args.sel4.expanduser()
     if not sel4_dir.exists():
         raise Exception(f"sel4_dir: {sel4_dir} does not exist")
-    
+
     rust_sel4_crates = RUST_SEL4_DIR / "crates"
     if not rust_sel4_crates.exists():
         raise Exception(f"rust-sel4 does not exist. Have you ran `git submodule init && git submodule update`?")

@@ -6,7 +6,6 @@
 
 use std::ops::Range;
 
-// use crate::sel4::Object;
 use serde_json;
 
 pub fn msb(x: u64) -> u64 {
