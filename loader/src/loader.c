@@ -849,21 +849,24 @@ static void configure_gicv2(void)
     puts("GIC target of loader: ");
     puthex32(target);
     puts("\n");
-    for (i = 0; i < nirqs; i += 4) {
-        gic_dist->ITARGETSRn[i >> 2] = TARGET_CPU_ALLINT(target);
+
+    for (i = 32; i < nirqs; i += 4) {
+        /* IRQs by default have no interrupt targets */
+        /* cannot configure for SGIs/PPIs (irq < 32) */
+        gic_dist->ITARGETSRn[i / 4] = 0b00000000;
     }
 
     /* level-triggered, 1-N */
     for (i = 32; i < nirqs; i += 32) {
-        gic_dist->ICFGRn[i >> 5] = 0x55555555;
+        gic_dist->ICFGRn[i / 32] = 0x55555555;
     }
 
     /* group 0 for secure; group 1 for non-secure */
     for (i = 0; i < nirqs; i += 32) {
         if (loader_data->flags & FLAG_SEL4_HYP && !is_set(BOARD_qemu_virt_aarch64)) {
-            gic_dist->IGROUPRn[i >> 5] = 0xffffffff;
+            gic_dist->IGROUPRn[i / 32] = 0xffffffff;
         } else {
-            gic_dist->IGROUPRn[i >> 5] = 0;
+            gic_dist->IGROUPRn[i / 32] = 0;
         }
     }
 
