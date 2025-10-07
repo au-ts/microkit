@@ -199,10 +199,9 @@ SUPPORTED_BOARDS = (
             "KernelArmHypervisorSupport": True,
             "KernelArmVtimerUpdateVOffset": False,
             "KernelEnableMultikernelSupport": True,
-            # XXX: Derive from devicetree?
-            "KernelMaxNumNodes": 2,
+            # TODO: Derive from device tree?
+            "KernelMultikernelNumCPUs": 2,
         },
-        multikernels=2,
     ),
     BoardInfo(
         name="qemu_virt_aarch64",
@@ -231,10 +230,10 @@ SUPPORTED_BOARDS = (
             "KernelArmExportPCNTUser": True,
             "KernelArmExportPTMRUser": True,
             "KernelArmVtimerUpdateVOffset": False,
-            "KernelMaxNumNodes": 2,
             "KernelEnableMultikernelSupport": True,
+            # TODO: Derive from device tree?
+            "KernelMultikernelNumCPUs": 2,
         },
-        multikernels=2,
     ),
     BoardInfo(
         name="qemu_virt_riscv64",
@@ -788,14 +787,8 @@ def main() -> None:
                     raise Exception("Unexpected ARM physical address bits defines")
                 loader_defines.append(("PHYSICAL_ADDRESS_BITS", arm_pa_size_bits))
 
-            # Used in multicore configurations, inject the number of cores into the makefile for loader.c
-            if board.multikernels is not None:
-                loader_defines.append(("NUM_MULTIKERNELS", board.multikernels))
-                print(f"Number of multikernels is {board.multikernels}")
-            else:
-                print("Default number of multikernels (1)")
-                loader_defines.append(("NUM_MULTIKERNELS", 1))
-                print(f"Number of multikernels is DEFAULT")
+            if (num_multikernels := sel4_gen_config.get("MULTIKERNEL_NUM_CPUS")) is not None:
+                loader_defines.append(("NUM_MULTIKERNELS", num_multikernels))
 
             build_elf_component("loader", root_dir, build_dir, board, config, args.llvm, loader_defines)
             build_elf_component("monitor", root_dir, build_dir, board, config, args.llvm, [])

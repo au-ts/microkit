@@ -3811,7 +3811,7 @@ fn main() -> Result<(), String> {
     // TODO: More code should be conditional based on ENABLE_MULTIKERNEL_SUPPORT.
     let num_multikernels: u8 =
         if json_str_as_bool(&kernel_config_json, "ENABLE_MULTIKERNEL_SUPPORT")? {
-            json_str_as_u64(&kernel_config_json, "MAX_NUM_NODES")?
+            json_str_as_u64(&kernel_config_json, "MULTIKERNEL_NUM_CPUS")?
                 .try_into()
                 .expect("number of multikernels fits in u8")
         } else {

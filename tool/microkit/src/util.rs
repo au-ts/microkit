@@ -147,7 +147,12 @@ pub fn json_str_as_u64(json: &serde_json::Value, field: &'static str) -> Result<
             .as_str()
             .unwrap_or_else(|| panic!("JSON field '{field}' is not a string"))
             .parse::<u64>()
-            .unwrap_or_else(|_| panic!("JSON field '{field}' could not be converted to u64"))),
+            .unwrap_or_else(|e| {
+                panic!(
+                    "JSON field '{field}' could not be converted to u64 (err: {e:?}, str: '{}')",
+                    value.as_str().unwrap()
+                )
+            })),
         None => Err(format!("JSON field '{field}' does not exist")),
     }
 }
