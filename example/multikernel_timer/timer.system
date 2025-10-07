@@ -9,7 +9,7 @@
 
     <memory_region name="shared" size="0x1000" />
 
-    <protection_domain name="timer">
+    <protection_domain name="timer" cpu="1">
         <program_image path="timer.elf" />
         <map mr="timer" vaddr="0x2_000_000" perms="rw" cached="false" setvar_vaddr="timer_regs" />
         <irq irq="42" id="0" trigger="edge" />
@@ -17,7 +17,7 @@
         <map mr="shared" vaddr="0x2_100_000" perms="rw" cached="false" setvar_vaddr="symbol_shared_buffer" />
     </protection_domain>
 
-    <protection_domain name="client" cpu="1">
+    <protection_domain name="client" cpu="0">
         <program_image path="client.elf" />
 
         <map mr="shared" vaddr="0x2_100_000" perms="rw" cached="false" setvar_vaddr="symbol_shared_buffer" />
