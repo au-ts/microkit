@@ -631,7 +631,6 @@ static void print_tcb_registers(seL4_UserContext *regs)
     puthex64(regs->gs_base);
     puts("\n");
 #endif
-
 }
 
 #ifdef ARCH_riscv64
