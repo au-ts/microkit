@@ -851,9 +851,15 @@ static void configure_gicv2(void)
     puts("\n");
 
     for (i = 32; i < nirqs; i += 4) {
-        /* IRQs by default have no interrupt targets */
+        /* IRQs by default target the loader's CPU, assuming it's "0" CPU interface */
+        /* This gives core 0 of seL4 "permission" to configure these interrupts */
         /* cannot configure for SGIs/PPIs (irq < 32) */
-        gic_dist->ITARGETSRn[i / 4] = 0b00000000;
+        gic_dist->ITARGETSRn[i / 4] = TARGET_CPU_ALLINT(target);
+        puts("gic_dist->ITARGETSRn[");
+        puthex32(i);
+        puts(" / 4] = ");
+        puthex32(gic_dist->ITARGETSRn[i / 4]);
+        puts("\n");
     }
 
     /* level-triggered, 1-N */
