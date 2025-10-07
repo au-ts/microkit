@@ -33,12 +33,14 @@ MICROKIT_EPOCH = 1616367257
 
 TRIPLE_AARCH64 = "aarch64-none-elf"
 TRIPLE_RISCV = "riscv64-unknown-elf"
+TRIPLE_X86_64 = "x86_64-linux-gnu"
 
 KERNEL_CONFIG_TYPE = Union[bool, str]
 KERNEL_OPTIONS = Dict[str, Union[bool, str]]
 
 DEFAULT_KERNEL_OPTIONS = {
     "KernelIsMCS": True,
+    "KernelRootCNodeSizeBits": "17",
 }
 
 DEFAULT_KERNEL_OPTIONS_AARCH64 = {
@@ -50,16 +52,35 @@ DEFAULT_KERNEL_OPTIONS_AARCH64 = {
 
 DEFAULT_KERNEL_OPTIONS_RISCV64 = DEFAULT_KERNEL_OPTIONS
 
+DEFAULT_KERNEL_OPTIONS_X86_64 = {
+    "KernelX86MicroArch": "generic",
+    "KernelSupportPCID": False,
+} | DEFAULT_KERNEL_OPTIONS
+
+RUST_SEL4_DIR = Path("dep/rust-sel4").absolute()
 
 class KernelArch(IntEnum):
     AARCH64 = 1
     RISCV64 = 2
+    X86_64 = 3
 
     def target_triple(self) -> str:
         if self == KernelArch.AARCH64:
             return TRIPLE_AARCH64
         elif self == KernelArch.RISCV64:
             return TRIPLE_RISCV
+        elif self == KernelArch.X86_64:
+            return TRIPLE_X86_64
+        else:
+            raise Exception(f"Unsupported toolchain architecture '{self}'")
+
+    def rust_toolchain(self) -> str:
+        if self == KernelArch.AARCH64:
+            return f"{self.to_str()}-sel4-minimal"
+        elif self == KernelArch.RISCV64:
+            return f"{self.to_str()}imac-sel4-minimal"
+        elif self == KernelArch.X86_64:
+            return f"{self.to_str()}-sel4-minimal"
         else:
             raise Exception(f"Unsupported toolchain target triple '{self}'")
 
@@ -68,12 +89,17 @@ class KernelArch(IntEnum):
 
     def is_arm(self) -> bool:
         return self == KernelArch.AARCH64
+    
+    def is_x86(self) -> bool:
+        return self == KernelArch.X86_64
 
     def to_str(self) -> str:
         if self == KernelArch.AARCH64:
             return "aarch64"
         elif self == KernelArch.RISCV64:
             return "riscv64"
+        elif self == KernelArch.X86_64:
+            return "x86_64"
         else:
             raise Exception(f"Unsupported arch {self}")
 
@@ -89,7 +115,7 @@ class BoardInfo:
     name: str
     arch: KernelArch
     gcc_cpu: Optional[str]
-    loader_link_address: int
+    loader_link_address: int | None
     kernel_options: KERNEL_OPTIONS
 
 
@@ -314,6 +340,30 @@ SUPPORTED_BOARDS = (
             "KernelRiscvExtF": True,
         } | DEFAULT_KERNEL_OPTIONS_RISCV64,
     ),
+    BoardInfo(
+        name="x86_64_generic",
+        arch=KernelArch.X86_64,
+        gcc_cpu="generic",
+        loader_link_address=None,
+        kernel_options = {
+            "KernelPlatform": "pc99",
+            "KernelVTX": False,
+        } | DEFAULT_KERNEL_OPTIONS_X86_64,
+    ),
+    # This particular configuration requires support for Intel VT-x
+    # (plus nested virtualisation on your host if targeting QEMU).
+    # AMD SVM is currently unsupported by seL4.
+    BoardInfo(
+        name="x86_64_generic_vtx",
+        arch=KernelArch.X86_64,
+        gcc_cpu="generic",
+        loader_link_address=None,
+        kernel_options = {
+            "KernelPlatform": "pc99",
+            "KernelVTX": True,
+            "KernelX86_64VTX64BitGuests": True,
+        } | DEFAULT_KERNEL_OPTIONS_X86_64,
+    ),
 )
 
 SUPPORTED_CONFIGS = (
@@ -339,12 +389,17 @@ SUPPORTED_CONFIGS = (
         kernel_options={
             "KernelDebugBuild": False,
             "KernelVerificationBuild": False,
-            "KernelBenchmarks": "track_utilisation"
+            "KernelBenchmarks": "track_utilisation",
+            "KernelSignalFastpath": True,
         },
         kernel_options_arch={
             KernelArch.AARCH64: {
                 "KernelArmExportPMUUser": True,
             },
+            KernelArch.X86_64: {
+                "KernelExportPMCUser": True,
+                "KernelX86DangerousMSR": True,
+            }
         },
     ),
 )
@@ -423,7 +478,6 @@ def build_tool(tool_target: Path, target_triple: str) -> None:
     copy(tool_output, tool_target)
 
     tool_target.chmod(0o755)
-
 
 def build_sel4(
     sel4_dir: Path,
@@ -520,11 +574,13 @@ def build_sel4(
             copy(p, dest)
             dest.chmod(0o744)
 
-    platform_gen = sel4_build_dir / "gen_headers" / "plat" / "machine" / "platform_gen.json"
-    dest = root_dir / "board" / board.name / config.name / "platform_gen.json"
-    dest.unlink(missing_ok=True)
-    copy(platform_gen, dest)
-    dest.chmod(0o744)
+    if not board.arch.is_x86():
+        # only non-x86 platforms have this file to describe memory regions
+        platform_gen = sel4_build_dir / "gen_headers" / "plat" / "machine" / "platform_gen.json"
+        dest = root_dir / "board" / board.name / config.name / "platform_gen.json"
+        dest.unlink(missing_ok=True)
+        copy(platform_gen, dest)
+        dest.chmod(0o744)
 
     gen_config_path = sel4_install_dir / "libsel4/include/kernel/gen_config.json"
     with open(gen_config_path, "r") as f:
@@ -636,6 +692,41 @@ def build_lib_component(
         copy(p, dest)
         dest.chmod(0o744)
 
+def build_capdl_initialiser(
+    component_name: str,
+    rust_sel4_dir: Path,
+    root_dir: Path,
+    build_dir: Path,
+    board: BoardInfo,
+    config: ConfigInfo,
+) -> None:
+    cargo_target_flag = "--release"
+    cargo_out_dir = "release"
+    if config.debug:
+        cargo_env = "RUSTFLAGS='-C debuginfo=2 -C strip=none'"
+    else:
+        cargo_env = ""
+
+    sel4_src_dir = build_dir / board.name / config.name / "sel4" / "install"
+
+    cargo_cross_options = "-Z build-std=core,alloc,compiler_builtins -Z build-std-features=compiler-builtins-mem"
+    cargo_target = board.arch.rust_toolchain()
+
+    cmd = f"cd {rust_sel4_dir} && SEL4_PREFIX={sel4_src_dir.absolute()} {cargo_env} cargo build {cargo_cross_options} --target {cargo_target} {cargo_target_flag} -p sel4-capdl-initializer"
+    r = system(cmd)
+    if r != 0:
+        raise Exception(
+            f"Error building: {component_name} for board: {board.name} config: {config.name}"
+        )
+
+    capdl_init_elf = rust_sel4_dir / "target" / cargo_target / cargo_out_dir / "sel4-capdl-initializer.elf"
+    dest = (
+        root_dir / "board" / board.name / config.name / "elf" / f"{component_name}.elf"
+    )
+    dest.unlink(missing_ok=True)
+    copy(capdl_init_elf, dest)
+    # Make output read-only
+    dest.chmod(0o744)
 
 def main() -> None:
     parser = ArgumentParser()
@@ -661,8 +752,10 @@ def main() -> None:
 
     global TRIPLE_AARCH64
     global TRIPLE_RISCV
+    global TRIPLE_X86_64
     TRIPLE_AARCH64 = args.gcc_toolchain_prefix_aarch64
     TRIPLE_RISCV = args.gcc_toolchain_prefix_riscv64
+    TRIPLE_X86_64 = args.gcc_toolchain_prefix_x86_64
 
     version = args.version
 
@@ -689,6 +782,10 @@ def main() -> None:
     sel4_dir = args.sel4.expanduser()
     if not sel4_dir.exists():
         raise Exception(f"sel4_dir: {sel4_dir} does not exist")
+    
+    rust_sel4_crates = RUST_SEL4_DIR / "crates"
+    if not rust_sel4_crates.exists():
+        raise Exception(f"rust-sel4 does not exist. Have you ran `git submodule init && git submodule update`?")
 
     root_dir = Path("release") / f"{NAME}-sdk-{version}"
     tar_file = Path("release") / f"{NAME}-sdk-{version}.tar.gz"
@@ -745,7 +842,6 @@ def main() -> None:
                 sel4_gen_config = build_sel4(sel4_dir, root_dir, build_dir, board, config, args.llvm)
             loader_printing = 1 if config.name == "debug" else 0
             loader_defines = [
-                ("LINK_ADDRESS", hex(board.loader_link_address)),
                 ("PRINTING", loader_printing)
             ]
             # There are some architecture dependent configuration options that the loader
@@ -761,9 +857,12 @@ def main() -> None:
                     raise Exception("Unexpected ARM physical address bits defines")
                 loader_defines.append(("PHYSICAL_ADDRESS_BITS", arm_pa_size_bits))
 
-            build_elf_component("loader", root_dir, build_dir, board, config, args.llvm, loader_defines)
+            if not board.arch.is_x86():
+                loader_defines.append(("LINK_ADDRESS", hex(board.loader_link_address)))
+                build_elf_component("loader", root_dir, build_dir, board, config, args.llvm, loader_defines)
             build_elf_component("monitor", root_dir, build_dir, board, config, args.llvm, [])
             build_lib_component("libmicrokit", root_dir, build_dir, board, config, args.llvm)
+            build_capdl_initialiser("capdl_initialiser", RUST_SEL4_DIR, root_dir, build_dir, board, config)
 
     # Setup the examples
     for example, example_path in EXAMPLES.items():

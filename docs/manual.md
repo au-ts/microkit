@@ -58,9 +58,11 @@ To build a Microkit system you will write some programs that use `libmicrokit`.
 Microkit programs are a little different to a typical process on a Linux-like operating system.
 Rather than a single `main` entry point, a program has four distinct entry points: `init`, `notified` and, potentially, `protected`, `fault`.
 
-The individual programs are combined to produce a single bootable *system image*.
+On ARM and RISC-V, the individual programs are combined to produce a single bootable *system image*.
 The format of the image is suitable for loading by the target board's bootloader.
 The Microkit tool, which is provided as part of the SDK, is used to generate the system image.
+
+On x86-64, the individual programs are combined to produce a system initialiser ELF image that is loaded by Multiboot as a boot module to seL4. More details in later sections.
 
 The Microkit tool takes a *system description* as input.
 The system description is an XML file that specifies all the objects that make up the system.
@@ -104,6 +106,7 @@ This document attempts to clearly describe all of these terms, however as the co
 * [notification](#notification)
 * [interrupt](#irq)
 * [fault](#fault)
+* [ioport](#ioport)
 
 ## System {#system}
 
@@ -163,7 +166,7 @@ The overall computational model for a Microkit system is a set of isolated compo
 
 The PD has a number of scheduling attributes that are configured in the system description:
 
-* priority (0 -- 254)
+* priority (0 -- 253)
 * period (microseconds)
 * budget (microseconds)
 * passive (boolean)
@@ -216,7 +219,7 @@ The size of a memory region must be a multiple of a supported page size.
 The supported page sizes are architecture dependent.
 For example, on AArch64 architectures, Microkit support 4KiB and 2MiB pages.
 The page size for a memory region may be specified explicitly in the system description.
-If page size is not specified, the smallest supported page size is used.
+If page size is not specified, the largest supported page size is used.
 
 *Note:* The page size also restricts the alignment of the memory region's physical address.
 A fixed physical address must be a multiple of the specified page size.
@@ -328,6 +331,10 @@ The default system fault handler (aka the monitor) has the highest priority and 
 execute and handle faults immediately after they occur. For child PDs that have their faults
 delivered to another PD, the fault being handled depends on when the parent PD is scheduled.
 
+## I/O Ports {#ioport}
+
+I/O ports are x86 mechanisms to access certain physical devices (e.g. PC serial ports or PCI) using the `in` and `out` CPU instructions. The system description specifies if a protection domain have access to certain port address ranges. These accesses will be executed by seL4 and the result returned to protection domains.
+
 # SDK {#sdk}
 
 Microkit is distributed as a software development kit (SDK).
@@ -343,10 +350,12 @@ The SDK contains:
 
 Additionally, for each supported board configuration the following are provided:
 
-* `libmicrokit`
-* `loader.elf`
-* `kernel.elf`
+* `libmicrokit.a`
+* `capdl_initialiser.elf`
+* `sel4.elf`
 * `monitor.elf`
+
+On ARM and RISC-V, a `loader.elf` is provided, which acts as the system's bootloader.
 
 There are also examples provided in the `example` directory.
 
@@ -355,7 +364,7 @@ The user is free to build their system using whatever build system is deemed mos
 
 The Microkit tool should be invoked by the system build process to transform a system description (and any referenced program images) into an image file which can be loaded by the target board's bootloader.
 
-The ELF files provided as program images should be standard ELF files and have been linked against the provided libmicrokit.
+The ELF files provided as program images should be standard ELF files and have been linked against the provided `libmicrokit.a`.
 
 ## Configurations {#config}
 
@@ -365,7 +374,7 @@ The *debug* configuration includes a debug build of the seL4 kernel to allow con
 
 ## Release
 
-The *release* configuration is a release build of the seL4 kernel and is intended for production builds. The loader, monitor, and
+The *release* configuration is a release build of the seL4 kernel and is intended for production builds. The loader, monitor, capDL initialiser and
 kernel do *not* perform any serial output.
 
 ## Benchmark
@@ -406,7 +415,8 @@ In the case of success, a loadable image file and a report shall be produced.
 The output paths for these can be specified by `-o` and `-r` respectively.
 The default output paths are `loader.img` and `report.txt`.
 
-The loadable image will be a binary that can be loaded by the board's bootloader.
+On ARM and RISC-V, the loadable image will be a binary that can be loaded by the board's bootloader.
+On x86, the image will be a Multiboot boot module containing the capDL initialiser.
 
 The report is a plain text file describing important information about the system.
 The report can be useful when debugging potential system problems.
@@ -466,6 +476,12 @@ If the protection domain has children it must also implement:
     seL4_Word microkit_vcpu_arm_read_reg(microkit_child vcpu, seL4_Word reg);
     void microkit_vcpu_arm_write_reg(microkit_child vcpu, seL4_Word reg, seL4_Word value);
     void microkit_arm_smc_call(seL4_ARM_SMCContext *args, seL4_ARM_SMCContext *response);
+    void microkit_x86_ioport_write_8(microkit_ioport ioport_id, seL4_Word port_addr, seL4_Word data);
+    void microkit_x86_ioport_write_16(microkit_ioport ioport_id, seL4_Word port_addr, seL4_Word data);
+    void microkit_x86_ioport_write_32(microkit_ioport ioport_id, seL4_Word port_addr, seL4_Word data);
+    seL4_Uint8 microkit_x86_ioport_read_8(microkit_ioport ioport_id, seL4_Word port_addr);
+    seL4_Uint16 microkit_x86_ioport_read_16(microkit_ioport ioport_id, seL4_Word port_addr);
+    seL4_Uint32 microkit_x86_ioport_read_32(microkit_ioport ioport_id, seL4_Word port_addr);
 
 
 ## `void init(void)`
@@ -644,6 +660,14 @@ Note that this API is only available when the PD making the call has been config
 have SMC enabled in the SDF. Note that when the kernel makes the actual SMC, it cannot
 pre-empt the Secure Monitor and therefore any kernel WCET properties are no longer guaranteed.
 
+## `void microkit_x86_ioport_write_(8|16|32)(microkit_ioport ioport_id, seL4_Word port_addr, seL4_Word data)`
+
+Write an 8, 16, or 32 bits value at port address `port_addr` to I/O Port with ID `ioport_id`.
+
+## `seL4_Uint(8|16|32) microkit_x86_ioport_read_(8|16|32)(microkit_ioport ioport_id, seL4_Word port_addr)`
+
+Read an 8, 16, or 32 bits value at port address `port_addr` from I/O Port with ID `ioport_id`.
+
 # System Description File {#sysdesc}
 
 This section describes the format of the System Description File (SDF).
@@ -694,11 +718,33 @@ The `map` element has the following attributes:
 * `setvar_vaddr`: (optional) Specifies a symbol in the program image. This symbol will be rewritten with the virtual address of the memory region.
 * `setvar_size`: (optional) Specifies a symbol in the program image. This symbol will be rewritten with the size of the memory region.
 
-The `irq` element has the following attributes:
+The `irq` element has the following attributes on ARM and RISC-V:
 
 * `irq`: The hardware interrupt number.
 * `id`: The channel identifier. Must be at least 0 and less than 63.
 * `trigger`: (optional) Whether the IRQ is edge triggered ("edge") or level triggered ("level"). Defaults to "level".
+
+The `irq` element has the following attributes when registering X86_64 IOAPIC interrupts:
+
+* `id`: The channel identifier. Must be at least 0 and less than 63.
+* `ioapic`: (optional) Zero based index of the IOAPIC to get the interrupt from. Defaults to 0.
+* `pin`: IOAPIC pin that generates the interrupt.
+* `level`: (optional) Whether the IRQ is level triggered (1) or edge triggered (0). Defaults to level (1).
+* `polarity`: (optional) Whether the line polarity is high (1) or low (0). Defaults to high (1).
+* `vector`: The IRQ vector number.
+
+The `irq` element has the following attributes when registering X86_64 MSI interrupts:
+
+* `id`: The channel identifier. Must be at least 0 and less than 63.
+* `pcidev`: The PCI device address of the device that will generate the interrupt, in BUS:DEV:FUNC notation (e.g. 01:1f:2).
+* `handle`: Value of the handle programmed into the data portion of the MSI.
+* `vector`: CPU vector to deliver the interrupt to.
+
+The `ioport` element has the following attributes:
+
+* `id`: The I/O port identifier. Must be at least 0 and less than 63.
+* `addr`: The base address of the I/O port.
+* `size`: The size in bytes of the I/O port region.
 
 The `setvar` element has the following attributes:
 
@@ -752,6 +798,11 @@ Below are the available page sizes for each architecture that Microkit supports.
 * 0x1000 (4KiB)
 * 0x200000 (2MiB)
 
+#### x86-64
+
+* 0x1000 (4KiB)
+* 0x200000 (2MiB)
+
 ## `channel`
 
 The `channel` element has exactly two `end` children elements for specifying the two PDs associated with the channel.
@@ -792,6 +843,7 @@ The currently supported platforms are:
 * star64
 * tqma8xqp1gb
 * ultra96v2
+* x86_64_generic
 * zcu102
 
 ## Ariane (CVA6) {#ariane}
@@ -1105,6 +1157,12 @@ ZynqMP> tftpboot 0x40000000 loader.img
 ZynqMP> go 0x40000000
 ```
 
+## x86-64 Generic
+
+Support is available for x86-64 with generic micro-architecture and no VTX.
+
+@billn fill in stuff
+
 ## ZCU102 {#zcu102}
 
 The ZCU102 can run on a physical board or on an appropriate QEMU based emulator.
@@ -1137,7 +1195,7 @@ To avoid this behaviour, the call to `armv8_switch_to_el1` should be replaced wi
 
 ## Adding Platform Support
 
-The following section is a guide for adding support for a new platform to Microkit.
+The following section is a guide for adding support for a new ARM or RISC-V platform to Microkit.
 
 ### Prerequisites
 

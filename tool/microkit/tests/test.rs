@@ -4,7 +4,10 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
-use microkit_tool::{sdf, sel4};
+use microkit_tool::{
+    sdf,
+    sel4::{self},
+};
 use serde_json::json;
 
 const DEFAULT_KERNEL_CONFIG: sel4::Config = sel4::Config {
@@ -15,6 +18,7 @@ const DEFAULT_KERNEL_CONFIG: sel4::Config = sel4::Config {
     kernel_frame_size: 1 << 12,
     init_cnode_bits: 12,
     cap_address_bits: 64,
+    max_num_bootinfo_untypeds: 230,
     fan_out_limit: 256,
     hypervisor: true,
     benchmark: false,
@@ -22,10 +26,11 @@ const DEFAULT_KERNEL_CONFIG: sel4::Config = sel4::Config {
     arm_pa_size_bits: Some(40),
     arm_smc: None,
     riscv_pt_levels: None,
+    x86_xsave_size: None,
     // Not necessary for SDF parsing
     invocations_labels: json!(null),
-    device_regions: vec![],
-    normal_regions: vec![],
+    device_regions: None,
+    normal_regions: None,
 };
 
 fn check_error(test_name: &str, expected_err: &str) {
@@ -142,7 +147,7 @@ mod protection_domain {
 
     #[test]
     fn test_missing_irq() {
-        check_missing("pd_missing_irq.system", "irq", "irq")
+        check_error("pd_missing_irq.system", "Error: Missing required attribute 'irq' (ARM & RISC-V), or 'pin' (x86 IOAPIC), or 'pcidev' (x86 MSI) on element 'irq' on element 'irq'");
     }
 
     #[test]
@@ -463,7 +468,7 @@ mod system {
     fn test_duplicate_irq_number() {
         check_error(
             "sys_duplicate_irq_number.system",
-            "Error: duplicate irq: 112 in protection domain: 'test2' @ ",
+            "Error: duplicate irq number/vector: 112 in protection domain: 'test2' @ ",
         )
     }
 
