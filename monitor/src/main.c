@@ -248,7 +248,8 @@ static char *data_abort_dfsc_to_string(uintptr_t dfsc)
 #endif
 
 #ifdef ARCH_x86_64
-static char *page_fault_to_string(seL4_Word fsr) {
+static char *page_fault_to_string(seL4_Word fsr)
+{
     // https://wiki.osdev.org/Exceptions#Page_Fault
     switch (fsr) {
     case 0 | 4:
@@ -656,7 +657,8 @@ static void riscv_print_vm_fault()
 #endif
 
 #if ARCH_x86_64
-static void x86_64_print_vm_fault() {
+static void x86_64_print_vm_fault()
+{
     seL4_Word ip = seL4_GetMR(seL4_VMFault_IP);
     seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr);
     seL4_Word is_instruction = seL4_GetMR(seL4_VMFault_PrefetchFault);

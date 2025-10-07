@@ -120,7 +120,7 @@ static inline void microkit_pd_restart(microkit_child pd, seL4_Word entry_point)
 #elif defined(CONFIG_ARCH_AARCH64) || defined(CONFIG_ARCH_RISCV)
     ctxt.pc = entry_point;
 #else
-    #error "Unsupported architecture for 'microkit_pd_restart'"
+#error "Unsupported architecture for 'microkit_pd_restart'"
 #endif
     err = seL4_TCB_WriteRegisters(
               BASE_TCB_CAP + pd,
@@ -279,7 +279,8 @@ static inline void microkit_arm_smc_call(seL4_ARM_SMCContext *args, seL4_ARM_SMC
 #endif
 
 #if defined(CONFIG_ARCH_X86_64)
-static inline void microkit_x86_ioport_write_8(microkit_ioport ioport_id, seL4_Word port_addr, seL4_Word data) {
+static inline void microkit_x86_ioport_write_8(microkit_ioport ioport_id, seL4_Word port_addr, seL4_Word data)
+{
     if (ioport_id > MICROKIT_MAX_IOPORT_ID || (microkit_ioports & (1ULL << ioport_id)) == 0) {
         microkit_dbg_puts(microkit_name);
         microkit_dbg_puts(" microkit_x86_ioport_write_8: invalid I/O Port ID given '");
@@ -296,7 +297,8 @@ static inline void microkit_x86_ioport_write_8(microkit_ioport ioport_id, seL4_W
     }
 }
 
-static inline void microkit_x86_ioport_write_16(microkit_ioport ioport_id, seL4_Word port_addr, seL4_Word data) {
+static inline void microkit_x86_ioport_write_16(microkit_ioport ioport_id, seL4_Word port_addr, seL4_Word data)
+{
     if (ioport_id > MICROKIT_MAX_IOPORT_ID || (microkit_ioports & (1ULL << ioport_id)) == 0) {
         microkit_dbg_puts(microkit_name);
         microkit_dbg_puts(" microkit_x86_ioport_write_16: invalid I/O Port ID given '");
@@ -313,7 +315,8 @@ static inline void microkit_x86_ioport_write_16(microkit_ioport ioport_id, seL4_
     }
 }
 
-static inline void microkit_x86_ioport_write_32(microkit_ioport ioport_id, seL4_Word port_addr, seL4_Word data) {
+static inline void microkit_x86_ioport_write_32(microkit_ioport ioport_id, seL4_Word port_addr, seL4_Word data)
+{
     if (ioport_id > MICROKIT_MAX_IOPORT_ID || (microkit_ioports & (1ULL << ioport_id)) == 0) {
         microkit_dbg_puts(microkit_name);
         microkit_dbg_puts(" microkit_x86_ioport_write_32: invalid I/O Port ID given '");
@@ -330,7 +333,8 @@ static inline void microkit_x86_ioport_write_32(microkit_ioport ioport_id, seL4_
     }
 }
 
-static inline seL4_Uint8 microkit_x86_ioport_read_8(microkit_ioport ioport_id, seL4_Word port_addr) {
+static inline seL4_Uint8 microkit_x86_ioport_read_8(microkit_ioport ioport_id, seL4_Word port_addr)
+{
     if (ioport_id > MICROKIT_MAX_IOPORT_ID || (microkit_ioports & (1ULL << ioport_id)) == 0) {
         microkit_dbg_puts(microkit_name);
         microkit_dbg_puts(" microkit_x86_ioport_read_8: invalid I/O Port ID given '");
@@ -349,7 +353,8 @@ static inline seL4_Uint8 microkit_x86_ioport_read_8(microkit_ioport ioport_id, s
     return ret.result;
 }
 
-static inline seL4_Uint16 microkit_x86_ioport_read_16(microkit_ioport ioport_id, seL4_Word port_addr) {
+static inline seL4_Uint16 microkit_x86_ioport_read_16(microkit_ioport ioport_id, seL4_Word port_addr)
+{
     if (ioport_id > MICROKIT_MAX_IOPORT_ID || (microkit_ioports & (1ULL << ioport_id)) == 0) {
         microkit_dbg_puts(microkit_name);
         microkit_dbg_puts(" microkit_x86_ioport_read_16: invalid I/O Port ID given '");
@@ -368,7 +373,8 @@ static inline seL4_Uint16 microkit_x86_ioport_read_16(microkit_ioport ioport_id,
     return ret.result;
 }
 
-static inline seL4_Uint32 microkit_x86_ioport_read_32(microkit_ioport ioport_id, seL4_Word port_addr) {
+static inline seL4_Uint32 microkit_x86_ioport_read_32(microkit_ioport ioport_id, seL4_Word port_addr)
+{
     if (ioport_id > MICROKIT_MAX_IOPORT_ID || (microkit_ioports & (1ULL << ioport_id)) == 0) {
         microkit_dbg_puts(microkit_name);
         microkit_dbg_puts(" microkit_x86_ioport_read_32: invalid I/O Port ID given '");

@@ -59,6 +59,7 @@ DEFAULT_KERNEL_OPTIONS_X86_64 = {
 
 RUST_SEL4_DIR = Path("dep/rust-sel4").absolute()
 
+
 class KernelArch(IntEnum):
     AARCH64 = 1
     RISCV64 = 2
@@ -345,7 +346,7 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.X86_64,
         gcc_cpu="generic",
         loader_link_address=None,
-        kernel_options = {
+        kernel_options={
             "KernelPlatform": "pc99",
             "KernelVTX": False,
         } | DEFAULT_KERNEL_OPTIONS_X86_64,
@@ -358,7 +359,7 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.X86_64,
         gcc_cpu="generic",
         loader_link_address=None,
-        kernel_options = {
+        kernel_options={
             "KernelPlatform": "pc99",
             "KernelVTX": True,
             "KernelX86_64VTX64BitGuests": True,
@@ -478,6 +479,7 @@ def build_tool(tool_target: Path, target_triple: str) -> None:
     copy(tool_output, tool_target)
 
     tool_target.chmod(0o755)
+
 
 def build_sel4(
     sel4_dir: Path,
@@ -692,6 +694,7 @@ def build_lib_component(
         copy(p, dest)
         dest.chmod(0o744)
 
+
 def build_capdl_initialiser(
     component_name: str,
     rust_sel4_dir: Path,
@@ -727,6 +730,7 @@ def build_capdl_initialiser(
     copy(capdl_init_elf, dest)
     # Make output read-only
     dest.chmod(0o744)
+
 
 def main() -> None:
     parser = ArgumentParser()

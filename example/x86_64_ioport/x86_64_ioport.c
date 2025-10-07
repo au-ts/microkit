@@ -18,8 +18,9 @@ static inline void serial_putc(char ch)
 static inline void serial_puts(const char *s)
 {
     while (*s) {
-        if (*s == '\n')
+        if (*s == '\n') {
             serial_putc('\r');
+        }
         serial_putc(*s++);
     }
 }
