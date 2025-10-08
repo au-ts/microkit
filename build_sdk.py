@@ -57,8 +57,6 @@ DEFAULT_KERNEL_OPTIONS_X86_64 = {
     "KernelSupportPCID": False,
 } | DEFAULT_KERNEL_OPTIONS
 
-RUST_SEL4_DIR = Path("dep/rust-sel4").absolute()
-
 
 class KernelArch(IntEnum):
     AARCH64 = 1
@@ -697,14 +695,11 @@ def build_lib_component(
 
 def build_capdl_initialiser(
     component_name: str,
-    rust_sel4_dir: Path,
     root_dir: Path,
     build_dir: Path,
     board: BoardInfo,
     config: ConfigInfo,
 ) -> None:
-    cargo_target_flag = "--release"
-    cargo_out_dir = "release"
     if config.debug:
         cargo_env = "RUSTFLAGS='-C debuginfo=2 -C strip=none'"
     else:
@@ -714,18 +709,29 @@ def build_capdl_initialiser(
 
     cargo_cross_options = "-Z build-std=core,alloc,compiler_builtins -Z build-std-features=compiler-builtins-mem"
     cargo_target = board.arch.rust_toolchain()
+    rust_target_path = Path("initialiser/support/targets").absolute()
 
-    cmd = f"cd {rust_sel4_dir} && SEL4_PREFIX={sel4_src_dir.absolute()} {cargo_env} cargo build {cargo_cross_options} --target {cargo_target} {cargo_target_flag} -p sel4-capdl-initializer"
+    dest = (
+        root_dir / "board" / board.name / config.name / "elf" / f"{component_name}.elf"
+    )
+
+    build_dir = build_dir / board.name / config.name / component_name
+    build_dir.mkdir(exist_ok=True, parents=True)
+    capdl_init_elf = build_dir / "bin" / "sel4-capdl-initializer.elf"
+
+    cmd = f"""
+        RUST_TARGET_PATH={rust_target_path} SEL4_PREFIX={sel4_src_dir.absolute()} \
+        {cargo_env} cargo install {cargo_cross_options} \
+        --target {cargo_target} \
+        --git https://github.com/au-ts/rust-seL4 --branch capdl_dev sel4-capdl-initializer \
+        --root {build_dir}
+    """
     r = system(cmd)
     if r != 0:
         raise Exception(
             f"Error building: {component_name} for board: {board.name} config: {config.name}"
         )
 
-    capdl_init_elf = rust_sel4_dir / "target" / cargo_target / cargo_out_dir / "sel4-capdl-initializer.elf"
-    dest = (
-        root_dir / "board" / board.name / config.name / "elf" / f"{component_name}.elf"
-    )
     dest.unlink(missing_ok=True)
     copy(capdl_init_elf, dest)
     # Make output read-only
@@ -786,10 +792,6 @@ def main() -> None:
     sel4_dir = args.sel4.expanduser()
     if not sel4_dir.exists():
         raise Exception(f"sel4_dir: {sel4_dir} does not exist")
-
-    rust_sel4_crates = RUST_SEL4_DIR / "crates"
-    if not rust_sel4_crates.exists():
-        raise Exception(f"rust-sel4 does not exist. Have you ran `git submodule init && git submodule update`?")
 
     root_dir = Path("release") / f"{NAME}-sdk-{version}"
     tar_file = Path("release") / f"{NAME}-sdk-{version}.tar.gz"
@@ -866,7 +868,7 @@ def main() -> None:
                 build_elf_component("loader", root_dir, build_dir, board, config, args.llvm, loader_defines)
             build_elf_component("monitor", root_dir, build_dir, board, config, args.llvm, [])
             build_lib_component("libmicrokit", root_dir, build_dir, board, config, args.llvm)
-            build_capdl_initialiser("capdl_initialiser", RUST_SEL4_DIR, root_dir, build_dir, board, config)
+            build_capdl_initialiser("capdl_initialiser", root_dir, build_dir, board, config)
 
     # Setup the examples
     for example, example_path in EXAMPLES.items():

@@ -1,3 +1,0 @@
-[submodule "dep/rust-sel4"]
-	path = dep/rust-sel4
-	url = https://github.com/au-ts/rust-sel4.git
