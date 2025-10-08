@@ -19,7 +19,7 @@
 use crate::sel4::{
     Arch, ArmRiscvIrqTrigger, Config, PageSize, X86IoapicIrqPolarity, X86IoapicIrqTrigger,
 };
-use crate::util::str_to_bool;
+use crate::util::{ranges_overlap, str_to_bool};
 use crate::MAX_PDS;
 use std::path::{Path, PathBuf};
 
@@ -177,6 +177,7 @@ pub struct IOPort {
     pub id: u64,
     pub addr: u64,
     pub size: u64,
+    pub text_pos: roxmltree::TextPos,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -773,6 +774,7 @@ impl ProtectionDomain {
                                 checked_lookup(xml_sdf, &child, "size")?,
                                 &child,
                             )?,
+                            text_pos: xml_sdf.doc.text_pos_at(node.range().start),
                         })
                     } else {
                         return Err(value_error(
@@ -1577,6 +1579,37 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             } else {
                 seen_ioport_ids.push(ioport.id);
             }
+        }
+    }
+
+    // Ensure I/O Ports don't overlap
+    let mut seen_ioports: Vec<(&str, &IOPort)> = Vec::new();
+    for pd in &pds {
+        for this_ioport in &pd.ioports {
+            for (seen_pd_name, seen_ioport) in &seen_ioports {
+                let left_range = this_ioport.addr..this_ioport.addr + this_ioport.size;
+                let right_range = seen_ioport.addr..seen_ioport.addr + seen_ioport.size;
+                if ranges_overlap(&left_range, &right_range) {
+                    return Err(format!(
+                            "Error: I/O port id: {}, range: [{:#x}, {:#x}) in protection domain: '{}' @ {}:{}:{} overlaps with I/O port id: {}, range: [{:#x}, {:#x}) in protection domain: '{}' @ {}:{}:{}",
+                            this_ioport.id,
+                            left_range.start,
+                            left_range.end,
+                            pd.name,
+                            filename,
+                            this_ioport.text_pos.row,
+                            this_ioport.text_pos.col,
+                            seen_ioport.id,
+                            right_range.start,
+                            right_range.end,
+                            seen_pd_name,
+                            filename,
+                            seen_ioport.text_pos.row,
+                            seen_ioport.text_pos.col
+                        ));
+                }
+            }
+            seen_ioports.push((&pd.name, this_ioport));
         }
     }
 
