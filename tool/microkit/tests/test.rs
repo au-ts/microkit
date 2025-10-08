@@ -170,8 +170,8 @@ mod protection_domain {
     }
 
     #[test]
-    fn test_missing_irq() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, "pd_missing_irq.system", "Error: Missing required attribute 'irq' (ARM & RISC-V), or 'pin' (x86 IOAPIC), or 'pcidev' (x86 MSI) on element 'irq' on element 'irq'");
+    fn test_missing_irq_arm() {
+        check_missing(&DEFAULT_AARCH64_KERNEL_CONFIG, "pd_missing_irq.system", "irq", "irq");
     }
 
     #[test]
@@ -255,6 +255,30 @@ mod protection_domain {
         check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
             "irq_invalid_trigger.system",
             "Error: trigger must be either 'level' or 'edge' on element 'irq'",
+        )
+    }
+
+    #[test]
+    fn test_irq_ioapic_on_arm() {
+        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+            "irq_ioapic_on_arm.system",
+            "Error: x86 I/O APIC IRQ isn't supported on ARM and RISC-V on element 'irq'",
+        )
+    }
+
+    #[test]
+    fn test_irq_msi_on_arm() {
+        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+            "irq_msi_on_arm.system",
+            "Error: x86 MSI IRQ isn't supported on ARM and RISC-V on element 'irq'",
+        )
+    }
+
+    #[test]
+    fn test_irq_arm_on_x86() {
+        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+            "irq_arm_on_x86.system",
+            "Error: ARM and RISC-V IRQs are not supported on x86 on element 'irq'",
         )
     }
 

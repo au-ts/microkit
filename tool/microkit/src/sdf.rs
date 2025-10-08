@@ -627,6 +627,14 @@ impl ProtectionDomain {
                     }
 
                     if let Some(irq_str) = child.attribute("irq") {
+                        if config.arch == Arch::X86_64 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "ARM and RISC-V IRQs are not supported on x86".to_string(),
+                            ));
+                        }
+
                         // ARM and RISC-V interrupts must have an "irq" attribute.
                         check_attributes(xml_sdf, &child, &["irq", "id", "trigger"])?;
                         let irq = irq_str.parse::<u64>().unwrap();
@@ -652,6 +660,14 @@ impl ProtectionDomain {
                         };
                         irqs.push(irq);
                     } else if let Some(pin_str) = child.attribute("pin") {
+                        if config.arch != Arch::X86_64 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "x86 I/O APIC IRQ isn't supported on ARM and RISC-V".to_string(),
+                            ));
+                        }
+
                         // IOAPIC interrupts (X86_64) must have a "pin" attribute.
                         check_attributes(
                             xml_sdf,
@@ -712,6 +728,14 @@ impl ProtectionDomain {
                         };
                         irqs.push(irq);
                     } else if let Some(pcidev_str) = child.attribute("pcidev") {
+                        if config.arch != Arch::X86_64 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "x86 MSI IRQ isn't supported on ARM and RISC-V".to_string(),
+                            ));
+                        }
+
                         // MSI interrupts (X86_64) have a "pcidev" attribute.
                         check_attributes(xml_sdf, &child, &["id", "pcidev", "handle", "vector"])?;
 
@@ -750,13 +774,16 @@ impl ProtectionDomain {
                         irqs.push(irq);
                     } else {
                         // We can't figure out what type interrupt is specified.
-                        return Err(value_error(
-                            xml_sdf,
-                            &child,
-                            // @merge: we know the architecture, and so we should spit out the correct error.
-                            format!("Missing required attribute 'irq' (ARM & RISC-V), or 'pin' (x86 IOAPIC), or 'pcidev' (x86 MSI) on element '{}'",
-                                    child.tag_name().name())
-                        ));
+                        // Trigger an error.
+                        match config.arch {
+                            Arch::Aarch64 | Arch::Riscv64 => {
+                                checked_lookup(xml_sdf, &child, "irq")?
+                            }
+                            Arch::X86_64 => {
+                                checked_lookup(xml_sdf, &child, "pin")?;
+                                checked_lookup(xml_sdf, &child, "pcidev")?
+                            }
+                        };
                     }
                 }
                 "ioport" => {
