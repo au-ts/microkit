@@ -1582,10 +1582,21 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         }
     }
 
-    // Ensure I/O Ports don't overlap
+    // Ensure I/O Ports' size are valid and they don't overlap.
     let mut seen_ioports: Vec<(&str, &IOPort)> = Vec::new();
     for pd in &pds {
         for this_ioport in &pd.ioports {
+            if this_ioport.size <= 0 {
+                return Err(format!(
+                    "Error: I/O port id: {}, in protection domain: '{}' @ {}:{}:{} have size <= 0",
+                    this_ioport.id,
+                    pd.name,
+                    filename,
+                    this_ioport.text_pos.row,
+                    this_ioport.text_pos.col,
+                ));
+            }
+
             for (seen_pd_name, seen_ioport) in &seen_ioports {
                 let left_range = this_ioport.addr..this_ioport.addr + this_ioport.size;
                 let right_range = seen_ioport.addr..seen_ioport.addr + seen_ioport.size;

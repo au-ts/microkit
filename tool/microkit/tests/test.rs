@@ -326,6 +326,14 @@ mod protection_domain {
             "Error: I/O port id: 0, range: [0x3ff, 0x407) in protection domain: 'test2' @ pd_overlapping_x86_io_ports_2.system:13:5 overlaps with I/O port id: 0, range: [0x3f8, 0x400) in protection domain: 'test1' @ pd_overlapping_x86_io_ports_2.system:8:5"
         )
     }
+
+    #[test]
+    fn test_invalid_x86_io_port_size() {
+        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+            "pd_invalid_x86_io_port_size.system",
+            "Error: I/O port id: 0, in protection domain: 'test1' @ pd_invalid_x86_io_port_size.system:8:5 have size <= 0"
+        )
+    }
 }
 
 #[cfg(test)]
