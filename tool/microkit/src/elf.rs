@@ -99,7 +99,7 @@ struct ElfHeader64 {
 
 const ELF_MAGIC: &[u8; 4] = b"\x7FELF";
 
-const PHENT_TYPE_LOADABLE = 1;
+const PHENT_TYPE_LOADABLE: u32 = 1;
 
 /// ELF program-header flags (`p_flags`)
 const PF_X: u32 = 0x1;
