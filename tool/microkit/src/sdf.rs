@@ -752,6 +752,7 @@ impl ProtectionDomain {
                         return Err(value_error(
                             xml_sdf,
                             &child,
+                            // @merge: we know the architecture, and so we should spit out the correct error.
                             format!("Missing required attribute 'irq' (ARM & RISC-V), or 'pin' (x86 IOAPIC), or 'pcidev' (x86 MSI) on element '{}'",
                                     child.tag_name().name())
                         ));

@@ -727,11 +727,11 @@ The `irq` element has the following attributes on ARM and RISC-V:
 The `irq` element has the following attributes when registering X86_64 IOAPIC interrupts:
 
 * `id`: The channel identifier. Must be at least 0 and less than 63.
-* `ioapic`: (optional) Zero based index of the IOAPIC to get the interrupt from. Defaults to 0.
 * `pin`: IOAPIC pin that generates the interrupt.
+* `vector`: CPU vector to deliver the interrupt to.
+* `ioapic`: (optional) Zero based index of the IOAPIC to get the interrupt from. Defaults to 0.
 * `level`: (optional) Whether the IRQ is level triggered (1) or edge triggered (0). Defaults to level (1).
 * `polarity`: (optional) Whether the line polarity is high (1) or low (0). Defaults to high (1).
-* `vector`: The IRQ vector number.
 
 The `irq` element has the following attributes when registering X86_64 MSI interrupts:
 

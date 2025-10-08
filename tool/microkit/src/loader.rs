@@ -131,6 +131,10 @@ impl Loader {
         initial_task_phy_base: u64,
         initial_task_vaddr_range: Range<u64>,
     ) -> Loader {
+        if config.arch == Arch::X86_64 {
+            unreachable!("internal error: x86_64 does not support creating a loader image"),
+        }
+
         let loader_elf = ElfFile::from_path(loader_elf_path).unwrap();
         let sz = loader_elf.word_size;
         let magic = match sz {

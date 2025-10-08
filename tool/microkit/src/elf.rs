@@ -99,6 +99,8 @@ struct ElfHeader64 {
 
 const ELF_MAGIC: &[u8; 4] = b"\x7FELF";
 
+const PHENT_TYPE_LOADABLE = 1;
+
 /// ELF program-header flags (`p_flags`)
 const PF_X: u32 = 0x1;
 const PF_W: u32 = 0x2;
@@ -236,7 +238,7 @@ impl ElfFile {
 
         // Read all the segments
         if hdr.phnum == 0 {
-            return Err(format!("ELF '{}': have no program headers", path.display()));
+            return Err(format!("ELF '{}': has no program headers", path.display()));
         }
 
         let mut segments = Vec::with_capacity(hdr.phnum as usize);
@@ -250,7 +252,7 @@ impl ElfFile {
             let segment_start = phent.offset as usize;
             let segment_end = phent.offset as usize + phent.filesz as usize;
 
-            if phent.type_ != 1 {
+            if phent.type_ != PHENT_TYPE_LOADABLE {
                 continue;
             }
 
@@ -265,7 +267,7 @@ impl ElfFile {
                 data: segment_data,
                 phys_addr: phent.paddr,
                 virt_addr: phent.vaddr,
-                loadable: phent.type_ == 1,
+                loadable: phent.type_ == PHENT_TYPE_LOADABLE,
                 attrs: flags,
             };
 
@@ -339,6 +341,7 @@ impl ElfFile {
                 // Here we are doing something that could end up being fairly expensive, we are copying
                 // the string for each symbol name. It should be possible to turn this into a reference
                 // although it might be awkward in order to please the borrow checker.
+                // @merge: review this clone
                 let insert = symbols.insert(name.to_string(), (sym.clone(), false));
                 assert!(insert.is_none());
             }
@@ -463,7 +466,7 @@ impl ElfFile {
     }
 
     /// Re-create a minimal ELF file with all the segments such that it can be loaded
-    /// by seL4 on x86 platform as a boot module. This is the kernel code that does the
+    /// by seL4 on a x86 platform as a boot module. This is the kernel code that does the
     /// loading of what we generate here: seL4/src/arch/x86/64/kernel/elf.c
     /// We use this function after patching the spec into the CapDL initialiser.
     /// We don't guarantee that this ELF can be loaded by other kinds of ELF loader.
@@ -520,7 +523,7 @@ impl ElfFile {
         // first write out the headers table
         for (i, seg) in self.loadable_segments().iter().enumerate() {
             let seg_serialised = ElfProgramHeader64 {
-                type_: 1, // loadable segment
+                type_: PHENT_TYPE_LOADABLE, // loadable segment
                 flags: seg.attrs,
                 offset: data_off,
                 vaddr: seg.virt_addr,
@@ -530,6 +533,7 @@ impl ElfFile {
                 align: 0,
             };
 
+            // @merge: this should use struct to bytes instead
             elf_file
                 .write_all(unsafe {
                     from_raw_parts(
