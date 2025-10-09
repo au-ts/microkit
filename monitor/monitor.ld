@@ -5,12 +5,15 @@
  */
 PHDRS
 {
-    all PT_LOAD AT (0x08a000000);
+    text PT_LOAD;
+    data PT_LOAD;
 }
+
+ENTRY(_start);
 
 SECTIONS
 {
-    . = 0x08a000000;
+    . = 0x200000;
 
     .text :
     {
@@ -19,25 +22,33 @@ SECTIONS
         *(.text*)
         *(.rodata)
         _text_end = .;
-    } :all
+    } :text
 
+    . = ALIGN(0x1000);
     .data :
     {
         _data = .;
         *(.data)
+        . = ALIGN(8);
         __global_pointer$ = . + 0x800;
         *(.srodata)
         *(.sdata)
         _data_end = .;
-    } :all
+    } :data
 
     .bss :
     {
         _bss = .;
         *(.sbss)
         *(.bss)
+        *(.bss*)
         *(COMMON)
         . = ALIGN(4);
         _bss_end = .;
-    } :all
+    } :data
+
+    . = ALIGN(0x1000);
+    .ipc_buffer (NOLOAD): {
+        __sel4_ipc_buffer_obj = .;
+    } :NONE
 }
