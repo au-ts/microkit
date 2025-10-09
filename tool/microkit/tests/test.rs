@@ -283,6 +283,46 @@ mod protection_domain {
     }
 
     #[test]
+    fn test_irq_ioapic_less_than_0() {
+        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+            "irq_ioapic_less_than_0.system",
+            "Error: ioapic must be >= 0 on element 'irq'",
+        )
+    }
+
+    #[test]
+    fn test_irq_ioapic_pin_less_than_0() {
+        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+            "irq_ioapic_pin_less_than_0.system",
+            "Error: pin must be >= 0 on element 'irq'",
+        )
+    }
+
+    #[test]
+    fn test_irq_ioapic_invalid_trigger() {
+        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+            "irq_ioapic_invalid_trigger.system",
+            "Error: trigger must be either 'level' or 'edge' on element 'irq'",
+        )
+    }
+
+    #[test]
+    fn test_irq_ioapic_invalid_polarity() {
+        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+            "irq_ioapic_invalid_polarity.system",
+            "Error: polarity must be either 'low' or 'high' on element 'irq'",
+        )
+    }
+
+    #[test]
+    fn test_irq_ioapic_vector_less_than_0() {
+        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+            "irq_ioapic_vector_less_than_0.system",
+            "Error: vector must be >= 0 on element 'irq'",
+        )
+    }
+
+    #[test]
     fn test_parent_has_id() {
         check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
             "pd_parent_has_id.system",

@@ -7,6 +7,6 @@
 <system>
     <protection_domain name="test1">
         <program_image path="test" />
-        <irq irq="1" id="16" />
+        <irq pin="1" vector="1" id="1" ioapic="0" trigger="an_invalid_trigger" />
     </protection_domain>
 </system>

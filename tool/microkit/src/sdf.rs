@@ -672,16 +672,33 @@ impl ProtectionDomain {
                         check_attributes(
                             xml_sdf,
                             &child,
-                            &["id", "ioapic", "pin", "level", "polarity", "vector"],
+                            &["id", "ioapic", "pin", "trigger", "polarity", "vector"],
                         )?;
+
                         let ioapic = if let Some(ioapic_str) = child.attribute("ioapic") {
-                            ioapic_str.parse::<u64>().unwrap()
+                            ioapic_str.parse::<i64>().unwrap()
                         } else {
                             // Default to the first unit.
                             0
                         };
-                        let pin = pin_str.parse::<u64>().unwrap();
-                        let trigger = if let Some(trigger_str) = child.attribute("level") {
+                        if ioapic < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "ioapic must be >= 0".to_string(),
+                            ));
+                        }
+
+                        let pin = pin_str.parse::<i64>().unwrap();
+                        if pin < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "pin must be >= 0".to_string(),
+                            ));
+                        }
+
+                        let trigger = if let Some(trigger_str) = child.attribute("trigger") {
                             match trigger_str {
                                 "level" => X86IoapicIrqTrigger::Level,
                                 "edge" => X86IoapicIrqTrigger::Edge,
@@ -714,16 +731,24 @@ impl ProtectionDomain {
                             X86IoapicIrqPolarity::HighTriggered
                         };
                         let vector = checked_lookup(xml_sdf, &child, "vector")?
-                            .parse::<u64>()
+                            .parse::<i64>()
                             .unwrap();
+                        if vector < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "vector must be >= 0".to_string(),
+                            ));
+                        }
+
                         let irq = SysIrq {
                             id: id as u64,
                             kind: SysIrqKind::IOAPIC {
-                                ioapic,
-                                pin,
+                                ioapic: ioapic as u64,
+                                pin: pin as u64,
                                 trigger,
                                 polarity,
-                                vector,
+                                vector: vector as u64,
                             },
                         };
                         irqs.push(irq);
