@@ -323,6 +323,46 @@ mod protection_domain {
     }
 
     #[test]
+    fn test_irq_msi_pci_bus_less_than_0() {
+        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+            "irq_msi_pci_bus_less_than_0.system",
+            "Error: PCI bus must be >= 0 on element 'irq'",
+        )
+    }
+
+    #[test]
+    fn test_irq_msi_pci_dev_less_than_0() {
+        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+            "irq_msi_pci_dev_less_than_0.system",
+            "Error: PCI device must be >= 0 on element 'irq'",
+        )
+    }
+
+    #[test]
+    fn test_irq_msi_pci_func_less_than_0() {
+        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+            "irq_msi_pci_func_less_than_0.system",
+            "Error: PCI function must be >= 0 on element 'irq'",
+        )
+    }
+
+    #[test]
+    fn test_irq_msi_handle_less_than_0() {
+        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+            "irq_msi_handle_less_than_0.system",
+            "Error: handle must be >= 0 on element 'irq'",
+        )
+    }
+
+    #[test]
+    fn test_irq_msi_vector_less_than_0() {
+        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+            "irq_msi_vector_less_than_0.system",
+            "Error: vector must be >= 0 on element 'irq'",
+        )
+    }
+
+    #[test]
     fn test_parent_has_id() {
         check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
             "pd_parent_has_id.system",
@@ -580,7 +620,7 @@ mod system {
     fn test_duplicate_irq_number() {
         check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
             "sys_duplicate_irq_number.system",
-            "Error: duplicate irq number/vector: 112 in protection domain: 'test2' @ ",
+            "Error: duplicate irq: 112 in protection domain: 'test2' @ ",
         )
     }
 

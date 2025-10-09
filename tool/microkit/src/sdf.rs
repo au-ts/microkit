@@ -764,36 +764,74 @@ impl ProtectionDomain {
                         // MSI interrupts (X86_64) have a "pcidev" attribute.
                         check_attributes(xml_sdf, &child, &["id", "pcidev", "handle", "vector"])?;
 
-                        let pciparts: Vec<u64> = pcidev_str
+                        let pci_parts: Vec<i64> = pcidev_str
                             .split([':', '.'])
                             .map(str::trim)
                             .map(|x| {
-                                u64::from_str_radix(x, 16).expect(
+                                i64::from_str_radix(x, 16).expect(
                                     "Error: Failed to parse parts of the PCI device address",
                                 )
                             })
                             .collect();
-                        if pciparts.len() != 3 {
+                        if pci_parts.len() != 3 {
                             return Err(format!(
                                 "Error: failed to parse PCI address '{}' on element '{}'",
                                 pcidev_str,
                                 child.tag_name().name()
                             ));
                         }
+                        if pci_parts[0] < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "PCI bus must be >= 0".to_string(),
+                            ));
+                        }
+                        if pci_parts[1] < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "PCI device must be >= 0".to_string(),
+                            ));
+                        }
+                        if pci_parts[2] < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "PCI function must be >= 0".to_string(),
+                            ));
+                        }
+
                         let handle = checked_lookup(xml_sdf, &child, "handle")?
-                            .parse::<u64>()
+                            .parse::<i64>()
                             .unwrap();
+                        if handle < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "handle must be >= 0".to_string(),
+                            ));
+                        }
+
                         let vector = checked_lookup(xml_sdf, &child, "vector")?
-                            .parse::<u64>()
+                            .parse::<i64>()
                             .unwrap();
+                        if vector < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "vector must be >= 0".to_string(),
+                            ));
+                        }
+
                         let irq = SysIrq {
                             id: id as u64,
                             kind: SysIrqKind::MSI {
-                                pci_bus: pciparts[0],
-                                pci_dev: pciparts[1],
-                                pci_func: pciparts[2],
-                                handle,
-                                vector,
+                                pci_bus: pci_parts[0] as u64,
+                                pci_dev: pci_parts[1] as u64,
+                                pci_func: pci_parts[2] as u64,
+                                handle: handle as u64,
+                                vector: vector as u64,
                             },
                         };
                         irqs.push(irq);
@@ -1539,7 +1577,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         for sysirq in &pd.irqs {
             if all_irqs.contains(&sysirq.irq_num()) {
                 return Err(format!(
-                    "Error: duplicate irq number/vector: {} in protection domain: '{}' @ {}:{}:{}",
+                    "Error: duplicate irq: {} in protection domain: '{}' @ {}:{}:{}",
                     sysirq.irq_num(),
                     pd.name,
                     filename,
