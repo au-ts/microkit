@@ -695,6 +695,7 @@ def build_lib_component(
 
 def build_capdl_initialiser(
     component_name: str,
+    custom_rust_sel4_dir: Path,
     root_dir: Path,
     build_dir: Path,
     board: BoardInfo,
@@ -717,15 +718,24 @@ def build_capdl_initialiser(
 
     build_dir = build_dir / board.name / config.name / component_name
     build_dir.mkdir(exist_ok=True, parents=True)
-    capdl_init_elf = build_dir / "bin" / "sel4-capdl-initializer.elf"
 
-    cmd = f"""
-        RUST_TARGET_PATH={rust_target_path} SEL4_PREFIX={sel4_src_dir.absolute()} \
-        {cargo_env} cargo install {cargo_cross_options} \
-        --target {cargo_target} \
-        --git https://github.com/au-ts/rust-seL4 --branch capdl_dev sel4-capdl-initializer \
-        --root {build_dir}
-    """
+    if custom_rust_sel4_dir is None:
+        capdl_init_elf = build_dir / "bin" / "sel4-capdl-initializer.elf"
+        cmd = f"""
+            RUST_TARGET_PATH={rust_target_path} SEL4_PREFIX={sel4_src_dir.absolute()} \
+            {cargo_env} cargo install {cargo_cross_options} \
+            --target {cargo_target} \
+            --git https://github.com/au-ts/rust-seL4 --branch capdl_dev sel4-capdl-initializer \
+            --root {build_dir}
+        """
+    else:
+        capdl_init_elf = custom_rust_sel4_dir / "target" / cargo_target / "release" / "sel4-capdl-initializer.elf"
+        cmd = f"""
+            cd {custom_rust_sel4_dir} && SEL4_PREFIX={sel4_src_dir.absolute()} {cargo_env} \
+            cargo build {cargo_cross_options} --target {cargo_target} \
+            --release -p sel4-capdl-initializer
+        """
+
     r = system(cmd)
     if r != 0:
         raise Exception(
@@ -741,6 +751,7 @@ def build_capdl_initialiser(
 def main() -> None:
     parser = ArgumentParser()
     parser.add_argument("--sel4", type=Path, required=True)
+    parser.add_argument("--rust-sel4", type=Path, required=False, default=None, help="Compile capDL initialiser from local repository")
     parser.add_argument("--tool-target-triple", default=get_tool_target_triple(), help="Compile the Microkit tool for this target triple")
     parser.add_argument("--llvm", action="store_true", help="Cross-compile seL4 and Microkit's run-time targets with LLVM")
     parser.add_argument("--boards", metavar="BOARDS", help="Comma-separated list of boards to support. When absent, all boards are supported.")
@@ -868,7 +879,7 @@ def main() -> None:
                 build_elf_component("loader", root_dir, build_dir, board, config, args.llvm, loader_defines)
             build_elf_component("monitor", root_dir, build_dir, board, config, args.llvm, [])
             build_lib_component("libmicrokit", root_dir, build_dir, board, config, args.llvm)
-            build_capdl_initialiser("capdl_initialiser", root_dir, build_dir, board, config)
+            build_capdl_initialiser("capdl_initialiser", args.rust_sel4, root_dir, build_dir, board, config)
 
     # Setup the examples
     for example, example_path in EXAMPLES.items():
