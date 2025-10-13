@@ -56,7 +56,6 @@ const DEFAULT_X86_64_KERNEL_CONFIG: sel4::Config = sel4::Config {
     normal_regions: None,
 };
 
-
 fn check_error(kernel_config: &sel4::Config, test_name: &str, expected_err: &str) {
     let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests/sdf/");
@@ -88,7 +87,8 @@ mod memory_region {
 
     #[test]
     fn test_unsupported_page_size() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "mr_unsupported_page_size.system",
             "Error: page size 0x200001 not supported on element 'memory_region'",
         )
@@ -96,7 +96,8 @@ mod memory_region {
 
     #[test]
     fn test_size_not_multiple_of_page_size() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "mr_size_not_multiple_of_page_size.system",
             "Error: size is not a multiple of the page size on element 'memory_region'",
         )
@@ -104,7 +105,8 @@ mod memory_region {
 
     #[test]
     fn test_addr_not_aligned_to_page_size() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "mr_addr_not_aligned_to_page_size.system",
             "Error: phys_addr is not aligned to the page size on element 'memory_region'",
         )
@@ -112,17 +114,28 @@ mod memory_region {
 
     #[test]
     fn test_missing_size() {
-        check_missing(&DEFAULT_AARCH64_KERNEL_CONFIG, "mr_missing_size.system", "size", "memory_region")
+        check_missing(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "mr_missing_size.system",
+            "size",
+            "memory_region",
+        )
     }
 
     #[test]
     fn test_missing_name() {
-        check_missing(&DEFAULT_AARCH64_KERNEL_CONFIG, "mr_missing_name.system", "name", "memory_region")
+        check_missing(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "mr_missing_name.system",
+            "name",
+            "memory_region",
+        )
     }
 
     #[test]
     fn test_invalid_attrs() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "mr_invalid_attrs.system",
             "Error: invalid attribute 'page_count' on element 'memory_region': ",
         )
@@ -130,7 +143,7 @@ mod memory_region {
 
     #[test]
     fn test_overlapping_phys_addr() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG,
             "mr_overlapping_phys_addr.system",
             "Error: memory region 'mr2' physical address range [0x9001000..0x9002000) overlaps with another memory region 'mr1' [0x9000000..0x9002000) @ ",
         )
@@ -143,12 +156,18 @@ mod protection_domain {
 
     #[test]
     fn test_missing_name() {
-        check_missing(&DEFAULT_AARCH64_KERNEL_CONFIG, "pd_missing_name.system", "name", "protection_domain")
+        check_missing(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_missing_name.system",
+            "name",
+            "protection_domain",
+        )
     }
 
     #[test]
     fn test_missing_program_image() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_missing_program_image.system",
             "Error: missing 'program_image' element on protection_domain: ",
         )
@@ -156,42 +175,78 @@ mod protection_domain {
 
     #[test]
     fn test_missing_path() {
-        check_missing(&DEFAULT_AARCH64_KERNEL_CONFIG, "pd_missing_path.system", "path", "program_image")
+        check_missing(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_missing_path.system",
+            "path",
+            "program_image",
+        )
     }
 
     #[test]
     fn test_missing_mr() {
-        check_missing(&DEFAULT_AARCH64_KERNEL_CONFIG, "pd_missing_mr.system", "mr", "map")
+        check_missing(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_missing_mr.system",
+            "mr",
+            "map",
+        )
     }
 
     #[test]
     fn test_missing_vaddr() {
-        check_missing(&DEFAULT_AARCH64_KERNEL_CONFIG, "pd_missing_vaddr.system", "vaddr", "map")
+        check_missing(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_missing_vaddr.system",
+            "vaddr",
+            "map",
+        )
     }
 
     #[test]
     fn test_missing_irq_arm() {
-        check_missing(&DEFAULT_AARCH64_KERNEL_CONFIG, "pd_missing_irq.system", "irq", "irq");
+        check_missing(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_missing_irq.system",
+            "irq",
+            "irq",
+        );
     }
 
     #[test]
     fn test_missing_id() {
-        check_missing(&DEFAULT_AARCH64_KERNEL_CONFIG, "pd_missing_id.system", "id", "irq")
+        check_missing(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_missing_id.system",
+            "id",
+            "irq",
+        )
     }
 
     #[test]
     fn test_missing_symbol() {
-        check_missing(&DEFAULT_AARCH64_KERNEL_CONFIG, "pd_missing_symbol.system", "symbol", "setvar")
+        check_missing(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_missing_symbol.system",
+            "symbol",
+            "setvar",
+        )
     }
 
     #[test]
     fn test_missing_region_paddr() {
-        check_missing(&DEFAULT_AARCH64_KERNEL_CONFIG, "pd_missing_region_paddr.system", "region_paddr", "setvar")
+        check_missing(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_missing_region_paddr.system",
+            "region_paddr",
+            "setvar",
+        )
     }
 
     #[test]
     fn test_duplicate_setvar() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_duplicate_setvar.system",
             "Error: setvar on symbol 'test' already exists on element 'setvar': ",
         )
@@ -199,7 +254,8 @@ mod protection_domain {
 
     #[test]
     fn test_duplicate_program_image() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_duplicate_program_image.system",
             "Error: program_image must only be specified once on element 'protection_domain': ",
         )
@@ -207,7 +263,8 @@ mod protection_domain {
 
     #[test]
     fn test_invalid_attrs() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_invalid_attrs.system",
             "Error: invalid attribute 'foo' on element 'protection_domain': ",
         )
@@ -215,7 +272,8 @@ mod protection_domain {
 
     #[test]
     fn test_program_image_invalid_attrs() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_program_image_invalid_attrs.system",
             "Error: invalid attribute 'foo' on element 'program_image': ",
         )
@@ -228,7 +286,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_greater_than_max() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "irq_id_greater_than_max.system",
             "Error: id must be < 62 on element 'irq'",
         )
@@ -236,7 +295,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_less_than_0() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "irq_id_less_than_0.system",
             "Error: id must be >= 0 on element 'irq'",
         )
@@ -244,7 +304,8 @@ mod protection_domain {
 
     #[test]
     fn test_write_only_mr() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_write_only_mr.system",
             "Error: perms must not be 'w', write-only mappings are not allowed on element 'map':",
         )
@@ -252,7 +313,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_invalid_trigger() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "irq_invalid_trigger.system",
             "Error: trigger must be either 'level' or 'edge' on element 'irq'",
         )
@@ -260,7 +322,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_ioapic_on_arm() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "irq_ioapic_on_arm.system",
             "Error: x86 I/O APIC IRQ isn't supported on ARM and RISC-V on element 'irq'",
         )
@@ -268,7 +331,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_msi_on_arm() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "irq_msi_on_arm.system",
             "Error: x86 MSI IRQ isn't supported on ARM and RISC-V on element 'irq'",
         )
@@ -276,7 +340,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_arm_on_x86() {
-        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_X86_64_KERNEL_CONFIG,
             "irq_arm_on_x86.system",
             "Error: ARM and RISC-V IRQs are not supported on x86 on element 'irq'",
         )
@@ -284,7 +349,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_ioapic_less_than_0() {
-        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_X86_64_KERNEL_CONFIG,
             "irq_ioapic_less_than_0.system",
             "Error: ioapic must be >= 0 on element 'irq'",
         )
@@ -292,7 +358,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_ioapic_pin_less_than_0() {
-        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_X86_64_KERNEL_CONFIG,
             "irq_ioapic_pin_less_than_0.system",
             "Error: pin must be >= 0 on element 'irq'",
         )
@@ -300,7 +367,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_ioapic_invalid_trigger() {
-        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_X86_64_KERNEL_CONFIG,
             "irq_ioapic_invalid_trigger.system",
             "Error: trigger must be either 'level' or 'edge' on element 'irq'",
         )
@@ -308,7 +376,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_ioapic_invalid_polarity() {
-        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_X86_64_KERNEL_CONFIG,
             "irq_ioapic_invalid_polarity.system",
             "Error: polarity must be either 'low' or 'high' on element 'irq'",
         )
@@ -316,7 +385,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_ioapic_vector_less_than_0() {
-        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_X86_64_KERNEL_CONFIG,
             "irq_ioapic_vector_less_than_0.system",
             "Error: vector must be >= 0 on element 'irq'",
         )
@@ -324,7 +394,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_msi_pci_bus_less_than_0() {
-        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_X86_64_KERNEL_CONFIG,
             "irq_msi_pci_bus_less_than_0.system",
             "Error: PCI bus must be >= 0 on element 'irq'",
         )
@@ -332,7 +403,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_msi_pci_dev_less_than_0() {
-        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_X86_64_KERNEL_CONFIG,
             "irq_msi_pci_dev_less_than_0.system",
             "Error: PCI device must be >= 0 on element 'irq'",
         )
@@ -340,7 +412,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_msi_pci_func_less_than_0() {
-        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_X86_64_KERNEL_CONFIG,
             "irq_msi_pci_func_less_than_0.system",
             "Error: PCI function must be >= 0 on element 'irq'",
         )
@@ -348,7 +421,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_msi_handle_less_than_0() {
-        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_X86_64_KERNEL_CONFIG,
             "irq_msi_handle_less_than_0.system",
             "Error: handle must be >= 0 on element 'irq'",
         )
@@ -356,7 +430,8 @@ mod protection_domain {
 
     #[test]
     fn test_irq_msi_vector_less_than_0() {
-        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_X86_64_KERNEL_CONFIG,
             "irq_msi_vector_less_than_0.system",
             "Error: vector must be >= 0 on element 'irq'",
         )
@@ -364,7 +439,8 @@ mod protection_domain {
 
     #[test]
     fn test_parent_has_id() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_parent_has_id.system",
             "Error: invalid attribute 'id' on element 'protection_domain': ",
         )
@@ -372,12 +448,18 @@ mod protection_domain {
 
     #[test]
     fn test_child_missing_id() {
-        check_missing(&DEFAULT_AARCH64_KERNEL_CONFIG, "pd_child_missing_id.system", "id", "protection_domain")
+        check_missing(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_child_missing_id.system",
+            "id",
+            "protection_domain",
+        )
     }
 
     #[test]
     fn test_duplicate_child_id() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_duplicate_child_id.system",
             "Error: duplicate id: 0 in protection domain: 'parent' @",
         )
@@ -385,7 +467,7 @@ mod protection_domain {
 
     #[test]
     fn test_duplicate_child_id_vcpu() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_duplicate_child_id_vcpu.system",
             "Error: duplicate id: 0 clashes with virtual machine vcpu id in protection domain: 'parent' @",
         )
@@ -393,7 +475,8 @@ mod protection_domain {
 
     #[test]
     fn test_small_stack_size() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_small_stack_size.system",
             "Error: stack size must be between",
         )
@@ -401,7 +484,8 @@ mod protection_domain {
 
     #[test]
     fn test_unaligned_stack_size() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_unaligned_stack_size.system",
             "Error: stack size must be aligned to the smallest page size",
         )
@@ -409,7 +493,7 @@ mod protection_domain {
 
     #[test]
     fn test_overlapping_maps() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_overlapping_maps.system",
             "Error: map for 'mr2' has virtual address range [0x1000000..0x1001000) which overlaps with map for 'mr1' [0x1000000..0x1001000) in protection domain 'hello' @"
         )
@@ -417,7 +501,7 @@ mod protection_domain {
 
     #[test]
     fn test_overlapping_x86_io_ports_1() {
-        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+        check_error(&DEFAULT_X86_64_KERNEL_CONFIG,
             "pd_overlapping_x86_io_ports_1.system",
             "Error: I/O port id: 1, inclusive range: [0x3ff, 0x406] in protection domain: 'test1' @ pd_overlapping_x86_io_ports_1.system:8:5 overlaps with I/O port id: 0, inclusive range: [0x3f8, 0x3ff] in protection domain: 'test1' @ pd_overlapping_x86_io_ports_1.system:8:5"
         )
@@ -425,7 +509,7 @@ mod protection_domain {
 
     #[test]
     fn test_overlapping_x86_io_ports_2() {
-        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+        check_error(&DEFAULT_X86_64_KERNEL_CONFIG,
             "pd_overlapping_x86_io_ports_2.system",
             "Error: I/O port id: 0, inclusive range: [0x3ff, 0x406] in protection domain: 'test2' @ pd_overlapping_x86_io_ports_2.system:13:5 overlaps with I/O port id: 0, inclusive range: [0x3f8, 0x3ff] in protection domain: 'test1' @ pd_overlapping_x86_io_ports_2.system:8:5"
         )
@@ -433,9 +517,10 @@ mod protection_domain {
 
     #[test]
     fn test_invalid_x86_io_port_size() {
-        check_error(&DEFAULT_X86_64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_X86_64_KERNEL_CONFIG,
             "pd_invalid_x86_io_port_size.system",
-            "Error: I/O port id: 0, in protection domain: 'test1' @ pd_invalid_x86_io_port_size.system:8:5 have size <= 0"
+            "Error: size must be > 0 on element 'ioport':",
         )
     }
 }
@@ -446,7 +531,8 @@ mod virtual_machine {
 
     #[test]
     fn test_vm_not_child() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "vm_not_child.system",
             "Error: virtual machine must be a child of a protection domain",
         )
@@ -454,7 +540,8 @@ mod virtual_machine {
 
     #[test]
     fn test_duplicate_name() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "vm_duplicate_name.system",
             "Error: duplicate virtual machine name 'guest'",
         )
@@ -462,7 +549,8 @@ mod virtual_machine {
 
     #[test]
     fn test_missing_vcpu() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "vm_missing_vcpu.system",
             "Error: missing 'vcpu' element on virtual_machine: ",
         )
@@ -470,12 +558,18 @@ mod virtual_machine {
 
     #[test]
     fn test_missing_vcpu_id() {
-        check_missing(&DEFAULT_AARCH64_KERNEL_CONFIG, "vm_missing_vcpu_id.system", "id", "vcpu")
+        check_missing(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "vm_missing_vcpu_id.system",
+            "id",
+            "vcpu",
+        )
     }
 
     #[test]
     fn test_invalid_vcpu_id() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "vm_invalid_vcpu_id.system",
             "Error: id must be < 62 on element 'vcpu'",
         )
@@ -483,7 +577,7 @@ mod virtual_machine {
 
     #[test]
     fn test_overlapping_maps() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG,
             "vm_overlapping_maps.system",
             "Error: map for 'mr2' has virtual address range [0x1000000..0x1001000) which overlaps with map for 'mr1' [0x1000000..0x1001000) in virtual machine 'guest' @"
         )
@@ -491,7 +585,8 @@ mod virtual_machine {
 
     #[test]
     fn test_missing_mr() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "vm_missing_mr.system",
             "Error: invalid memory region name 'mr1' on 'map' @",
         )
@@ -504,12 +599,18 @@ mod channel {
 
     #[test]
     fn test_missing_id() {
-        check_missing(&DEFAULT_AARCH64_KERNEL_CONFIG, "ch_missing_id.system", "id", "end")
+        check_missing(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "ch_missing_id.system",
+            "id",
+            "end",
+        )
     }
 
     #[test]
     fn test_id_greater_than_max() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "ch_id_greater_than_max.system",
             "Error: id must be < 62 on element 'end'",
         )
@@ -517,7 +618,8 @@ mod channel {
 
     #[test]
     fn test_id_less_than_0() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "ch_id_less_than_0.system",
             "Error: id must be >= 0 on element 'end'",
         )
@@ -525,7 +627,8 @@ mod channel {
 
     #[test]
     fn test_invalid_attrs() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "ch_invalid_attrs.system",
             "Error: invalid attribute 'foo' on element 'channel': ",
         )
@@ -533,7 +636,8 @@ mod channel {
 
     #[test]
     fn test_channel_invalid_pd() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "ch_invalid_pd.system",
             "Error: invalid PD name 'invalidpd' on element 'end': ",
         )
@@ -541,7 +645,8 @@ mod channel {
 
     #[test]
     fn test_invalid_element() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "ch_invalid_element.system",
             "Error: invalid XML element 'ending': ",
         )
@@ -549,7 +654,8 @@ mod channel {
 
     #[test]
     fn test_not_enough_ends() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "ch_not_enough_ends.system",
             "Error: exactly two end elements must be specified on element 'channel': ",
         )
@@ -557,7 +663,8 @@ mod channel {
 
     #[test]
     fn test_too_many_ends() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "ch_too_many_ends.system",
             "Error: exactly two end elements must be specified on element 'channel': ",
         )
@@ -565,7 +672,8 @@ mod channel {
 
     #[test]
     fn test_end_invalid_pp() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "ch_end_invalid_pp.system",
             "Error: pp must be 'true' or 'false' on element 'end': ",
         )
@@ -573,7 +681,8 @@ mod channel {
 
     #[test]
     fn test_end_invalid_notify() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "ch_end_invalid_notify.system",
             "Error: notify must be 'true' or 'false' on element 'end': ",
         )
@@ -581,7 +690,8 @@ mod channel {
 
     #[test]
     fn test_bidirectional_ppc() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "ch_bidirectional_ppc.system",
             "Error: cannot ppc bidirectionally on element 'channel': ",
         )
@@ -589,7 +699,7 @@ mod channel {
 
     #[test]
     fn test_ppcall_priority() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG,
             "ch_ppcall_priority.system",
             "Error: PPCs must be to protection domains of strictly higher priorities; channel with PPC exists from pd test1 (priority: 2) to pd test2 (priority: 1)",
         )
@@ -602,7 +712,8 @@ mod system {
 
     #[test]
     fn test_duplicate_pd_names() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "sys_duplicate_pd_name.system",
             "Error: duplicate protection domain name 'test'.",
         )
@@ -610,7 +721,8 @@ mod system {
 
     #[test]
     fn test_duplicate_mr_names() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "sys_duplicate_mr_name.system",
             "Error: duplicate memory region name 'test'.",
         )
@@ -618,7 +730,8 @@ mod system {
 
     #[test]
     fn test_duplicate_irq_number() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "sys_duplicate_irq_number.system",
             "Error: duplicate irq: 112 in protection domain: 'test2' @ ",
         )
@@ -626,7 +739,8 @@ mod system {
 
     #[test]
     fn test_duplicate_irq_id() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "sys_duplicate_irq_id.system",
             "Error: duplicate channel id: 3 in protection domain: 'test1' @",
         )
@@ -634,7 +748,8 @@ mod system {
 
     #[test]
     fn test_channel_duplicate_a_id() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "sys_channel_duplicate_a_id.system",
             "Error: duplicate channel id: 5 in protection domain: 'test1' @",
         )
@@ -642,7 +757,8 @@ mod system {
 
     #[test]
     fn test_channel_duplicate_b_id() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "sys_channel_duplicate_b_id.system",
             "Error: duplicate channel id: 5 in protection domain: 'test2' @",
         )
@@ -650,7 +766,8 @@ mod system {
 
     #[test]
     fn test_no_protection_domains() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "sys_no_protection_domains.system",
             "Error: at least one protection domain must be defined",
         )
@@ -658,7 +775,8 @@ mod system {
 
     #[test]
     fn test_text_elements() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "sys_text_elements.system",
             "Error: unexpected text found in element 'system' @",
         )
@@ -666,7 +784,8 @@ mod system {
 
     #[test]
     fn test_map_invalid_mr() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "sys_map_invalid_mr.system",
             "Error: invalid memory region name 'foos' on 'map' @ ",
         )
@@ -674,7 +793,8 @@ mod system {
 
     #[test]
     fn test_map_not_aligned() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "sys_map_not_aligned.system",
             "Error: invalid vaddr alignment on 'map' @ ",
         )
@@ -682,7 +802,8 @@ mod system {
 
     #[test]
     fn test_map_too_high() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "sys_map_too_high.system",
             "Error: vaddr (0x1000000000000000) must be less than 0xffffffe000 on element 'map'",
         )
@@ -690,7 +811,8 @@ mod system {
 
     #[test]
     fn test_too_many_pds() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG, 
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
             "sys_too_many_pds.system",
             "Error: too many protection domains (64) defined. Maximum is 63.",
         )

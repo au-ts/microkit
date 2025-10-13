@@ -852,18 +852,43 @@ impl ProtectionDomain {
                 "ioport" => {
                     if let Arch::X86_64 = config.arch {
                         check_attributes(xml_sdf, &child, &["id", "addr", "size"])?;
+
+                        let id = checked_lookup(xml_sdf, &child, "id")?
+                            .parse::<i64>()
+                            .unwrap();
+                        if id > PD_MAX_ID as i64 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                format!("id must be < {}", PD_MAX_ID + 1),
+                            ));
+                        }
+                        if id < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "id must be >= 0".to_string(),
+                            ));
+                        }
+
+                        let addr =
+                            sdf_parse_number(checked_lookup(xml_sdf, &child, "addr")?, &child)?;
+
+                        let size = checked_lookup(xml_sdf, &child, "size")?
+                            .parse::<i64>()
+                            .unwrap();
+                        if size <= 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "size must be > 0".to_string(),
+                            ));
+                        }
+
                         ioports.push(IOPort {
-                            id: checked_lookup(xml_sdf, &child, "id")?
-                                .parse::<u64>()
-                                .unwrap(),
-                            addr: sdf_parse_number(
-                                checked_lookup(xml_sdf, &child, "addr")?,
-                                &child,
-                            )?,
-                            size: sdf_parse_number(
-                                checked_lookup(xml_sdf, &child, "size")?,
-                                &child,
-                            )?,
+                            id: id as u64,
+                            addr,
+                            size: size as u64,
                             text_pos: xml_sdf.doc.text_pos_at(node.range().start),
                         })
                     } else {
@@ -1676,17 +1701,6 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
     let mut seen_ioports: Vec<(&str, &IOPort)> = Vec::new();
     for pd in &pds {
         for this_ioport in &pd.ioports {
-            if this_ioport.size <= 0 {
-                return Err(format!(
-                    "Error: I/O port id: {}, in protection domain: '{}' @ {}:{}:{} have size <= 0",
-                    this_ioport.id,
-                    pd.name,
-                    filename,
-                    this_ioport.text_pos.row,
-                    this_ioport.text_pos.col,
-                ));
-            }
-
             for (seen_pd_name, seen_ioport) in &seen_ioports {
                 let left_range = this_ioport.addr..this_ioport.addr + this_ioport.size - 1;
                 let right_range = seen_ioport.addr..seen_ioport.addr + seen_ioport.size - 1;
