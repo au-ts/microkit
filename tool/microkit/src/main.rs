@@ -2021,6 +2021,25 @@ fn build_system(
         }
     }
 
+    // TODO: disallow people making IRQs in the SGI range? but PPI is OK.
+    // If we're CPU core 0 (primary, the one allowed to touch the GIC)
+    // perform the SetTargetCore invocations for IRQs on other cores.
+    if cpu == sdf::CpuCore(0) {
+        for pd in all_protection_domains.values().filter(|&pd| pd.cpu != cpu) {
+            /* only system irqs on other cores, not SGIs/PPIs ('32') */
+            for sysirq in pd.irqs.iter().filter(|si| si.irq >= 32) {
+                system_invocations.push(Invocation::new(
+                    config,
+                    InvocationArgs::IrqControlSetTargetCore {
+                        irq_control: IRQ_CONTROL_CAP_ADDRESS,
+                        irq: sysirq.irq,
+                        target: pd.cpu.0,
+                    },
+                ));
+            }
+        }
+    }
+
     // This has to be done prior to minting!
     let num_asid_invocations = protection_domains.len() + virtual_machines.len();
     let mut asid_invocation = Invocation::new(
