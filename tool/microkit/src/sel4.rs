@@ -254,24 +254,6 @@ pub struct PlatformConfig {
     pub memory: Vec<PlatformConfigRegion>,
 }
 
-/// Represents an allocated kernel object.
-///
-/// Kernel objects can have multiple caps (and caps can have multiple addresses).
-/// The cap referred to here is the original cap that is allocated when the
-/// kernel object is first allocate.
-/// The cap_slot refers to the specific slot in which this cap resides.
-/// The cap_address refers to a cap address that addresses this cap.
-/// The cap_address is is intended to be valid within the context of the
-/// initial task.
-#[derive(Copy, Clone)]
-pub struct Object {
-    /// Type of kernel object
-    pub object_type: ObjectType,
-    pub cap_addr: u64,
-    /// Physical memory address of the kernel object
-    pub phys_addr: u64,
-}
-
 pub struct Config {
     pub arch: Arch,
     pub word_size: u64,
@@ -409,7 +391,7 @@ impl RiscvVirtualMemory {
     }
 }
 
-#[derive(Debug, Hash, Eq, PartialEq, Copy, Clone)]
+#[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub enum ObjectType {
     Untyped,
     Tcb,
@@ -483,7 +465,7 @@ impl ObjectType {
 }
 
 #[repr(u64)]
-#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum PageSize {
     Small = 0x1000,
     Large = 0x200_000,
@@ -509,7 +491,7 @@ impl PageSize {
 }
 
 #[repr(u64)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 /// The same values apply to ARM and RISC-V
 pub enum ArmRiscvIrqTrigger {
     Level = 0,
@@ -536,7 +518,7 @@ impl ArmRiscvIrqTrigger {
 }
 
 #[repr(u64)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum X86IoapicIrqTrigger {
     Level = 1,
     Edge = 0,
@@ -562,7 +544,7 @@ impl X86IoapicIrqTrigger {
 }
 
 #[repr(u64)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum X86IoapicIrqPolarity {
     LowTriggered = 0,
     HighTriggered = 1,
