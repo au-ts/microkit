@@ -341,7 +341,6 @@ impl ElfFile {
                 // Here we are doing something that could end up being fairly expensive, we are copying
                 // the string for each symbol name. It should be possible to turn this into a reference
                 // although it might be awkward in order to please the borrow checker.
-                // @merge: review this clone
                 let insert = symbols.insert(name.to_string(), (sym.clone(), false));
                 assert!(insert.is_none());
             }
