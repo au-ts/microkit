@@ -5,7 +5,7 @@
 //
 
 use crate::sel4::PageSize;
-use crate::util::{bytes_to_struct, round_down};
+use crate::util::{bytes_to_struct, round_down, struct_to_bytes};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Write;
@@ -533,14 +533,8 @@ impl ElfFile {
                 align: 0,
             };
 
-            // @merge: this should use struct to bytes instead
             elf_file
-                .write_all(unsafe {
-                    from_raw_parts(
-                        (&seg_serialised as *const ElfProgramHeader64) as *const u8,
-                        phentsize,
-                    )
-                })
+                .write_all(unsafe { struct_to_bytes(&seg_serialised) })
                 .unwrap_or_else(|_| {
                     panic!(
                         "Failed to write ELF segment header #{} for '{}'",
