@@ -119,7 +119,8 @@ fn check_non_overlapping(regions: &Vec<(u64, &[u8], String)>) {
 #[derive(Debug)]
 struct LoaderRegion64 {
     load_addr: u64,
-    size: u64,
+    load_size: u64,
+    write_size: u64,
     offset: u64,
     r#type: u64,
 }
@@ -130,8 +131,6 @@ struct LoaderHeader64 {
     magic: u64,
     size: u64,
     flags: u64,
-    shared_region_to_zero_base: u64,
-    shared_region_to_zero_end: u64,
     num_multikernels: u64,
     num_regions: u64,
     kernel_v_entry: u64,
@@ -163,7 +162,7 @@ impl<'a> Loader<'a> {
         reserved_regions: &[MemoryRegion],
         system_regions: Vec<(u64, &'a [u8])>,
         per_core_ram_regions: &[&[MemoryRegion]],
-        shared_memory_region: &MemoryRegion,
+        shared_memory_phys_regions: &[MemoryRegion],
     ) -> Loader<'a> {
         // Note: If initial_task_phys_base is not None, then it just this address
         // as the base physical address of the initial task, rather than the address
@@ -193,7 +192,7 @@ impl<'a> Loader<'a> {
         .first()
         .expect("Failed to copy in number of multikernels to boot"))
         .into();
-        println!("Recieved number {}", num_multikernels);
+        println!("Received number {}", num_multikernels);
         assert!(num_multikernels > 0);
 
         let mut kernel_regions = Vec::new();
@@ -357,11 +356,23 @@ impl<'a> Loader<'a> {
             );
             region_metadata.push(LoaderRegion64 {
                 load_addr: *addr,
-                size: data.len() as u64,
+                load_size: data.len() as u64,
+                write_size: data.len() as u64,
                 offset,
                 r#type: 1,
             });
             offset += data.len() as u64;
+        }
+
+        for shared_mr in shared_memory_phys_regions.iter() {
+            // TODO: What is type?
+            region_metadata.push(LoaderRegion64 {
+                load_addr: shared_mr.base,
+                load_size: 0,
+                write_size: shared_mr.size(),
+                offset: 0,
+                r#type: 1,
+            })
         }
 
         let mut kernel_bootinfos = Vec::new();
@@ -451,15 +462,13 @@ impl<'a> Loader<'a> {
         // XXX: size including bootinfos?
         let size = std::mem::size_of::<LoaderHeader64>() as u64
             + region_metadata.iter().fold(0_u64, |acc, x| {
-                acc + x.size + std::mem::size_of::<LoaderRegion64>() as u64
+                acc + x.load_size + std::mem::size_of::<LoaderRegion64>() as u64
             });
 
         let header = LoaderHeader64 {
             magic,
             size,
             flags,
-            shared_region_to_zero_base: shared_memory_region.base,
-            shared_region_to_zero_end: shared_memory_region.end,
             num_multikernels: num_multikernels as u64,
             num_regions: region_metadata.len() as u64,
             kernel_v_entry: kernel_elf.entry,

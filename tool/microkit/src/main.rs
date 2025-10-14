@@ -907,9 +907,9 @@ fn emulate_kernel_boot(
 #[derive(Debug)]
 struct FullSystemState {
     sgi_irq_numbers: BTreeMap<ChannelEnd, u64>,
-    memory_regions: Vec<SysMemoryRegion>,
+    sys_memory_regions: Vec<SysMemoryRegion>,
     per_core_ram_regions: BTreeMap<CpuCore, DisjointMemoryRegion>,
-    shared_memory_region: MemoryRegion,
+    shared_memory_phys_regions: DisjointMemoryRegion,
 }
 
 fn build_system(
@@ -3352,28 +3352,82 @@ fn build_full_system_state(
     let sgi_irq_numbers = pick_sgi_channels(system, kernel_config);
 
     // Take all the memory regions used on multiple cores and make them shared.
-    // XXX: Choosing this address is somewhat of a hack.
+    // Note: there are a few annoying things we have to deal with:
+    // - users might specify phys_addr that point into RAM
+    // - users might also specify phys_addr that points to device registers (is this ever sensible?)
+    // - the phys_addr the user specify in RAM may overlap with our auto-allocated physical addresses
+    //   for when that don't specify RAM phys_addr in shared memory
+    // - a lot of user code expects these regions to be zeroed out on boot
+    //   (like how seL4 would otherwise make them) so we need to zero them out
+    //    in the loader
+    //
+    // We do the following, which is somewhat hacky:
+    //  for each user memory region, if it's used across multiple cores:
+    //      1. check if it has a phys_addr; if it does:
+    //          a. if it corresponds to device RAM, then we remove it
+    //             from "normal memory" and mark it as a shared region
+    //             to be zeroed in the loader
+    //          b. if it doesn't correspond to device RAM, then it's device registers
+    //             this is already device memory which can be "shared" and
+    //             shouldn't be zeroed in the loader.
+    //      2. else, we need to autoassign it. save it temporarily and once
+    //         we have processed all the user-specified memory regions
+    //         (which might allocate more holes) we allocate a shared region
+    //         started from the top of RAM and moving down.
+    //         FIXME: This might need to be split into multiple to handle overlaps
+    //                for now we check if it does happen, but we don't resolve it.
+
+    let mut sys_memory_regions = vec![];
+    // This checks overlaps of the shared memory regions if specified by paddr
+    let mut shared_memory_phys_regions = DisjointMemoryRegion::default();
+    let mut to_allocate_phys_addr_shared_indices = vec![];
+
+    for mr in system.memory_regions.iter().cloned() {
+        if mr.used_cores.len() > 1 {
+            println!("allocation shared: {mr:?}");
+
+            match mr.phys_addr {
+                Some(phys_addr) => {
+                    let in_ram = {
+                        // TODO.
+                        true
+                    };
+
+                    if in_ram {
+                        shared_memory_phys_regions.insert_region(phys_addr, phys_addr + mr.size);
+                    } else {
+                        // Do nothing to it.
+                    }
+                }
+                None => {
+                    // index of the memory region in sys_memory_regions.
+                    to_allocate_phys_addr_shared_indices.push(sys_memory_regions.len());
+                }
+            }
+        }
+
+        sys_memory_regions.push(mr);
+    }
+
+    // FIXME: this would need to be changed if we want to handle overlaps
+    //        of specified phys regions.
     let last_ram_region = kernel_config
         .normal_regions
         .last()
         .expect("kernel should have one memory region");
     let mut shared_phys_addr_prev = last_ram_region.end;
-    let mut memory_regions = vec![];
-    for mut mr in system.memory_regions.iter().cloned() {
-        if mr.used_cores.len() > 1 {
-            shared_phys_addr_prev -= mr.size;
-            // FIXME: Support allocated shared from more than one memory region.
-            assert!(shared_phys_addr_prev >= last_ram_region.start);
 
-            // FIXME: These might conflict if you specify regions in phys mem shared across cores.
-            assert!(mr.phys_addr.is_none());
-            mr.phys_addr = Some(shared_phys_addr_prev);
-        }
+    for &shared_index in to_allocate_phys_addr_shared_indices.iter() {
+        let mr = sys_memory_regions
+            .get_mut(shared_index)
+            .expect("should be valid by construction");
 
-        memory_regions.push(mr);
+        let phys_addr = shared_phys_addr_prev.checked_sub(mr.size).expect("no underflow :(");
+        mr.phys_addr = Some(phys_addr);
+        // FIXME: This would crash if overlap happens with shared memory paddrs.
+        shared_memory_phys_regions.insert_region(phys_addr, phys_addr + mr.size);
+        shared_phys_addr_prev = phys_addr;
     }
-
-    let shared_memory_region = MemoryRegion::new(shared_phys_addr_prev, last_ram_region.end);
 
     let per_core_ram_regions = {
         let mut per_core_regions = BTreeMap::new();
@@ -3383,8 +3437,11 @@ fn build_full_system_state(
             available_normal_memory.insert_region(region.start, region.end);
         }
 
-        // remove the shared addresses
-        available_normal_memory.remove_region(shared_memory_region.base, shared_memory_region.end);
+        // Remove shared memory.
+        for s_mr in shared_memory_phys_regions.regions.iter() {
+            available_normal_memory
+                .remove_region(s_mr.base, s_mr.end);
+        }
 
         println!("available memory:");
         for r in available_normal_memory.regions.iter() {
@@ -3448,9 +3505,9 @@ fn build_full_system_state(
 
     FullSystemState {
         sgi_irq_numbers,
-        memory_regions,
+        sys_memory_regions,
         per_core_ram_regions,
-        shared_memory_region,
+        shared_memory_phys_regions,
     }
 }
 
@@ -3948,7 +4005,7 @@ fn main() -> Result<(), String> {
         }
 
         let memory_regions_for_core: Vec<_> = full_system_state
-            .memory_regions
+            .sys_memory_regions
             .iter()
             .filter(|&mr| mr.used_cores.contains(&cpu))
             .collect();
@@ -4205,7 +4262,7 @@ fn main() -> Result<(), String> {
             .values()
             .map(|disjoint_mem| &disjoint_mem.regions[..])
             .collect::<Vec<_>>()[..],
-        &full_system_state.shared_memory_region,
+        &full_system_state.shared_memory_phys_regions.regions[..],
     );
     println!("Made image");
     loader.write_image(Path::new(args.output));

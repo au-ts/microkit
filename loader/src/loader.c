@@ -53,7 +53,10 @@ enum el {
 
 struct region {
     uintptr_t load_addr; // this should be updated for subsequent regions by loader.rs
-    uintptr_t size;
+    // size of the data to load
+    uintptr_t load_size;
+    // size of the data to write. this is useful for zeroing out memory.
+    uintptr_t write_size;
     uintptr_t offset;
     uintptr_t type;
 };
@@ -72,8 +75,6 @@ struct loader_data {
     uintptr_t magic;
     uintptr_t size;
     uintptr_t flags;
-    uintptr_t shared_region_to_zero_base;
-    uintptr_t shared_region_to_zero_end;
     uintptr_t num_kernels;
     uintptr_t num_regions;
     uintptr_t kernel_v_entry;
@@ -118,6 +119,14 @@ void *memmove(void *restrict dest, const void *restrict src, size_t n)
     }
 
     return dest;
+}
+
+static void memzero(void *s, size_t sz)
+{
+    uint8_t *p = s;
+    while (sz-- > 0) {
+        *p++ = 0x0;
+    }
 }
 
 #if 1 || NUM_MULTIKERNELS > 1
@@ -609,8 +618,10 @@ static void print_loader_data(void)
         puthex32(i);
         puts("   addr: ");
         puthex64(r->load_addr);
-        puts("   size: ");
-        puthex64(r->size);
+        puts("   load size: ");
+        puthex64(r->load_size);
+        puts("   write size: ");
+        puthex64(r->write_size);
         puts("   offset: ");
         puthex64(r->offset);
         puts("   type: ");
@@ -627,7 +638,12 @@ static void copy_data(void)
         puts("LDR|INFO: copying region ");
         puthex32(i);
         puts("\n");
-        memcpy((void *)(uintptr_t)r->load_addr, base + r->offset, r->size);
+        // XXX: assert load_size <= write_size.
+        memcpy((void *)(uintptr_t)r->load_addr, base + r->offset, r->load_size);
+        if (r->write_size > r->load_size) {
+            // zero out remaining memory
+            memzero((void *)(r->load_addr + r->load_size), r->write_size - r->load_size);
+        }
     }
 }
 
@@ -1078,16 +1094,6 @@ int main(void)
      * fail label; it's not possible to return to U-boot
      */
     copy_data();
-
-    puts("LDR|INFO: zeroing out the shared data pre-kernel boot\n");
-    puts("LDR|INFO: region is: [");
-    puthex64(loader_data->shared_region_to_zero_base);
-    puts("..");
-    puthex64(loader_data->shared_region_to_zero_end);
-    puts(")\n");
-    for (uintptr_t addr = loader_data->shared_region_to_zero_base; addr < loader_data->shared_region_to_zero_end; addr += sizeof(uint64_t)) {
-        *(volatile uint64_t *)(addr) = 0;
-    }
 
 #if defined(BOARD_zcu102) || defined(BOARD_ultra96v2) || defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel) || defined(BOARD_qemu_virt_aarch64_multikernel) || defined(BOARD_qemu_virt_aarch64)
     configure_gicv2();
