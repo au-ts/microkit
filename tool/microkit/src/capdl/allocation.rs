@@ -27,10 +27,12 @@ pub fn simulate_capdl_object_alloc_algorithm(
     // Step 1: sort untypeds by paddr.
     // We don't want to mess with the original order in `kernel_boot_info` as we will patch
     // them out to the initialiser later.
-    let untypeds_clone = kernel_boot_info.untyped_objects.clone();
-    let mut untypeds_by_paddr: Vec<(usize, &UntypedObject)> =
-        untypeds_clone.iter().enumerate().collect();
-    untypeds_by_paddr.sort_by_key(|(_i, ut)| ut.base());
+    let mut untypeds_by_paddr: Vec<(usize, &UntypedObject)> = kernel_boot_info
+        .untyped_objects
+        .iter()
+        .enumerate()
+        .collect();
+    untypeds_by_paddr.sort_by_key(|(_, ut)| ut.base());
 
     // Step 2: create object "windows" for objects that doesn't specify paddr,
     // where each window contains all objects of the array index size bits.
@@ -66,30 +68,25 @@ pub fn simulate_capdl_object_alloc_algorithm(
         let obj_size_bytes = 1 << named_obj.object.physical_size_bits(kernel_config);
         let paddr_range = paddr_base..paddr_base + obj_size_bytes;
 
-        // Binary search for the untyped that would fit, if we can't find one, this object is not in valid memory.
-        let mut low = 0;
-        let mut high = untypeds_by_paddr.len();
-        let mut found = false;
-        while low < high {
-            let mid = low + (high - low) / 2;
-            let (_, candidate_ut) = untypeds_by_paddr.get(mid).unwrap();
+        // Binary search for the UT that is next to the UT that might fit.
+        // i.e. we are looking for the first UT that is uts[i_ut].paddr() > paddr_range.start
+        let ut_after_candidate_idx =
+            untypeds_by_paddr.partition_point(|(_, ut)| ut.base() <= paddr_range.start);
 
-            if paddr_range.start >= candidate_ut.end() {
-                low = mid + 1;
-            } else if paddr_range.start < candidate_ut.base() {
-                high = mid;
-            } else if paddr_range.start >= candidate_ut.base() {
-                if paddr_range.end <= candidate_ut.end() {
-                    // Object paddr range doesn't span across 2 untypeds, all good.
-                    found = true;
-                }
-                break;
-            }
-        }
-
-        if !found {
-            eprintln!("ERROR: object '{}', with paddr 0x{:0>12x}..0x{:0>12x} is not in any valid memory region.", named_obj.name, paddr_range.start, paddr_range.end);
+        if ut_after_candidate_idx == 0 {
+            // Predicate returned false for the first UT, cannot allocate this object as all UTs are
+            // after the object.
             phys_addrs_ok = false;
+        } else {
+            let candidate_ut = &untypeds_by_paddr[ut_after_candidate_idx - 1].1;
+            let candidate_ut_range =
+                candidate_ut.base()..candidate_ut.base() + (1 << candidate_ut.size_bits());
+            if !(candidate_ut_range.start <= paddr_range.start
+                && candidate_ut_range.end >= paddr_range.end)
+            {
+                eprintln!("ERROR: object '{}', with paddr 0x{:0>12x}..0x{:0>12x} is not in any valid memory region.", named_obj.name, paddr_range.start, paddr_range.end);
+                phys_addrs_ok = false;
+            }
         }
     }
 
