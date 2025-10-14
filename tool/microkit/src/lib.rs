@@ -6,7 +6,7 @@
 
 use std::{cmp::min, fmt};
 
-use crate::sel4::Config;
+use crate::{sel4::Config, util::struct_to_bytes};
 
 pub mod capdl;
 pub mod elf;
@@ -35,17 +35,29 @@ pub struct UntypedObject {
 }
 
 pub const UNTYPED_DESC_PADDING: usize = size_of::<u64>() - (2 * size_of::<u8>());
+#[repr(C)]
+struct SeL4UntypedDesc {
+    paddr: u64,
+    size_bits: u8,
+    is_device: u8,
+    padding: [u8; UNTYPED_DESC_PADDING],
+}
+
+impl From<&UntypedObject> for SeL4UntypedDesc {
+    fn from(value: &UntypedObject) -> Self {
+        Self {
+            paddr: value.base(),
+            size_bits: value.size_bits() as u8,
+            is_device: if value.is_device { 1 } else { 0 },
+            padding: [0u8; UNTYPED_DESC_PADDING],
+        }
+    }
+}
+
 /// Getting a `seL4_UntypedDesc` for patching into the initialiser
-// @merge: should just Repr(C) this and call struct_to_bytes
 pub fn serialise_ut(ut: &UntypedObject) -> Vec<u8> {
-    let mut bytes = Vec::new();
-
-    bytes.extend_from_slice(&ut.base().to_le_bytes());
-    bytes.extend_from_slice(&(ut.size_bits() as u8).to_le_bytes());
-    bytes.extend_from_slice(&(ut.is_device as u8).to_le_bytes());
-    bytes.extend_from_slice(&[0u8; UNTYPED_DESC_PADDING]);
-
-    bytes
+    let sel4_untyped_desc: SeL4UntypedDesc = ut.into();
+    unsafe { struct_to_bytes(&sel4_untyped_desc).to_vec() }
 }
 
 impl UntypedObject {
