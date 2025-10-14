@@ -20,8 +20,6 @@ jobs:
       RUSTFLAGS: "-Dwarnings"
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
       - uses: actions/cache@v3
         with:
           path: |
