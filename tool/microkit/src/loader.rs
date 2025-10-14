@@ -198,8 +198,9 @@ impl<'a> Loader<'a> {
         // Skip heap segment
         for segment in initial_task_segments[..initial_task_segments.len() - 1].iter() {
             if segment.mem_size() > 0 {
-                let segment_paddr = initial_task_phy_base + (segment.virt_addr - initial_task_vaddr_range.start);
-                regions.push((segment_paddr, &segment.data()));
+                let segment_paddr =
+                    initial_task_phy_base + (segment.virt_addr - initial_task_vaddr_range.start);
+                regions.push((segment_paddr, segment.data()));
             }
         }
 
