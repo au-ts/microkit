@@ -64,8 +64,8 @@ $(COPIED_KERNEL): $(KERNEL)
 
 qemu:
 	qemu-system-x86_64                      \
-			-cpu qemu64,+fsgsbase,+pdpe1gb,+pcid,+invpcid,+xsave,+xsaves,+xsaveopt \
-			-m "4G"                         \
+			-cpu qemu64,+fsgsbase,+pdpe1gb,+xsaveopt,+xsave \
+			-m "1G"                         \
 			-display none                   \
 			-serial mon:stdio               \
 		-kernel $(COPIED_KERNEL) \
