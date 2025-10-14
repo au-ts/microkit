@@ -62,7 +62,7 @@ On ARM and RISC-V, the individual programs are combined to produce a single boot
 The format of the image is suitable for loading by the target board's bootloader.
 The Microkit tool, which is provided as part of the SDK, is used to generate the system image.
 
-On x86-64, the individual programs are combined to produce a system initialiser ELF image that is loaded by Multiboot as a boot module to seL4. More details in later sections.
+On x86-64, the individual programs are combined to produce a capDL initialiser ELF image that is loaded by Multiboot as a boot module to seL4. More details in later sections.
 
 The Microkit tool takes a *system description* as input.
 The system description is an XML file that specifies all the objects that make up the system.
@@ -416,7 +416,7 @@ The output paths for these can be specified by `-o` and `-r` respectively.
 The default output paths are `loader.img` and `report.txt`.
 
 On ARM and RISC-V, the loadable image will be a binary that can be loaded by the board's bootloader.
-On x86, the image will be a Multiboot boot module containing the capDL initialiser.
+On x86, the image will be an ELF containing the capDL initialiser to be loaded as a Multiboot boot module.
 
 The report is a plain text file describing important information about the system.
 The report can be useful when debugging potential system problems.
@@ -844,6 +844,7 @@ The currently supported platforms are:
 * tqma8xqp1gb
 * ultra96v2
 * x86_64_generic
+* x86_64_generic_vtx
 * zcu102
 
 ## Ariane (CVA6) {#ariane}
@@ -1157,11 +1158,30 @@ ZynqMP> tftpboot 0x40000000 loader.img
 ZynqMP> go 0x40000000
 ```
 
-## x86-64 Generic
+## x86-64 Generic {#x86_64_generic}
 
-Support is available for x86-64 with generic micro-architecture and no VTX.
+Support is available for x86-64 with generic micro-architecture and no virtualisation (VTX).
 
-@billn fill in stuff
+On x86, Microkit only produces an initial task ELF image. 
+
+For simulating an x86_64 machine using QEMU, use the following command:
+```
+	$ qemu-system-x86_64                                \
+		-cpu qemu64,+fsgsbase,+pdpe1gb,+xsaveopt,+xsave \
+		-m "1G"                                         \
+		-display none                                   \
+		-serial mon:stdio                               \
+		-kernel $(COPIED_KERNEL)                        \
+		-initrd $(INITIAL_TASK)
+```
+
+If you see the following message on boot:
+```
+PCIDs not supported by the processor
+```
+
+@billn continue
+@billn directing the user to write grub stanzas and stuff is a bit complicated, how about we build a bootable ISO from the tool?
 
 ## ZCU102 {#zcu102}
 
