@@ -79,7 +79,7 @@ impl Riscv64 {
 
 /// Checks that each region in the given list does not overlap with any other region.
 /// Panics upon finding an overlapping region
-fn check_non_overlapping(regions: &Vec<(u64, Vec<u8>)>) {
+fn check_non_overlapping(regions: &Vec<(u64, &[u8])>) {
     let mut checked: Vec<(u64, u64)> = Vec::new();
     for (base, data) in regions {
         let end = base + data.len() as u64;
@@ -115,22 +115,22 @@ struct LoaderHeader64 {
     num_regions: u64,
 }
 
-pub struct Loader {
+pub struct Loader<'a> {
     image: Vec<u8>,
     header: LoaderHeader64,
     region_metadata: Vec<LoaderRegion64>,
-    regions: Vec<(u64, Vec<u8>)>,
+    regions: Vec<(u64, &'a [u8])>,
 }
 
-impl Loader {
+impl<'a> Loader<'a> {
     pub fn new(
         config: &Config,
         loader_elf_path: &Path,
-        kernel_elf: &ElfFile,
-        initial_task_elf: &ElfFile,
+        kernel_elf: &'a ElfFile,
+        initial_task_elf: &'a ElfFile,
         initial_task_phy_base: u64,
         initial_task_vaddr_range: Range<u64>,
-    ) -> Loader {
+    ) -> Loader<'a> {
         if config.arch == Arch::X86_64 {
             unreachable!("internal error: x86_64 does not support creating a loader image");
         }
@@ -147,7 +147,7 @@ impl Loader {
             ),
         };
 
-        let mut regions = Vec::new();
+        let mut regions: Vec<(u64, &[u8])> = Vec::new();
 
         let mut kernel_first_vaddr = None;
         let mut kernel_last_vaddr = None;
@@ -177,9 +177,7 @@ impl Loader {
                     panic!("Kernel does not have a consistent physical to virtual offset");
                 }
 
-                // @merge: this used to be .as_slice, unsure why it's a clone. For large ELFs
-                // this will have an impact.
-                regions.push((segment.phys_addr, segment.data().clone()));
+                regions.push((segment.phys_addr, segment.data().as_slice()));
             }
         }
 
@@ -189,26 +187,21 @@ impl Loader {
         // into 1 segment, so if your segments are sparse, a lot of memory will be wasted.
         let initial_task_segments = initial_task_elf.loadable_segments();
 
-        // Find an available physical memory segment large enough to house the initial task (CapDL initialiser with spec)
+        // Compute an available physical memory segment large enough to house the initial task (CapDL initialiser with spec)
         // that is after the kernel window.
-        let initial_task_size = initial_task_vaddr_range.end - initial_task_vaddr_range.start;
         let inittask_p_v_offset = initial_task_vaddr_range.start - initial_task_phy_base;
         let inittask_v_entry = initial_task_elf.entry;
 
         // initialiser.rs will always place the heap as the last region in the initial task's address space.
         // So instead of copying a bunch of useless zeroes into the image, we can just leave it uninitialised.
         assert!(initial_task_segments.last().unwrap().is_uninitialised());
-        let initial_task_actual_size =
-            initial_task_size - initial_task_segments.last().unwrap().mem_size();
-        let mut initial_task_data: Vec<u8> = vec![0; initial_task_actual_size as usize];
         // Skip heap segment
         for segment in initial_task_segments[..initial_task_segments.len() - 1].iter() {
-            let buf_off = segment.virt_addr - initial_task_vaddr_range.start;
-            initial_task_data[buf_off as usize..(buf_off + segment.mem_size()) as usize]
-                .copy_from_slice(segment.data());
+            if segment.mem_size() > 0 {
+                let segment_paddr = initial_task_phy_base + (segment.virt_addr - initial_task_vaddr_range.start);
+                regions.push((segment_paddr, &segment.data()));
+            }
         }
-
-        regions.push((initial_task_phy_base, initial_task_data));
 
         // Determine the pagetable variables
         assert!(kernel_first_vaddr.is_some());
@@ -234,7 +227,9 @@ impl Loader {
             .find(|segment| segment.loadable)
             .expect("Did not find loadable segment");
         let image_vaddr = image_segment.virt_addr;
-        // @merge: sus clone again
+        // We have to clone here as the image executable is part of this function return object,
+        // and the loader ELF is deserialised in this scope, so its lifetime will be shorter than
+        // the return object.
         let mut image = image_segment.data().clone();
 
         if image_vaddr != loader_elf.entry {
@@ -257,8 +252,9 @@ impl Loader {
         let ui_p_reg_end = initial_task_vaddr_range.end - inittask_p_v_offset;
         assert!(ui_p_reg_end > ui_p_reg_start);
 
+        // This clone isn't too bad as it is just a Vec<(u64, &[u8])>
         let mut all_regions_with_loader = regions.clone();
-        all_regions_with_loader.push((image_vaddr, image.clone()));
+        all_regions_with_loader.push((image_vaddr, &image));
         check_non_overlapping(&all_regions_with_loader);
 
         let flags = match config.hypervisor {
