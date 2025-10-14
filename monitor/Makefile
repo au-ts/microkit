@@ -57,7 +57,7 @@ CFLAGS := -std=gnu11 -g -O3 -nostdlib -ffreestanding -Wall $(CFLAGS_TOOLCHAIN) -
 
 PROGS := monitor.elf
 OBJECTS := main.o crt0.o util.o
-LINKSCRIPT := monitor.ld
+LINKSCRIPT := ../libmicrokit/microkit.ld
 
 $(BUILD_DIR)/%.o : src/$(ARCH_DIR)/%.S
 	$(CC) $(ASM_CPP_FLAGS) $< -o $@
