@@ -1162,7 +1162,7 @@ ZynqMP> go 0x40000000
 
 Support is available for x86-64 with generic micro-architecture and no virtualisation (VTX).
 
-On x86, Microkit only produces an initial task ELF image. 
+On x86, Microkit only produces an initial task ELF image.
 
 For simulating an x86_64 machine using QEMU, use the following command:
 ```
