@@ -578,7 +578,7 @@ fn main() -> Result<(), String> {
     );
     let initialiser_vaddr_range = capdl_initialiser.image_bound();
     println!(
-        "INITIAL TASK: size = {}, vaddr = [0x{:x}..0x{:x}], entry = 0x{:x}",
+        "INITIAL TASK: memory size = {}, vaddr = [0x{:x}..0x{:x}], entry = 0x{:x}",
         human_size_strict(initialiser_vaddr_range.end - initialiser_vaddr_range.start),
         initialiser_vaddr_range.start,
         initialiser_vaddr_range.end,
