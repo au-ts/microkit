@@ -7,7 +7,7 @@
 use crate::sel4::PageSize;
 use crate::util::{bytes_to_struct, round_down, struct_to_bytes};
 use std::collections::HashMap;
-use std::fs::{self, File};
+use std::fs::{self, metadata, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::slice::from_raw_parts;
@@ -469,7 +469,7 @@ impl ElfFile {
     /// loading of what we generate here: seL4/src/arch/x86/64/kernel/elf.c
     /// We use this function after patching the spec into the CapDL initialiser.
     /// We don't guarantee that this ELF can be loaded by other kinds of ELF loader.
-    pub fn reserialise(&self, out: &std::path::Path) -> Result<(), String> {
+    pub fn reserialise(&self, out: &std::path::Path) -> Result<u64, String> {
         let phnum = self.loadable_segments().len();
         let phentsize = size_of::<ElfProgramHeader64>();
         let ehsize = size_of::<ElfHeader64>();
@@ -563,6 +563,6 @@ impl ElfFile {
 
         elf_file.flush().unwrap();
 
-        Ok(())
+        Ok(metadata(out).unwrap().len())
     }
 }

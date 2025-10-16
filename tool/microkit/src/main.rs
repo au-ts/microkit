@@ -587,7 +587,14 @@ fn main() -> Result<(), String> {
 
     // For x86 we write out the initialiser ELF as is, but on ARM and RISC-V we build the bootloader image.
     if kernel_config.arch == Arch::X86_64 {
-        capdl_initialiser.elf.reserialise(Path::new(args.output))?;
+        match capdl_initialiser.elf.reserialise(Path::new(args.output)) {
+            Ok(size) => {
+                println!("BOOT MODULE: image file size = {}", human_size_strict(size));
+            }
+            Err(err) => {
+                eprintln!("Error: couldn't write the boot module to filesystem: {err}");
+            }
+        }
     } else {
         // Now that we have the entire spec and CapDL initialiser ELF with embedded spec,
         // we can determine exactly how much memory will be available statically when the kernel
@@ -661,7 +668,7 @@ fn main() -> Result<(), String> {
         loader.write_image(Path::new(args.output));
 
         println!(
-            "LOADER: image size = {}",
+            "LOADER: image file size = {}",
             human_size_strict(metadata(args.output).unwrap().len())
         );
     }
