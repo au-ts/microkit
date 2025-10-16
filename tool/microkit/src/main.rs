@@ -3264,7 +3264,8 @@ fn pick_sgi_channels(
         .expect("INTERNAL: arm_gic_version specified on arm")
     {
         // TODO: Source document?
-        sel4::ArmGicVersion::GICv2 => 16,
+        // Maybe 16 not always OK????
+        sel4::ArmGicVersion::GICv2 => 8,
         sel4::ArmGicVersion::GICv3 => 16,
     };
 

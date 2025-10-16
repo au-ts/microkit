@@ -366,6 +366,11 @@ impl<'a> Loader<'a> {
 
         for shared_mr in shared_memory_phys_regions.iter() {
             // TODO: What is type?
+            println!(
+                "Adding shared (so zeroing) region into {:x}..{:x}",
+                shared_mr.base,
+                shared_mr.end,
+            );
             region_metadata.push(LoaderRegion64 {
                 load_addr: shared_mr.base,
                 load_size: 0,
