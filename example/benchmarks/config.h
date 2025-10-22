@@ -1,8 +1,7 @@
 #pragma once
 
-#define NUM_WARMUP 100
-#define NUM_COOLDOWN 100
-#define NUM_SAMPLES 10000
+#define NUM_WARMUP 1000
+#define NUM_SAMPLES 100000
 
 /* These numbers are used as the channels from the manager POV.
  * If it is defined as 0, it is disabled.

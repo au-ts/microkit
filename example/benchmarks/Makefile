@@ -44,7 +44,7 @@ endif
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
 IMAGES := manager.elf signal_low_to_hi_same_core__high.elf signal_low_to_hi_same_core__low.elf
-CFLAGS := -nostdlib -ffreestanding -g -O2 -Wall -Wno-unused-function -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
+CFLAGS := -MMD -MP -nostdlib -ffreestanding -g -O2 -Wall -Wno-unused-function -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
 LDFLAGS := -L$(BOARD_DIR)/lib
 LIBS := -lmicrokit -Tmicrokit.ld
 
@@ -61,9 +61,13 @@ $(BUILD_DIR)/%.o: %.c Makefile
 $(BUILD_DIR)/%.elf: $(BUILD_DIR)/%.o $(BUILD_DIR)/print.o
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
+-include $(addprefix $(BUILD_DIR)/, $(IMAGES:.elf=.d))
+-include $(BUILD_DIR)/print.d
+
 $(SYSTEM_FILE_PP): $(SYSTEM_FILE)
 	cpp $< -o $@
 	sed -i '/^#/d' $@
+	echo deps $(DEPS)
 
 $(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) $(SYSTEM_FILE_PP)
 	$(MICROKIT_TOOL) $(SYSTEM_FILE_PP) --search-path $(BUILD_DIR) --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE)

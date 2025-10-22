@@ -3,12 +3,14 @@
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
+#include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <microkit.h>
 
 #include "benchmark.h"
 #include "config.h"
+#include "kernel/gen_config.h"
 #include "print.h"
 
 typedef struct {
@@ -48,6 +50,8 @@ start:
 }
 
 void init(void) {
+    static_assert(CONFIG_EXPORT_PMU_USER);
+
     print("hello world\n");
 
     print("Available benchmarks:\n");
