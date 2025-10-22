@@ -69,7 +69,7 @@ void init(void)
         RECORDING_ADD_SAMPLE(start, end);
     }
 
-    RECORDING_END(results, BENCHMARK_CH__SIGNAL_LOW_HI);
+    RECORDING_END(results, BENCHMARK_CH__SIGNAL_SAME_CORE_LOW_HI);
 
     microkit_notify(BENCHMARK_START_STOP_CH);
 }

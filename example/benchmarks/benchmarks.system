@@ -46,7 +46,7 @@
     </protection_domain>
 
     <channel>
-        <end pd="manager" id=str(BENCHMARK_CH__SIGNAL_LOW_HI) />
+        <end pd="manager" id=str(BENCHMARK_CH__SIGNAL_SAME_CORE_LOW_HI) />
         <end pd="signal_low_to_hi_same_core__low" id="0" />
     </channel>
 </system>

@@ -21,7 +21,7 @@ typedef struct {
 } benchmark_t;
 
 static const benchmark_t benchmark_infos[] = {
-    { BENCHMARK_CH__SIGNAL_LOW_HI, "Signal low to Hi" }
+    { BENCHMARK_CH__SIGNAL_SAME_CORE_LOW_HI, "signal low to high same core" }
 };
 
 static const size_t benchmark_infos_count = sizeof(benchmark_infos)/sizeof(benchmark_infos[0]);
