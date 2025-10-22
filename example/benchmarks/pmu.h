@@ -37,7 +37,7 @@ static inline void isb_sy(void) { asm volatile("isb sy" ::: "memory"); }
 static inline cycles_t pmccntr_el0(void) {
   cycles_t v;
   /* D24.5.2 in DDI 0487L.b, PMCCNTR_EL0. All 64 bits is CCNT. */
-  asm volatile("mrs %0, pmccntr_el0" : "=r"(v));
+  asm volatile("mrs %0, pmccntr_el0" : "=r"(v) :: "memory");
   /* TODO: From the ARM sample code, I think there's no need for an ISB here.
            But I can't justify this w.r.t the specification...
    */

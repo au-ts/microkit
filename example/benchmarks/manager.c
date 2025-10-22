@@ -21,7 +21,8 @@ typedef struct {
 } benchmark_t;
 
 static const benchmark_t benchmark_infos[] = {
-    { BENCHMARK_CH__SIGNAL_SAME_CORE_LOW_HI, "signal low to high same core" }
+    { BENCHMARK_CH__SIGNAL_SAME_CORE_LOW_HI, "signal low to high same core" },
+    { BENCHMARK_CH__SIGNAL_SAME_CORE_HI_LOW, "signal high to low same core" },
 };
 
 static const size_t benchmark_infos_count = sizeof(benchmark_infos)/sizeof(benchmark_infos[0]);
@@ -100,8 +101,8 @@ void init(void) {
 
 void notified(microkit_channel ch) {
     print("Benchmark complete: ");
-    puthex32(ch);
+    puthex32(ch - 1);
     puts("\n");
 
-    start_benchmark(ch + 1);
+    start_benchmark(ch);
 }

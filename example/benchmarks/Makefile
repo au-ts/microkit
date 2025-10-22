@@ -43,7 +43,10 @@ endif
 
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
-IMAGES := manager.elf signal_low_to_hi_same_core__high.elf signal_low_to_hi_same_core__low.elf
+IMAGES := manager.elf \
+  signal_low_to_hi_same_core__high.elf signal_low_to_hi_same_core__low.elf \
+  signal_hi_to_low_same_core__high.elf signal_hi_to_low_same_core__low.elf
+
 CFLAGS := -MMD -MP -nostdlib -ffreestanding -g -O2 -Wall -Wno-unused-function -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
 LDFLAGS := -L$(BOARD_DIR)/lib
 LIBS := -lmicrokit -Tmicrokit.ld

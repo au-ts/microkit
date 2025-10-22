@@ -28,6 +28,8 @@ void init(void)
     /* wait for start notification */
     tag = seL4_Recv(INPUT_CAP, &badge, REPLY_CAP);
 
+    RECORDING_BEGIN();
+
     for (size_t i = 0; i < NUM_WARMUP; i++) {
         start = pmu_read_cycles();
         seL4_Signal(BASE_OUTPUT_NOTIFICATION_CAP + SIGNAL_LO_HI_CHANNEL);
@@ -36,8 +38,6 @@ void init(void)
 
         asm volatile("" :: "r"(start), "r"(end));
     }
-
-    RECORDING_BEGIN();
 
     for (size_t i = 0; i < NUM_SAMPLES; i++) {
 
