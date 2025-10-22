@@ -10,7 +10,8 @@
 
 #include "benchmark.h"
 #include "config.h"
-#include "signal_low_to_hi_same_core.h"
+
+#define SIGNAL_LO_HI_CHANNEL 1
 
 uintptr_t shared;
 uintptr_t results;
