@@ -28,3 +28,11 @@ This measures the time from a seL4_Signal in a high priority process to when
 that signal returns. This is because higher priority processes will always run
 above low priority, so the next running will be the *sender*. This is **different**
 to the case for low to high.
+
+## signal_2way_low_to_hi_{same,cross}_core
+
+This is a two way benchmark, performing a low to a high invocation, then another
+low to high invocation; so like low -> mid -> high. This design is aimed at
+cross-core scenarios, where we don't have coherent cycle counters across cores,
+so measuring the cycle count on core *A* then core *B* won't produce sensible
+results, as is done in `signal_low_to_hi_same_core`.

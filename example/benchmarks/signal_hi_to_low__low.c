@@ -11,8 +11,6 @@
 
 #define SIGNAL_LO_HI_CHANNEL 1
 
-uintptr_t shared;
-
 void init(void)
 {
     print("hello world\n");

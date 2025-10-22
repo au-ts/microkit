@@ -13,7 +13,8 @@
 #include "kernel/gen_config.h"
 #include "print.h"
 
-uintptr_t results;
+/* Each benchmark has 1 page mapped */
+uintptr_t results_base;
 
 typedef struct {
     microkit_channel start_stop_ch;
@@ -27,8 +28,6 @@ static const benchmark_t benchmark_infos[] = {
 
 static const size_t benchmark_infos_count = sizeof(benchmark_infos)/sizeof(benchmark_infos[0]);
 
-static_assert(sizeof(benchmark_infos)/sizeof(benchmark_infos[0]) * sizeof(result_t) <= 0x1000, "benchmark results fit");
-
 static void start_benchmark(size_t current) {
 start:
     if (current >= benchmark_infos_count) {
@@ -38,7 +37,9 @@ start:
         for (size_t i = 0; i < benchmark_infos_count; i++) {
             const benchmark_t *info = &benchmark_infos[i];
             if (info->start_stop_ch == 0) continue;
-            const result_t *result = &((const result_t *)results)[info->start_stop_ch];
+
+            uintptr_t result_ptr = results_base + 0x1000 * (i);
+            const result_t *result = (result_t *)result_ptr;
 
             puts(info->name);
             puts(",");

@@ -55,7 +55,7 @@ void init(void)
         tag = seL4_Recv(INPUT_CAP, &badge, REPLY_CAP);
     }
 
-    RECORDING_END(results, BENCHMARK_CH__SIGNAL_SAME_CORE_HI_LOW);
+    RECORDING_END(results);
 
     microkit_notify(BENCHMARK_START_STOP_CH);
 }

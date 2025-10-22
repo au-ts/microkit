@@ -43,13 +43,13 @@ typedef struct {
   cycles_t max;
 } result_t;
 
-#define RECORDING_END(results_ptr, benchmark_idx)                              \
+#define RECORDING_END(results_ptr)                              \
   do {                                                                         \
     /* TODO: cache flushes for multicore? */                                   \
     print("END\n");                                                            \
     result_t *_results = (void *)results_ptr;                \
-    _results[benchmark_idx].sum = sum;                                         \
-    _results[benchmark_idx].sum_squared = sum_squared;                         \
-    _results[benchmark_idx].min = min;                                         \
-    _results[benchmark_idx].max = max;                                         \
+    _results->sum = sum;                                         \
+    _results->sum_squared = sum_squared;                         \
+    _results->min = min;                                         \
+    _results->max = max;                                         \
   } while (0)
