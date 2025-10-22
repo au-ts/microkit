@@ -60,6 +60,27 @@
             <end pd="signal_hi_to_low_same_core__high" id="1" />
         </channel>
 
+    <!-- Benchmark 3: new test, cross core high->low -->
+        <memory_region name="signal_hi_to_low_cross_core__results" size="0x1000" />
+
+        <protection_domain name="signal_hi_to_low_cross_core__high" priority="201" cpu="0">
+            <program_image path="signal_hi_to_low__high.elf" />
+
+            <map mr="uart" vaddr="0x30000000" cached="false" setvar_vaddr="uart_base" />
+            <map mr="signal_hi_to_low_cross_core__results" vaddr="0x30001000" setvar_vaddr="results" />
+        </protection_domain>
+
+        <protection_domain name="signal_hi_to_low_cross_core__low" priority="101" cpu="1">
+            <program_image path="signal_hi_to_low__low.elf" />
+
+            <map mr="uart" vaddr="0x30000000" cached="false" setvar_vaddr="uart_base" />
+        </protection_domain>
+
+        <channel>
+            <end pd="signal_hi_to_low_cross_core__low" id="1" />
+            <end pd="signal_hi_to_low_cross_core__high" id="1" />
+        </channel>
+
     <!-- lowest priority. it should never interfere -->
     <protection_domain name="manager" priority="0" cpu="0">
         <program_image path="manager.elf" />
@@ -67,6 +88,7 @@
         <map mr="uart" vaddr="0x30000000" cached="false" setvar_vaddr="uart_base" />
         <map mr="signal_low_to_hi_same_core__results" vaddr="0x30001000" setvar_vaddr="results_base" />
         <map mr="signal_hi_to_low_same_core__results" vaddr="0x30002000" />
+        <map mr="signal_hi_to_low_cross_core__results" vaddr="0x30003000" />
     </protection_domain>
 
     <channel>
@@ -77,5 +99,10 @@
     <channel>
         <end pd="manager" id=str(BENCHMARK_CH__SIGNAL_SAME_CORE_HI_LOW) />
         <end pd="signal_hi_to_low_same_core__high" id="0" />
+    </channel>
+
+    <channel>
+        <end pd="manager" id=str(BENCHMARK_CH__SIGNAL_CROSS_CORE_HI_LOW) />
+        <end pd="signal_hi_to_low_cross_core__high" id="0" />
     </channel>
 </system>
