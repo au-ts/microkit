@@ -13,6 +13,7 @@
 #include "signal_low_to_hi_same_core.h"
 
 uintptr_t shared;
+uintptr_t results;
 
 void init(void)
 {
@@ -68,7 +69,7 @@ void init(void)
         RECORDING_ADD_SAMPLE(start, end);
     }
 
-    RECORDING_END();
+    RECORDING_END(results, BENCHMARK_CH__SIGNAL_LOW_HI);
 
     microkit_notify(BENCHMARK_START_STOP_CH);
 }

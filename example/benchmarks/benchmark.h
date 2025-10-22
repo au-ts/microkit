@@ -18,7 +18,6 @@
 /* Inside a benchmark, the start-stop ch */
 #define BENCHMARK_START_STOP_CH 0
 
-/* Declare and init internal parameters: "sample" and "is_counted" */
 #define RECORDING_BEGIN()                                                      \
   pmu_enable();                                                                \
   print("BEGIN\n");                                                            \
@@ -37,16 +36,20 @@
   min = (sample < min) ? sample : min;                                         \
   max = (sample > max) ? sample : max;
 
-#define RECORDING_END()                                                        \
-  print("RESULTS\n");                                                          \
-  puts("runs,sum,sum_squared,min,max\n");                                      \
-  puthex64(NUM_SAMPLES);                                                       \
-  puts(",");                                                                   \
-  puthex64(sum);                                                               \
-  puts(",");                                                                   \
-  puthex64(sum_squared);                                                       \
-  puts(",");                                                                   \
-  puthex64(min);                                                               \
-  puts(",");                                                                   \
-  puthex64(max);                                                               \
-  puts("\n");
+typedef struct {
+  uint64_t sum;
+  uint64_t sum_squared;
+  cycles_t min;
+  cycles_t max;
+} result_t;
+
+#define RECORDING_END(results_ptr, benchmark_idx)                              \
+  do {                                                                         \
+    /* TODO: cache flushes for multicore? */                                   \
+    print("END\n");                                                            \
+    result_t *_results = (void *)results_ptr;                \
+    _results[benchmark_idx].sum = sum;                                         \
+    _results[benchmark_idx].sum_squared = sum_squared;                         \
+    _results[benchmark_idx].min = min;                                         \
+    _results[benchmark_idx].max = max;                                         \
+  } while (0)

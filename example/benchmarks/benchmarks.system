@@ -12,6 +12,7 @@
 -->
 <system>
     <memory_region name="uart" size="0x1000" phys_addr="0xff803000" />
+    <memory_region name="results" size="0x1000" />
 
     <!-- Benchmark 1: basic comparison with existing seL4 performance tests -->
         <memory_region name="signal_low_to_hi_same_core__shared" size="0x1000" />
@@ -20,6 +21,7 @@
             <program_image path="signal_low_to_hi_same_core__low.elf" />
 
             <map mr="uart" vaddr="0x30000000" cached="false" setvar_vaddr="uart_base" />
+            <map mr="results" vaddr="0x30001000" setvar_vaddr="results" />
             <map mr="signal_low_to_hi_same_core__shared" vaddr="0x30010000" setvar_vaddr="shared" />
         </protection_domain>
 
@@ -40,6 +42,7 @@
         <program_image path="manager.elf" />
 
         <map mr="uart" vaddr="0x30000000" cached="false" setvar_vaddr="uart_base" />
+        <map mr="results" vaddr="0x30001000" setvar_vaddr="results" />
     </protection_domain>
 
     <channel>
