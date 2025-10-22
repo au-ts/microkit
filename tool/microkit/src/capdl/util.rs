@@ -45,7 +45,7 @@ pub fn capdl_util_make_frame_cap(
     frame_obj_id: ObjectId,
     read: bool,
     write: bool,
-    execute: bool,
+    executable: bool,
     cached: bool,
 ) -> Cap {
     Cap::Frame(cap::Frame {
@@ -59,7 +59,7 @@ pub fn capdl_util_make_frame_cap(
         cached,
         // This is ignored on x86 by seL4. As the NX/XD bit that marks page as non-executable
         // is unsupported on old hardware.
-        execute,
+        executable,
     })
 }
 

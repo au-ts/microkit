@@ -481,7 +481,7 @@ pub mod cap {
         pub object: ObjectId,
         pub rights: Rights,
         pub cached: bool,
-        pub execute: bool,
+        pub executable: bool,
     }
 
     #[derive(Serialize, Clone, Eq, PartialEq)]
