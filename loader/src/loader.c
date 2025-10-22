@@ -306,6 +306,20 @@ static void putc(uint8_t ch)
     *UART_REG(UTHR) = ch;
 }
 
+#elif defined(BOARD_rock3b)
+#define UART_BASE   0xfdd50000
+#define UTHR        0x0
+#define ULSR        0x14
+#define ULSR_THRE   (1 << 5)
+
+static void uart_init() {}
+
+static void putc(uint8_t ch)
+{
+    while ((*UART_REG(ULSR) & ULSR_THRE) == 0);
+    *UART_REG(UTHR) = ch;
+}
+
 #elif defined(ARCH_riscv64)
 #define SBI_CONSOLE_PUTCHAR 1
 
