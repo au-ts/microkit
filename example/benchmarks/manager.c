@@ -10,7 +10,6 @@
 
 #include "benchmark.h"
 #include "config.h"
-#include "kernel/gen_config.h"
 #include "print.h"
 
 /* Each benchmark has 1 page mapped */
@@ -25,6 +24,7 @@ static const benchmark_t benchmark_infos[] = {
     { BENCHMARK_CH__SIGNAL_SAME_CORE_LOW_HI, "signal low to high same core" },
     { BENCHMARK_CH__SIGNAL_SAME_CORE_HI_LOW, "signal high to low same core" },
     { BENCHMARK_CH__SIGNAL_CROSS_CORE_HI_LOW, "signal high to low cross core" },
+    { BENCHMARK_CH__SIGNAL_2WAY_SAME_CORE_LOW_HI, "signal 2way low to high same core" },
 };
 
 static const size_t benchmark_infos_count = sizeof(benchmark_infos)/sizeof(benchmark_infos[0]);
