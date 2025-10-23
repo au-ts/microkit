@@ -22,6 +22,7 @@ This section attempts to list the packages or external development tools which a
 * xmllint
 * qemu-system-aarch64
 * qemu-system-riscv64
+* qemu-system-x86_64
 
 To build the documentation you also need
 * pandoc
@@ -42,7 +43,7 @@ On a Debian-like system you can do:
         pandoc texlive-latex-base texlive-latex-recommended \
         texlive-fonts-recommended texlive-fonts-extra \
         python3.12 python3.12-venv \
-        qemu-system-arm qemu-system-misc \
+        qemu-system-arm qemu-system-misc qemu-system-x86 \
         gcc-riscv64-unknown-elf
     $ python3.12 -m venv pyenv
     $ ./pyenv/bin/pip install --upgrade pip setuptools wheel
