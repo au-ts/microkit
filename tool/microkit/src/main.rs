@@ -3389,10 +3389,18 @@ fn build_full_system_state(
 
             match mr.phys_addr {
                 Some(phys_addr) => {
-                    let in_ram = {
-                        // TODO.
-                        true
-                    };
+                    let in_ram = kernel_config.normal_regions.iter().fold(false, |acc, reg| {
+                        let in_region = reg.start <= phys_addr && phys_addr < reg.end;
+
+                        // We could early exit instead of reducing, but this extra
+                        // check is nice to make sure we haven't messed up any of the
+                        // logic.
+                        if acc && in_region {
+                            panic!("INTERNAL: phys_addr is somehow in two memory regions");
+                        }
+
+                        in_region
+                    });
 
                     if in_ram {
                         shared_memory_phys_regions.insert_region(phys_addr, phys_addr + mr.size);
@@ -3423,7 +3431,9 @@ fn build_full_system_state(
             .get_mut(shared_index)
             .expect("should be valid by construction");
 
-        let phys_addr = shared_phys_addr_prev.checked_sub(mr.size).expect("no underflow :(");
+        let phys_addr = shared_phys_addr_prev
+            .checked_sub(mr.size)
+            .expect("no underflow :(");
         mr.phys_addr = Some(phys_addr);
         // FIXME: This would crash if overlap happens with shared memory paddrs.
         shared_memory_phys_regions.insert_region(phys_addr, phys_addr + mr.size);
@@ -3440,8 +3450,7 @@ fn build_full_system_state(
 
         // Remove shared memory.
         for s_mr in shared_memory_phys_regions.regions.iter() {
-            available_normal_memory
-                .remove_region(s_mr.base, s_mr.end);
+            available_normal_memory.remove_region(s_mr.base, s_mr.end);
         }
 
         println!("available memory:");
