@@ -1,0 +1,225 @@
+co
+^Eco
+[Enter `^Ec?' for help]
+[connecting...up]
+SM1:BL:511f6b:81ca2f;FEAT:A0F83180:20282000;POC:F;RCY:0;EMMC:0;READ:0;0.0;CHK:0;
+bl2_stage_init 0x01
+bl2_stage_init 0x81
+hw id: 0x0000 - pwm id 0x01
+bl2_stage_init 0xc1
+bl2_stage_init 0x02
+
+L0:00000000
+L1:00000703
+L2:00008067
+L3:15000020
+S1:00000000
+B2:20282000
+B1:a0f83180
+
+TE: 153045
+
+BL2 Built : 20:29:41, Jun 18 2019. g12a ga659aac - luan.yuan@droid15-sz
+
+Board ID = 1
+Set cpu clk to 24M
+Set clk81 to 24M
+Use GP1_pll as DSU clk.
+DSU clk: 1200 Mhz
+CPU clk: 1200 MHz
+Set clk81 to 166.6M
+eMMC boot @ 0
+sw8 s
+DDR driver_vesion: LPDDR4_PHY_V_0_1_15 build time: Jun 18 2019 20:29:37
+board id: 1
+Load FIP HDR from eMMC, src: 0x00010200, des: 0xfffd0000, size: 0x00004000, part: 0
+fw parse done
+Load ddrfw from eMMC, src: 0x00060200, des: 0xfffd0000, size: 0x0000c000, part: 0
+Load ddrfw from eMMC, src: 0x00038200, des: 0xfffd0000, size: 0x00004000, part: 0
+PIEI prepare done
+fastboot data load
+00000000
+emmc switch 1 ok
+00000000
+emmc switch 2 ok
+fastboot data verify
+verify result: 255
+Cfg max: 2, cur: 1. Board id: 255. Force loop cfg
+DDR4 probe
+ddr clk to 1320MHz
+Load ddrfw from eMMC, src: 0x00014200, des: 0xfffd0000, size: 0x0000c000, part: 0
+00000000
+emmc switch 0 ok
+
+dmc_version 0001
+Check phy result
+INFO : End of initialization
+INFO : End of read enable training
+INFO : End of fine write leveling
+INFO : End of read dq deskew training
+INFO : End of MPR read delay center optimization
+INFO : End of Write leveling coarse delay
+INFO : End of write delay center optimization
+INFO : End of read delay center optimization
+INFO : End of max read latency training
+INFO : Training has run successfully!
+1D training succeed
+Load ddrfw from eMMC, src: 0x00020200, des: 0xfffd0000, size: 0x0000c000, part: 0
+Check phy result
+INFO : End of initialization
+INFO : End of 2D read delay Voltage center optimization
+INFO : End of 2D write delay Voltage center optimization
+INFO : Training has run successfully!
+
+R0_RxClkDly_Margin==94 ps 8
+R0_TxDqDly_Margi==106 ps 9
+
+
+R1_RxClkDly_Margin==0 ps 0
+R1_TxDqDly_Margi==0 ps 0
+
+ dwc_ddrphy_apb_wr((0<<20)|(2<<16)|(0<<12)|(0xb0):0001 
+
+soc_vref_reg_value 0x 0000004f 0000004f 0000004f 0000004c 0000004f 00000051 0000004d 0000004d 0000004d 0000004f 0000004e 0000004d 0000004e 0000004e 0000004c 0000004d 0000004f 00000050 0000004e 0000004f 0000004f 0000004e 0000004e 00000051 0000004e 00000051 0000004f 0000004f 0000004f 0000004e 00000050 00000050 dram_vref_reg_value 0x 00000020
+2D training succeed
+aml_ddr_fw_vesion: LPDDR4_PHY_V_0_1_15 build time: Jun 18 2019 20:29:43
+auto size-- 65535DDR cs0 size: 2048MB
+DDR cs1 size: 2048MB
+DMC_DDR_CTRL: 00700024DDR size: 3928MB
+cs0 DataBus test pass
+cs1 DataBus test pass
+cs0 AddrBus test pass
+cs1 AddrBus test pass
+
+non-sec scramble use zero key
+ddr scramble enabled
+
+100bdlr_step_size ps== 435
+result report
+boot times 0Enable ddr reg access
+00000000
+emmc switch 3 ok
+Authentication key not yet programmed
+get rpmb counter error 0x00000007
+00000000
+emmc switch 0 ok
+Load FIP HDR from eMMC, src: 0x00010200, des: 0x01700000, size: 0x00004000, part: 0
+Load BL3X from eMMC, src: 0x00078200, des: 0x01768000, size: 0x0009c000, part: 0
+bl2z: ptr: 05129330, size: 00001e40
+0.0;M3 CHK:0;cm4_sp_mode 0
+MVN_1=0x00000000
+MVN_2=0x00000000
+[Image: g12a_v1.1.3386-3b31431 2019-05-21 10:41:54 luan.yuan@droid15-sz]
+OPS=0x10
+ring efuse init
+2b 0c 10 00 01 1d 22 00 00 19 36 30 36 58 4b 50 
+[0.017354 Inits done]
+secure task start!
+high task start!
+low task start!
+run into bl31
+NOTICE:  BL31: v1.3(release):4fc40b1
+NOTICE:  BL31: Built : 15:57:33, May 22 2019
+NOTICE:  BL31: G12A normal boot!
+NOTICE:  BL31: BL33 decompress pass
+ERROR:   Error initializing runtime service opteed_fast
+
+<debug_uart>
+
+
+U-Boot 2022.07-armbian (Feb 17 2023 - 22:32:33 +0000) odroid-c4/hc4
+
+Model: Hardkernel ODROID-C4
+SoC:   Amlogic Meson SM1 (S905X3) Revision 2b:c (10:2)
+DRAM:  3.8 GiB
+Core:  388 devices, 27 uclasses, devicetree: separate
+MMC:   sd@ffe05000: 0, mmc@ffe07000: 1
+Loading Environment from nowhere... OK
+In:    serial
+Out:   serial
+Err:   serial
+Board variant: c4
+Net:   eth0: ethernet@ff3f0000
+Hit any key to stop autoboot:  2  
+ 0 
+=> 
+=> setenv autoload no && dhcp && tftpboot 0x20000000 odroidc4-2/local-kernel
+setenv autoload no && dhcp && tftpboot 0x20000000 odroidc4-2/local-kernel
+ethernet@ff3f0000 Waiting for PHY auto negotiation to complete...... done
+Speed: 1000, full duplex
+BOOTP broadcast 1
+BOOTP broadcast 2
+BOOTP broadcast 3
+BOOTP broadcast 4
+BOOTP broadcast 5
+BOOTP broadcast 6
+*** WARNING: Host Name is too long (34 - max: 32) - truncated
+*** WARNING: Host Name is too long (34 - max: 32) - truncated
+DHCP client bound to address 172.16.0.12 (5762 ms)
+Speed: 1000, full duplex
+Using ethernet@ff3f0000 device
+TFTP from server 172.16.0.2; our IP address is 172.16.0.12
+Filename 'odroidc4-2/local-kernel'.
+Load address: 0x20000000
+Loading: *#################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #
+	 13.1 MiB/s
+done
+Bytes transferred = 4781016 (48f3d8 hex)
+=> go 0x20000000
+go 0x20000000
+## Starting application at 0x20000000 ...
+2010signal_2way_low_to_hi_cross_core__mid: hello world
+signal_hi_to_low_srons__2ray_low: oeli_ wosl_c
+re__high: hello world
+signal_2way_low_to_hi_same_core__high: hello world
+signal_hi_to_low_cross_core__high: hello world
+signal_hi_to_low_same_core__high: hello world
+signal_low_to_hi_same_core__high: hello world
+signal_2way_low_to_hi_same_core__mid: hello world
+signal_2way_low_to_hi_cross_core__low: hello world
+signal_2way_low_to_hi_same_core__low: hello world
+signal_hi_to_low_same_core__low: hello world
+signal_low_to_hi_same_core__low: hello world
+manager: hello world
+manager: Available benchmarks:
+manager: 	signal low to high same core (enabled)
+manager: 	signal high to low same core (enabled)
+manager: 	signal high to low cross core (enabled)
+manager: 	signal 2way low to high same core (enabled)
+manager: 	signal 2way low to high cross core (enabled)
+manager: Starting benchmark run...
+manager: Running benchmark 'signal low to high same core' [0x00000000/0x00000005)
+signal_low_to_hi_same_core__low: BEGIN
+signal_low_to_hi_same_core__low: END
+manager: Benchmark complete: 0x00000000
+manager: Running benchmark 'signal high to low same core' [0x00000001/0x00000005)
+signal_hi_to_low_same_core__high: BEGIN
+signal_hi_to_low_same_core__high: END
+manager: Benchmark complete: 0x00000001
+manager: Running benchmark 'signal high to low cross core' [0x00000002/0x00000005)
+signal_hi_to_low_cross_core__high: BEGIN
+signal_hi_to_low_cross_core__high: END
+manager: Benchmark complete: 0x00000002
+manager: Running benchmark 'signal 2way low to high same core' [0x00000003/0x00000005)
+signal_2way_low_to_hi_same_core__low: BEGIN
+signal_2way_low_to_hi_same_core__low: END
+manager: Benchmark complete: 0x00000003
+manager: Running benchmark 'signal 2way low to high cross core' [0x00000004/0x00000005)
+signal_2way_low_to_hi_cross_core__low: BEGIN
+signal_2way_low_to_hi_cross_core__low: END
+manager: Benchmark complete: 0x00000004
+manager: All benchmarks done
+__RESULTS_BEGIN__
+name,runs,sum,sum_squared,min,max
+signal low to high same core,0x00000000000186a0,0x0000000005c9f5fe,0x00000015f9aa7836,0x00000000000003b0,0x0000000000000699
+signal high to low same core,0x00000000000186a0,0x000000000313a39c,0x000000063660b964,0x0000000000000202,0x00000000000004bb
+signal high to low cross core,0x00000000000186a0,0x0000000002e160a3,0x00000005725b3e3d,0x00000000000001de,0x000000000000049b
+signal 2way low to high same core,0x00000000000186a0,0x000000000b8fbdfe,0x000000579f19540e,0x0000000000000768,0x0000000000000a76
+signal 2way low to high cross core,0x00000000000186a0,0x000000000c8599b3,0x00000066c9de3d11,0x00000000000007f2,0x0000000000000b5f
+__RESULTS_END__
+All is well in the universe.
