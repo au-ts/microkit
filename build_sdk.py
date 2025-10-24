@@ -194,14 +194,11 @@ SUPPORTED_BOARDS = (
         loader_link_address=0x20000000,
         kernel_options={
             "KernelPlatform": "odroidc4",
-            "KernelIsMCS": True,
-            "KernelArmExportPCNTUser": True,
-            "KernelArmHypervisorSupport": True,
             "KernelArmVtimerUpdateVOffset": False,
             "KernelEnableMultikernelSupport": True,
             # TODO: Derive from device tree?
             "KernelMultikernelNumCPUs": 2,
-        },
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
         name="qemu_virt_aarch64",
@@ -223,17 +220,12 @@ SUPPORTED_BOARDS = (
         loader_link_address=0x70000000,
         kernel_options={
             "KernelPlatform": "qemu-arm-virt",
-            "KernelIsMCS": True,
-            "KernelArmExportPCNTUser": True,
             "QEMU_MEMORY": "2048",
-            "KernelArmHypervisorSupport": True,
-            "KernelArmExportPCNTUser": True,
             "KernelArmExportPTMRUser": True,
-            "KernelArmVtimerUpdateVOffset": False,
             "KernelEnableMultikernelSupport": True,
             # TODO: Derive from device tree?
             "KernelMultikernelNumCPUs": 2,
-        },
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
         name="qemu_virt_riscv64",
