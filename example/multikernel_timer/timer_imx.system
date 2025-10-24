@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright 2025, UNSW
+
+ SPDX-License-Identifier: BSD-2-Clause
+-->
+<system>
+    <!-- GPT memory map of the manual -->
+    <memory_region name="gpt1" size="0x1000" phys_addr="0x302d0000" />
+    <memory_region name="gpt2" size="0x1000" phys_addr="0x302e0000" />
+
+    <memory_region name="shared" size="0x1000" />
+
+    <protection_domain name="timer" cpu="0">
+        <program_image path="timer.elf" />
+        <map mr="gpt1" vaddr="0x2_000_000" perms="rw" cached="false" setvar_vaddr="timer_regs_1" />
+        <map mr="gpt2" vaddr="0x2_001_000" perms="rw" cached="false" setvar_vaddr="timer_regs_2" />
+        <!-- interrupts = <0x00 0x37 0x04>; -->
+        <irq irq="87" id="0" trigger="level" />
+
+        <map mr="shared" vaddr="0x2_100_000" perms="rw" cached="false" setvar_vaddr="symbol_shared_buffer" />
+    </protection_domain>
+
+    <protection_domain name="client" cpu="0">
+        <program_image path="client.elf" />
+
+        <map mr="shared" vaddr="0x2_100_000" perms="rw" cached="false" setvar_vaddr="symbol_shared_buffer" />
+    </protection_domain>
+
+    <channel>
+        <end pd="timer"  id="1" />
+        <end pd="client" id="0" />
+    </channel>
+</system>

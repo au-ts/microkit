@@ -19,13 +19,18 @@ ifeq ($(strip $(MICROKIT_CONFIG)),)
 $(error MICROKIT_CONFIG must be specified)
 endif
 
-ifneq ($(MICROKIT_BOARD),odroidc4_multikernel)
-$(error Unsupported MICROKIT_BOARD given, only odroidc4-multikernel supported)
+ifeq ($(MICROKIT_BOARD),odroidc4_multikernel)
+	CPU := cortex-a55
+	BOARD_SUFFIX := meson
+else ifeq ($(MICROKIT_BOARD),maaxboard_multikernel)
+	CPU := cortex-a53
+	BOARD_SUFFIX := imx
+else
+$(error Unsupported MICROKIT_BOARD given, only odroidc4 & maaxboard multikernel supported)
 endif
 
 TARGET_TRIPLE := aarch64-none-elf
 
-CPU := cortex-a55
 
 ifeq ($(strip $(LLVM)),True)
   CC := clang -target $(TARGET_TRIPLE)
@@ -39,7 +44,7 @@ endif
 
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
-TIMER_OBJS := timer.o
+TIMER_OBJS := timer_$(BOARD_SUFFIX).o
 
 BOARD_DIR := $(MICROKIT_SDK)/board/$(MICROKIT_BOARD)/$(MICROKIT_CONFIG)
 
@@ -65,5 +70,5 @@ $(BUILD_DIR)/timer.elf: $(addprefix $(BUILD_DIR)/, $(TIMER_OBJS))
 $(BUILD_DIR)/client.elf: $(BUILD_DIR)/client.o
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
-$(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) timer.system
-	$(MICROKIT_TOOL) timer.system --search-path $(BUILD_DIR) --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE)
+$(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) timer_$(BOARD_SUFFIX).system
+	$(MICROKIT_TOOL) timer_$(BOARD_SUFFIX).system --search-path $(BUILD_DIR) --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE)
