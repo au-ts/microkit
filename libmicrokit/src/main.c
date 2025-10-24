@@ -31,6 +31,7 @@ seL4_MessageInfo_t microkit_signal_msg;
 seL4_Word microkit_irqs;
 seL4_Word microkit_notifications;
 seL4_Word microkit_pps;
+seL4_Word microkit_sgi_notifications;
 
 extern seL4_IPCBuffer __sel4_ipc_buffer_obj;
 
@@ -98,6 +99,36 @@ static void handler_loop(void)
             unsigned int idx = 0;
             do  {
                 if (badge & 1) {
+
+                    /**
+                     * TODO: There might be an advantage to this auto-ack behaviour
+                     *       living inside the kernel instead.
+                     *  See: https://github.com/seL4/seL4/issues/1185
+                     *
+                     * Note that in its current state, GICv2 doesn't actually
+                     * need an ACK, at all, as GICv2 uses GICD_ICENABLERn bit
+                     * to (essentially) emulate split EOI.
+                     *
+                     * According to the GICv2:
+                     * "for SGIs, the behavior of this bit is IMPLEMENTATION DEFINED."
+                     *
+                     * GIC-400 (GICv2) defines it:
+                     * "The reset value for the register that contains the SGI and PPI interrupts is 0x0000FFFF because SGIs are always enabled."
+                     * Cortex A-15 (GICv2) defines it:
+                     * "The reset value for the register that contains the SGI and PPI interrupts is 0x0000FFFF because SGIs are always enabled."
+                     * Cortex A-9 (GICv2) defines it:
+                     * "In the Cortex-A9 MPCore, SGIs are always enabled. The corresponding bits in the ICDISERn are read as one, write ignored."
+                     * Cortex A-7 (GICv2) defines it:
+                     * "The reset value for the register that contains the SGI and PPI interrupts is 0x0000FFFF because SGIs are always enabled."
+                     * GIC-500 (GICv3) defines it:
+                     * "The reset value for the register that contains the SGI and PPI interrupts is 0x0000FFFF because SGIs are always enabled."
+                     *
+                     *
+                     */
+                    if (microkit_sgi_notifications & (1ull << idx)) {
+                        microkit_irq_ack(idx);
+                    }
+
                     notified(idx);
                 }
                 badge >>= 1;

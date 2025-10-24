@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "kernel/gen_config.h"
+
 _Static_assert(sizeof(uintptr_t) == 8 || sizeof(uintptr_t) == 4, "Expect uintptr_t to be 32-bit or 64-bit");
 
 #if UINTPTR_MAX == 0xffffffffUL
@@ -31,12 +33,22 @@ _Static_assert(sizeof(uintptr_t) == 8 || sizeof(uintptr_t) == 4, "Expect uintptr
 #if defined(BOARD_zcu102) || defined(BOARD_ultra96v2)
 #define GICD_BASE 0x00F9010000UL
 #define GICC_BASE 0x00F9020000UL
+#define GIC_VERSION 2
 #elif defined(BOARD_qemu_virt_aarch64) || defined(BOARD_qemu_virt_aarch64_multikernel)
 #define GICD_BASE 0x8000000UL
 #define GICC_BASE 0x8010000UL
+#define GIC_VERSION 2
 #elif defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel)
 #define GICD_BASE 0xffc01000UL
 #define GICC_BASE 0xffc02000UL
+#define GIC_VERSION 2
+#elif defined(BOARD_maaxboard_multikernel)
+/* reg = <0x38800000 0x10000 0x38880000 0xc0000 0x31000000 0x2000 0x31010000 0x2000 0x31020000 0x2000>; */
+#define GICD_BASE 0x38800000UL /* size 0x10000 */
+#define GICR_BASE 0x38880000UL /* size 0xc0000 */
+#define GIC_VERSION 3
+#else
+/* #define GIC_VERSION */
 #endif
 
 #define REGION_TYPE_DATA 1
@@ -232,7 +244,7 @@ static void putc(uint8_t ch)
     while (!(*UART_REG(UART_CHANNEL_STS) & UART_CHANNEL_STS_TXEMPTY));
     *UART_REG(UART_TX_RX_FIFO) = ch;
 }
-#elif defined(BOARD_maaxboard) || defined(BOARD_imx8mq_evk)
+#elif defined(BOARD_maaxboard) || defined(BOARD_imx8mq_evk) || defined(BOARD_maaxboard_multikernel)
 #define UART_BASE 0x30860000
 #define STAT 0x98
 #define TRANSMIT 0x40
@@ -724,6 +736,8 @@ static void start_kernel(int id)
     );
 }
 
+#if defined(GIC_VERSION)
+#if GIC_VERSION == 2
 
 #define IRQ_SET_ALL 0xffffffff
 #define TARGET_CPU_ALLINT(CPU) ( \
@@ -783,6 +797,12 @@ _Static_assert(__builtin_offsetof(struct gic_dist_map, SGIR) == 0xF00);
 _Static_assert(__builtin_offsetof(struct gic_dist_map, _res8) == 0xFD0);
 _Static_assert(__builtin_offsetof(struct gic_dist_map, ICPIDR2) == 0xFE8);
 
+
+#define _macrotest_1 ,
+#define is_set(value) _is_set__(_macrotest_##value)
+#define _is_set__(comma) _is_set___(comma 1, 0)
+#define _is_set___(_, v, ...) v
+
 static uint8_t infer_cpu_gic_id(int nirqs)
 {
    volatile struct gic_dist_map *gic_dist = (volatile void *)(GICD_BASE);
@@ -804,12 +824,6 @@ static uint8_t infer_cpu_gic_id(int nirqs)
     return target & 0xff;
 }
 
-#define _macrotest_1 ,
-#define is_set(value) _is_set__(_macrotest_##value)
-#define _is_set__(comma) _is_set___(comma 1, 0)
-#define _is_set___(_, v, ...) v
-
-#if defined(BOARD_zcu102) || defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel) || defined(BOARD_qemu_virt_aarch64) || defined(BOARD_qemu_virt_aarch64_multikernel)
 static void configure_gicv2(void)
 {
     /* The ZCU102 start in EL3, and then we drop to EL1(NS).
@@ -905,6 +919,20 @@ static void configure_gicv2(void)
     /* BIT 0 is enable; so enable */
     gic_dist->CTLR = 1;
 }
+
+#elif GIC_VERSION == 3
+
+static void configure_gicv3(void)
+{
+    puts("TODO: configure gicv3\n");
+}
+
+#else
+#error "unknown GIC version"
+#endif
+
+/* not a GIC */
+
 #endif
 
 #ifdef ARCH_riscv64
@@ -1006,8 +1034,10 @@ void secondary_cpu_entry() {
     __atomic_store_n(&core_up[cpu], 1, __ATOMIC_RELEASE);
     dsb();
 
-#if 0
+#if 1
 #ifdef BOARD_odroidc4_multikernel
+    for (volatile int i = 0; i < cpu * 10000000; i++);
+#elif defined(BOARD_maaxboard_multikernel)
     for (volatile int i = 0; i < cpu * 10000000; i++);
 #else
     for (volatile int i = 0; i < cpu * 100000000; i++);
@@ -1096,10 +1126,18 @@ int main(void)
      */
     copy_data();
 
-#if defined(BOARD_zcu102) || defined(BOARD_ultra96v2) || defined(BOARD_odroidc4) || defined(BOARD_odroidc4_multikernel) || defined(BOARD_qemu_virt_aarch64_multikernel) || defined(BOARD_qemu_virt_aarch64)
+#if defined(GIC_VERSION)
+#if GIC_VERSION == 2
+    puts("LDR|INFO: Initialising interrupt controller GICv2\n");
     configure_gicv2();
+#elif GIC_VERSION == 3
+    puts("LDR|INFO: Initialising interrupt controller GICv3\n");
+    configure_gicv3();
 #else
-#error
+    #error "unknown GIC version"
+#endif
+#else
+    puts("LDR|INFO: No interrupt controller to initialise\n");
 #endif
 
     puts("LDR|INFO: # of multikernels is ");

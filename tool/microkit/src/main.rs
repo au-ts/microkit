@@ -375,6 +375,7 @@ struct BuiltSystem {
     kernel_objects: Vec<Object>,
     initial_task_virt_region: MemoryRegion,
     initial_task_phys_region: MemoryRegion,
+    cross_core_receiver_channels: Vec<(ChannelEnd, ChannelEnd)>,
 }
 
 pub fn pd_write_symbols(
@@ -383,6 +384,7 @@ pub fn pd_write_symbols(
     channels: &[Channel],
     pd_elf_files: &mut BTreeMap<String, ElfFile>,
     pd_setvar_values: &BTreeMap<String, Vec<u64>>,
+    cross_core_receiver_channels: &[(ChannelEnd, ChannelEnd)],
 ) -> Result<(), String> {
     for pd in pds.values() {
         let elf = pd_elf_files.get_mut(&pd.name).unwrap();
@@ -412,9 +414,22 @@ pub fn pd_write_symbols(
             }
         }
 
-        elf.write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
+        let mut sgi_bits = 0;
+        for (_, recv) in cross_core_receiver_channels.iter() {
+            sgi_bits |= 1 << recv.id;
+        }
+
+        println!("writing sgi_bits {sgi_bits:#x}");
+
+        // This includes the SGI notification channels too as they need to be
+        // microkit_irq_ack(). See the implementation of libmicrokit/main.c
+        assert!(sgi_bits & pd.irq_bits() == 0);
+        let pd_irq_bits = pd.irq_bits() | sgi_bits;
+
+        elf.write_symbol("microkit_irqs", &pd_irq_bits.to_le_bytes())?;
         elf.write_symbol("microkit_notifications", &notification_bits.to_le_bytes())?;
         elf.write_symbol("microkit_pps", &pp_bits.to_le_bytes())?;
+        elf.write_symbol("microkit_sgi_notifications", &sgi_bits.to_le_bytes())?;
 
         for (setvar_idx, setvar) in pd.setvars.iter().enumerate() {
             let value = pd_setvar_values[&pd.name][setvar_idx];
@@ -1029,6 +1044,7 @@ fn build_system(
             pd_setvar_values: BTreeMap::new(),
             pd_stack_addrs: vec![],
             kernel_objects: vec![],
+            cross_core_receiver_channels: vec![],
         });
     }
 
@@ -1082,19 +1098,20 @@ fn build_system(
         .filter(|(send, _)| protection_domains.contains_key(&send.pd) && send.notify)
         .collect();
 
-    let cross_core_receiver_channels: Vec<_> = cross_core_channels
+    let cross_core_receiver_channels: Vec<(ChannelEnd, ChannelEnd)> = cross_core_channels
         .iter()
         // Make both directions of the channels
         .flat_map(|&cc| [(&cc.end_a, &cc.end_b), (&cc.end_b, &cc.end_a)])
         // And only look at the ones where we are the receiver (not the sender)
         //     and where the channel in the right direction
         .filter(|(send, recv)| protection_domains.contains_key(&recv.pd) && send.notify)
+        .map(|(send, recv)| (send.clone(), recv.clone()))
         .collect();
 
     let cross_core_receiver_sgi_irqs_by_pd = {
         let mut irqs_by_pd: BTreeMap<String, Vec<SysIrq>> = BTreeMap::new();
 
-        for &(_, recv) in cross_core_receiver_channels.iter() {
+        for (_, recv) in cross_core_receiver_channels.iter() {
             let sysirq = SysIrq {
                 irq: *full_system_state
                     .sgi_irq_numbers
@@ -3149,6 +3166,7 @@ fn build_system(
         kernel_objects,
         initial_task_phys_region,
         initial_task_virt_region,
+        cross_core_receiver_channels,
     })
 }
 
@@ -4198,6 +4216,7 @@ fn main() -> Result<(), String> {
             &system.channels,
             pd_elf_files,
             &built_system.pd_setvar_values,
+            &built_system.cross_core_receiver_channels,
         )?;
     }
 

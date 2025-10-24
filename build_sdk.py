@@ -133,6 +133,18 @@ SUPPORTED_BOARDS = (
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
+        name="maaxboard_multikernel",
+        arch=KernelArch.AARCH64,
+        gcc_cpu="cortex-a53",
+        loader_link_address=0x50000000,
+        kernel_options={
+            "KernelPlatform": "maaxboard",
+            "KernelEnableMultikernelSupport": True,
+            # TODO: Derive from device tree?
+            "KernelMultikernelNumCPUs": 2,
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
+    ),
+    BoardInfo(
         name="imx8mm_evk",
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a53",
