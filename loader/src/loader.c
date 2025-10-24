@@ -307,7 +307,7 @@ static void putc(uint8_t ch)
 }
 
 #elif defined(BOARD_rock3b)
-#define UART_BASE   0xfdd50000
+#define UART_BASE   0xfe660000
 #define UTHR        0x0
 #define ULSR        0x14
 #define ULSR_THRE   (1 << 5)
