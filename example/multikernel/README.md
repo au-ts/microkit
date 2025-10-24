@@ -1,21 +1,45 @@
 <!--
-     Copyright 2024, UNSW
+     Copyright 2025, UNSW
      SPDX-License-Identifier: CC-BY-SA-4.0
 -->
-# Example - Hello World
+# Example - Multikernel
 
-This is a basic hello world example that has a single protection domain
-that simply prints "hello, world!" upon initialisation.
-
-All supported platforms are supported in this example.
-
-## Building
-
-```sh
-mkdir build
-make BUILD_DIR=build MICROKIT_BOARD=<board> MICROKIT_CONFIG=<debug/release/benchmark> MICROKIT_SDK=/path/to/sdk
 ```
+[first core boots]
 
-## Running
+core0_A: hello, world (from core 0)
+core0_A: notifying same core on 5
+core0_B: hello, world (from core 0)
+core0_B: notifying same core on 5
+core0_A: notified: 5 (same core)
+core0_B: notified: 5 (same core)
 
-See instructions for your board in the manual.
+[second core boots]
+
+core1: hello, world (from core 1)
+core1: signalling from core 1 to core 0
+core0_A: notified: 0 (cross core)
+core0_A: replying from core 0 to core 1
+core1: notified: 0 (cross core)
+core1: replying from core 1 to core 0
+core0_A: notified: 0 (cross core)
+core0_A: replying from core 0 to core 1
+core1: notified: 0 (cross core)
+core1: replying from core 1 to core 0
+core0_A: notified: 0 (cross core)
+core0_A: replying from core 0 to core 1
+core1: notified: 0 (cross core)
+core1: replying from core 1 to core 0
+core0_A: notified: 0 (cross core)
+core0_A: replying from core 0 to core 1
+core1: notified: 0 (cross core)
+core1: replying from core 1 to core 0
+core0_A: notified: 0 (cross core)
+core0_A: replying from core 0 to core 1
+core1: notified: 0 (cross core)
+core1: replying from core 1 to core 0
+core0_A: notified: 0 (cross core)
+core0_A: replying from core 0 to core 1
+core1: notified: 0 (cross core)
+core1: stopping after 5 notifications
+```

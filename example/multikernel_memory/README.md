@@ -1,21 +1,22 @@
 <!--
-     Copyright 2024, UNSW
+     Copyright 2025, UNSW
      SPDX-License-Identifier: CC-BY-SA-4.0
 -->
-# Example - Hello World
+# Example - Multikernel Memory
 
-This is a basic hello world example that has a single protection domain
-that simply prints "hello, world!" upon initialisation.
-
-All supported platforms are supported in this example.
-
-## Building
-
-```sh
-mkdir build
-make BUILD_DIR=build MICROKIT_BOARD=<board> MICROKIT_CONFIG=<debug/release/benchmark> MICROKIT_SDK=/path/to/sdk
 ```
+[[ core 0 starts ]]
+core0: hello, world (from core 0)
+core0: shared_v: 50331648
+core0: shared_p: 4118802432
+core0: shared value: 0
+[[ core 1 starts ]]
 
-## Running
-
-See instructions for your board in the manual.
+core1: hello, world (from core 1)
+core1: shared_v: 50331648
+core1: shared_p: 4118802432
+core1: shared value: 0
+core1: new shared value: 128
+core0: notified: 0 (cross core)
+core0: shared value: 128
+```
