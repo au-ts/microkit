@@ -45,7 +45,6 @@ _Static_assert(sizeof(uintptr_t) == 8 || sizeof(uintptr_t) == 4, "Expect uintptr
 #elif defined(BOARD_maaxboard_multikernel)
 /* reg = <0x38800000 0x10000 0x38880000 0xc0000 0x31000000 0x2000 0x31010000 0x2000 0x31020000 0x2000>; */
 #define GICD_BASE 0x38800000UL /* size 0x10000 */
-#define GICR_BASE 0x38880000UL /* size 0xc0000 */
 #define GIC_VERSION 3
 #else
 /* #define GIC_VERSION */
@@ -737,6 +736,9 @@ static void start_kernel(int id)
 }
 
 #if defined(GIC_VERSION)
+
+#define SPI_START         32u
+
 #if GIC_VERSION == 2
 
 #define IRQ_SET_ALL 0xffffffff
@@ -842,9 +844,6 @@ static void configure_gicv2(void)
      *
      * 0xF901_0000.
      *
-     * Future work: On multicore systems the distributor setup
-     * only needs to be called once, while the GICC registers
-     * should be set for each CPU.
      */
     puts("LDR|INFO: Configuring GICv2 for ARM\n");
     // -------
@@ -864,7 +863,7 @@ static void configure_gicv2(void)
     }
 
     /* reset interrupts priority */
-    for (i = 32; i < nirqs; i += 4) {
+    for (i = SPI_START; i < nirqs; i += 4) {
         if (loader_data->flags & FLAG_SEL4_HYP) {
             gic_dist->IPRIORITYRn[i >> 2] = 0x80808080;
         } else {
@@ -880,7 +879,7 @@ static void configure_gicv2(void)
     puthex32(target);
     puts("\n");
 
-    for (i = 32; i < nirqs; i += 4) {
+    for (i = SPI_START; i < nirqs; i += 4) {
         /* IRQs by default target the loader's CPU, assuming it's "0" CPU interface */
         /* This gives core 0 of seL4 "permission" to configure these interrupts */
         /* cannot configure for SGIs/PPIs (irq < 32) */
@@ -893,7 +892,7 @@ static void configure_gicv2(void)
     }
 
     /* level-triggered, 1-N */
-    for (i = 32; i < nirqs; i += 32) {
+    for (i = SPI_START; i < nirqs; i += 32) {
         gic_dist->ICFGRn[i / 32] = 0x55555555;
     }
 
@@ -922,9 +921,139 @@ static void configure_gicv2(void)
 
 #elif GIC_VERSION == 3
 
+/* Memory map for GIC distributor */
+struct gic_dist_map {
+    uint32_t ctlr;                /* 0x0000 */
+    uint32_t typer;               /* 0x0004 */
+    uint32_t iidr;                /* 0x0008 */
+    uint32_t res0;                /* 0x000C */
+    uint32_t statusr;             /* 0x0010 */
+    uint32_t res1[11];            /* [0x0014, 0x0040) */
+    uint32_t setspi_nsr;          /* 0x0040 */
+    uint32_t res2;                /* 0x0044 */
+    uint32_t clrspi_nsr;          /* 0x0048 */
+    uint32_t res3;                /* 0x004C */
+    uint32_t setspi_sr;           /* 0x0050 */
+    uint32_t res4;                /* 0x0054 */
+    uint32_t clrspi_sr;           /* 0x0058 */
+    uint32_t res5[9];             /* [0x005C, 0x0080) */
+    uint32_t igrouprn[32];        /* [0x0080, 0x0100) */
+
+    uint32_t isenablern[32];        /* [0x100, 0x180) */
+    uint32_t icenablern[32];        /* [0x180, 0x200) */
+    uint32_t ispendrn[32];          /* [0x200, 0x280) */
+    uint32_t icpendrn[32];          /* [0x280, 0x300) */
+    uint32_t isactivern[32];        /* [0x300, 0x380) */
+    uint32_t icactivern[32];        /* [0x380, 0x400) */
+
+    uint32_t ipriorityrn[255];      /* [0x400, 0x7FC) */
+    uint32_t res6;                  /* 0x7FC */
+
+    uint32_t itargetsrn[254];       /* [0x800, 0xBF8) */
+    uint32_t res7[2];               /* 0xBF8 */
+
+    uint32_t icfgrn[64];            /* [0xC00, 0xD00) */
+    uint32_t igrpmodrn[64];         /* [0xD00, 0xE00) */
+    uint32_t nsacrn[64];            /* [0xE00, 0xF00) */
+    uint32_t sgir;                  /* 0xF00 */
+    uint32_t res8[3];               /* [0xF04, 0xF10) */
+    uint32_t cpendsgirn[4];         /* [0xF10, 0xF20) */
+    uint32_t spendsgirn[4];         /* [0xF20, 0xF30) */
+    uint32_t res9[5236];            /* [0x0F30, 0x6100) */
+
+    uint64_t iroutern[960];         /* [0x6100, 0x7F00) irouter<n> to configure IRQs
+                                     * with INTID from 32 to 1019. iroutern[0] is the
+                                     * interrupt routing for SPI 32 */
+};
+
+/* __builtin_offsetof is not in the verification C subset, so we can only check this in
+   non-verification builds. We specifically do not declare a macro for the builtin, because
+   we do not want break the verification subset by accident. */
+_Static_assert(0x6100 == __builtin_offsetof(struct gic_dist_map, iroutern),
+               "error_in_gic_dist_map");
+
+
+#define GICD_CTLR_RWP                (1ULL << 31)
+#define GICD_CTLR_ARE_NS             (1ULL << 5)
+#define GICD_CTLR_ENABLE_G1NS        (1ULL << 1)
+#define GICD_CTLR_ENABLE_G0          (1ULL << 0)
+
+#define GICD_TYPE_LINESNR 0x1f
+
+#define GIC_PRI_IRQ        0xa0
+
+#define IRQ_SET_ALL 0xffffffff
+
+#define MPIDR_AFF0(x) (x & 0xff)
+#define MPIDR_AFF1(x) ((x >> 8) & 0xff)
+#define MPIDR_AFF2(x) ((x >> 16) & 0xff)
+#define MPIDR_AFF3(x) ((x >> 32) & 0xff)
+
+static void gicv3_dist_wait_for_rwp(void)
+{
+    volatile struct gic_dist_map *gic_dist = (volatile void *)(GICD_BASE);
+
+    while (gic_dist->ctlr & GICD_CTLR_RWP);
+}
+
+static inline uint64_t mpidr_to_gic_affinity(void)
+{
+    uint64_t mpidr;
+    asm volatile("mrs %x0, mpidr_el1" : "=r"(mpidr) :: "cc");
+
+    uint64_t affinity = 0;
+    affinity = (uint64_t)MPIDR_AFF3(mpidr) << 32 | MPIDR_AFF2(mpidr) << 16 |
+               MPIDR_AFF1(mpidr) << 8  | MPIDR_AFF0(mpidr);
+    return affinity;
+}
+
 static void configure_gicv3(void)
 {
-    puts("TODO: configure gicv3\n");
+    uintptr_t i;
+    uint32_t type;
+    uint64_t affinity;
+    uint32_t priority;
+    unsigned int nr_lines;
+
+    volatile struct gic_dist_map *gic_dist = (volatile void *)(GICD_BASE);
+
+    gic_dist->ctlr = 0;
+    gicv3_dist_wait_for_rwp();
+
+    type = gic_dist->typer;
+
+    nr_lines = 32 * ((type & GICD_TYPE_LINESNR) + 1);
+
+    /* Assume level-triggered */
+    for (i = SPI_START; i < nr_lines; i += 16) {
+        gic_dist->icfgrn[(i / 16)] = 0;
+    }
+
+    /* Default priority for global interrupts */
+    priority = (GIC_PRI_IRQ << 24 | GIC_PRI_IRQ << 16 | GIC_PRI_IRQ << 8 |
+                GIC_PRI_IRQ);
+    for (i = SPI_START; i < nr_lines; i += 4) {
+        gic_dist->ipriorityrn[(i / 4)] = priority;
+    }
+    /* Disable and clear all global interrupts */
+    for (i = SPI_START; i < nr_lines; i += 32) {
+        gic_dist->icenablern[(i / 32)] = IRQ_SET_ALL;
+        gic_dist->icpendrn[(i / 32)] = IRQ_SET_ALL;
+    }
+
+    /* Turn on the distributor */
+    // TODO: Need to figure out what's going on here and the various modes that
+    //       are possible.
+    // Kent added extra changes https://github.com/kent-mcleod/seL4_tools/commit/9df404dd2ba50d46c649adb9a072a9d0117a1717
+    // but these don't even help as not all the bits even stay set.
+    gic_dist->ctlr = GICD_CTLR_ARE_NS | GICD_CTLR_ENABLE_G1NS | GICD_CTLR_ENABLE_G0;
+    gicv3_dist_wait_for_rwp();
+
+    /* Route all global IRQs to this CPU (CPU 0) */
+    affinity = mpidr_to_gic_affinity();
+    for (i = SPI_START; i < nr_lines; i++) {
+        gic_dist->iroutern[i - SPI_START] = affinity;
+    }
 }
 
 #else
