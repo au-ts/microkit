@@ -884,11 +884,13 @@ static void configure_gicv2(void)
         /* This gives core 0 of seL4 "permission" to configure these interrupts */
         /* cannot configure for SGIs/PPIs (irq < 32) */
         gic_dist->ITARGETSRn[i / 4] = TARGET_CPU_ALLINT(target);
+#if 0
         puts("gic_dist->ITARGETSRn[");
         puthex32(i);
         puts(" / 4] = ");
         puthex32(gic_dist->ITARGETSRn[i / 4]);
         puts("\n");
+#endif
     }
 
     /* level-triggered, 1-N */
