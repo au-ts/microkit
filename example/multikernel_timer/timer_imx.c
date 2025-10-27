@@ -142,6 +142,7 @@ void notified(microkit_channel ch)
     switch (ch) {
     case TIMER_IRQ_CH:
         microkit_dbg_puts("TIMER: Got timer interrupt!\n");
+        microkit_irq_ack(ch);
 
         uint32_t sr = timer.GPT1->SR;
         if (sr & ~GPTx_SR_OF1) {
