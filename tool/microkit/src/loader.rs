@@ -466,11 +466,11 @@ impl<'a> Loader<'a> {
             ));
         }
 
-        // XXX: size including bootinfos?
         let size = std::mem::size_of::<LoaderHeader64>() as u64
             + region_metadata.iter().fold(0_u64, |acc, x| {
                 acc + x.load_size + std::mem::size_of::<LoaderRegion64>() as u64
-            });
+            })
+            + kernel_bootinfos.len() as u64 * 0x1000;
 
         let header = LoaderHeader64 {
             magic,
@@ -570,6 +570,11 @@ impl<'a> Loader<'a> {
                 .write_all(data)
                 .expect("Failed to write region data to loader");
         }
+
+        // make sure size() of our data counts correctly.
+        assert!(
+            self.image.len() as u64 + self.header.size == loader_buf.stream_position().unwrap()
+        );
 
         loader_buf.flush().unwrap();
     }
