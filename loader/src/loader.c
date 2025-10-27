@@ -582,12 +582,28 @@ static void print_flags(void)
     }
 }
 
+static uintptr_t loader_mem_start;
+static uintptr_t loader_mem_end;
+
 static void print_loader_data(void)
 {
+    loader_mem_start = (uintptr_t)&_text;
+    loader_mem_end = (uintptr_t)&loader_data + loader_data->size;
+
     puts("LDR|INFO: Flags:                ");
     puthex64(loader_data->flags);
     puts("\n");
     print_flags();
+
+    puts("LDR|INFO: Size:                 ");
+    puthex64(loader_data->size);
+    puts("\n");
+
+    puts("LDR|INFO: Memory:               [");
+    puthex64(loader_mem_start);
+    puts("..");
+    puthex64(loader_mem_end);
+    puts(")\n");
 
     for (uint32_t i = 0; i < loader_data->num_kernels; i++) {
         puts("LDR|INFO: Kernel: ");
@@ -649,8 +665,15 @@ static void copy_data(void)
         puts("LDR|INFO: copying region ");
         puthex32(i);
         puts("\n");
+
+        // This should have been checked by the tool.
+        if (r->load_addr >= loader_mem_start && (r->load_addr + r->write_size) < loader_mem_end) {
+            puts("LDR|ERROR: data destination overlaps with loader\n");
+            for (;;) {}
+        }
+
         // XXX: assert load_size <= write_size.
-        memcpy((void *)(uintptr_t)r->load_addr, base + r->offset, r->load_size);
+        memcpy((void *)r->load_addr, base + r->offset, r->load_size);
         if (r->write_size > r->load_size) {
             // zero out remaining memory
             memzero((void *)(r->load_addr + r->load_size), r->write_size - r->load_size);
