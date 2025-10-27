@@ -207,6 +207,7 @@ pub enum ObjectType {
     LargePage,
     PageTable,
     Vcpu,
+    Vpmu,
 }
 
 impl ObjectType {
@@ -255,6 +256,7 @@ impl ObjectType {
                 Arch::Aarch64 => Some(12),
                 _ => panic!("Unexpected architecture asking for vCPU size bits"),
             },
+            ObjectType::Vpmu => Some(13),
             _ => None,
         }
     }
@@ -278,6 +280,7 @@ impl ObjectType {
             ObjectType::LargePage => "SEL4_LARGE_PAGE_OBJECT",
             ObjectType::PageTable => "SEL4_PAGE_TABLE_OBJECT",
             ObjectType::Vcpu => "SEL4_VCPU_OBJECT",
+            ObjectType::Vpmu => "SEL4_VPMU_OBJECT",
         }
     }
 
@@ -315,6 +318,10 @@ impl ObjectType {
                 Arch::Aarch64 => 12,
                 _ => panic!("Unknown vCPU object type value for given kernel config"),
             },
+            ObjectType::Vpmu => match config.arch {
+                Arch::Aarch64 => 13,
+                _ => panic!("Unknown vPMU object type value for given kernel config"),
+            }
         }
     }
 
@@ -431,6 +438,8 @@ enum InvocationLabel {
     TCBBindNotification,
     TCBUnbindNotification,
     TCBSetTLSBase,
+    TCBBindVPMU,
+    TCBUnbindVPMU,
     // CNode
     CNodeRevoke,
     CNodeDelete,
@@ -974,6 +983,14 @@ impl Invocation {
                 ));
                 (tcb, &cap_lookup[&tcb])
             }
+            InvocationArgs::TcbBindVpmu { tcb, vpmu } => {
+                arg_strs.push(Invocation::fmt_field_cap(
+                    "vpmu",
+                    vpmu,
+                    cap_lookup
+                ));
+                (tcb, &cap_lookup[&tcb])
+            }
             InvocationArgs::AsidPoolAssign { asid_pool, vspace } => {
                 arg_strs.push(Invocation::fmt_field_cap("vspace", vspace, cap_lookup));
                 (asid_pool, &cap_lookup[&asid_pool])
@@ -1116,7 +1133,8 @@ impl Invocation {
             | InvocationLabel::TCBSetIPCBuffer
             | InvocationLabel::TCBResume
             | InvocationLabel::TCBWriteRegisters
-            | InvocationLabel::TCBBindNotification => "TCB",
+            | InvocationLabel::TCBBindNotification
+            | InvocationLabel::TCBBindVPMU => "TCB",
             InvocationLabel::ARMASIDPoolAssign | InvocationLabel::RISCVASIDPoolAssign => {
                 "ASID Pool"
             }
@@ -1144,6 +1162,7 @@ impl Invocation {
             InvocationLabel::TCBResume => "Resume",
             InvocationLabel::TCBWriteRegisters => "WriteRegisters",
             InvocationLabel::TCBBindNotification => "BindNotification",
+            InvocationLabel::TCBBindVPMU => "BindVPMU",
             InvocationLabel::ARMASIDPoolAssign | InvocationLabel::RISCVASIDPoolAssign => "Assign",
             InvocationLabel::ARMIRQIssueIRQHandlerTrigger
             | InvocationLabel::RISCVIRQIssueIRQHandlerTrigger => "Get",
@@ -1174,6 +1193,7 @@ impl InvocationArgs {
             InvocationArgs::TcbResume { .. } => InvocationLabel::TCBResume,
             InvocationArgs::TcbWriteRegisters { .. } => InvocationLabel::TCBWriteRegisters,
             InvocationArgs::TcbBindNotification { .. } => InvocationLabel::TCBBindNotification,
+            InvocationArgs::TcbBindVpmu { .. } => InvocationLabel::TCBBindVPMU,
             InvocationArgs::AsidPoolAssign { .. } => match config.arch {
                 Arch::Aarch64 => InvocationLabel::ARMASIDPoolAssign,
                 Arch::Riscv64 => InvocationLabel::RISCVASIDPoolAssign,
@@ -1274,6 +1294,9 @@ impl InvocationArgs {
             }
             InvocationArgs::TcbBindNotification { tcb, notification } => {
                 (tcb, vec![], vec![notification])
+            }
+            InvocationArgs::TcbBindVpmu { tcb, vpmu } => {
+                (tcb, vec![], vec![vpmu])
             }
             InvocationArgs::AsidPoolAssign { asid_pool, vspace } => {
                 (asid_pool, vec![], vec![vspace])
@@ -1399,6 +1422,10 @@ pub enum InvocationArgs {
     TcbBindNotification {
         tcb: u64,
         notification: u64,
+    },
+    TcbBindVpmu {
+        tcb: u64,
+        vpmu: u64,
     },
     AsidPoolAssign {
         asid_pool: u64,

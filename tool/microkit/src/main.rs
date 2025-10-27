@@ -51,6 +51,7 @@ const MONITOR_EP_CAP_IDX: u64 = 5;
 const TCB_CAP_IDX: u64 = 6;
 const SMC_CAP_IDX: u64 = 7;
 const PMU_CONTROL_CAP_IDX: u64 = 8;
+const VPMU_CAP_IDX: u64 = 9;
 
 const BASE_OUTPUT_NOTIFICATION_CAP: u64 = 10;
 const BASE_OUTPUT_ENDPOINT_CAP: u64 = BASE_OUTPUT_NOTIFICATION_CAP + 64;
@@ -59,7 +60,8 @@ const BASE_PD_TCB_CAP: u64 = BASE_IRQ_CAP + 64;
 const BASE_PD_VSPACE_CAP: u64 = BASE_PD_TCB_CAP + 64;
 const BASE_VM_TCB_CAP: u64 = BASE_PD_VSPACE_CAP + 64;
 const BASE_VCPU_CAP: u64 = BASE_VM_TCB_CAP + 64;
-const BASE_FRAME_CAP: u64 = BASE_VCPU_CAP + 64;
+const BASE_VPMU_CAP: u64 = BASE_VCPU_CAP + 64;
+const BASE_FRAME_CAP: u64 = BASE_VPMU_CAP + 64;
 
 const MAX_SYSTEM_INVOCATION_SIZE: u64 = util::mb(128);
 
@@ -758,6 +760,7 @@ fn build_system(
     cap_address_names.insert(IRQ_CONTROL_CAP_ADDRESS, "IRQ Control".to_string());
     cap_address_names.insert(SMC_CAP_IDX, "SMC".to_string());
     cap_address_names.insert(PMU_CONTROL_CAP_ADDRESS, "PMU Control".to_string());
+    cap_address_names.insert(VPMU_CAP_IDX, "VPMU".to_string());
 
     let system_cnode_bits = system_cnode_size.ilog2() as u64;
 
@@ -1570,6 +1573,21 @@ fn build_system(
     let notification_objs =
         init_system.allocate_objects(ObjectType::Notification, notification_names, None);
     let notification_caps = notification_objs.iter().map(|ntfn| ntfn.cap_addr).collect();
+
+    // VPMU objects
+    let mut vpmu_pds: Vec<&ProtectionDomain> = Vec::new();
+
+    for pd in &system.protection_domains {
+        if pd.pmu {
+            vpmu_pds.push(pd);
+        }
+    }
+
+    let mut vpmu_names = vec![];
+    for pd in &vpmu_pds {
+            vpmu_names.push(format!("VPMU: PD={}", pd.name));
+    }
+    let vpmu_objects = init_system.allocate_objects(ObjectType::Vpmu, vpmu_names, None);
 
     // Determine number of upper directory / directory / page table objects required
     //
@@ -2555,24 +2573,71 @@ fn build_system(
         }
     }
 
-    for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
-        if pd.pmu {
-            // @kwinter: add some error checking here that we are on a supported platform.
-            let cnode_obj = &cnode_objs[pd_idx];
+    // for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+    //     if pd.pmu {
+    //         // @kwinter: add some error checking here that we are on a supported platform.
+    //         let cnode_obj = &cnode_objs[pd_idx];
+    //         system_invocations.push(Invocation::new(
+    //             config,
+    //             InvocationArgs::CnodeMint{
+    //                 cnode: cnode_obj.cap_addr,
+    //                 dest_index: PMU_CONTROL_CAP_IDX,
+    //                 dest_depth: PD_CAP_BITS,
+    //                 src_root: root_cnode_cap,
+    //                 src_obj: PMU_CONTROL_CAP_ADDRESS,
+    //                 src_depth: config.cap_address_bits,
+    //                 rights: Rights::All as u64, // FIXME: Check rights
+    //                 badge: 0,
+    //             }
+    //         ));
+
+    //         // @kwinter: TODO add a vpmu tag instead of using the pmu flag. (Actually figure out
+    //         // how we are going to do vpmu's in general)???
+    //     }
+    // }
+
+    for (vpmu_pd_idx, pd) in vpmu_pds.iter().enumerate() {
+        // First mint into the current PD
+        let cnode_obj = &cnode_objs[vpmu_pd_idx];
+        system_invocations.push(Invocation::new(
+            config,
+            InvocationArgs::CnodeMint{
+                cnode: cnode_obj.cap_addr,
+                dest_index: VPMU_CAP_IDX,
+                dest_depth: PD_CAP_BITS,
+                src_root: root_cnode_cap,
+                src_obj: vpmu_objects[vpmu_pd_idx].cap_addr,
+                src_depth: config.cap_address_bits,
+                rights: Rights::All as u64, // FIXME: Check rights
+                badge: 0,
+            }
+        ));
+        // If we have a parent, mint into the parent with base + index as the dest
+        if pd.parent.is_some() {
+            let parent_cnode_obj = &cnode_objs[pd.parent.unwrap()];
             system_invocations.push(Invocation::new(
                 config,
                 InvocationArgs::CnodeMint{
-                    cnode: cnode_obj.cap_addr,
-                    dest_index: PMU_CONTROL_CAP_IDX,
+                    cnode: parent_cnode_obj.cap_addr,
+                    dest_index: BASE_VPMU_CAP + pd.id.unwrap(),
                     dest_depth: PD_CAP_BITS,
                     src_root: root_cnode_cap,
-                    src_obj: PMU_CONTROL_CAP_ADDRESS,
+                    src_obj: vpmu_objects[vpmu_pd_idx].cap_addr,
                     src_depth: config.cap_address_bits,
                     rights: Rights::All as u64, // FIXME: Check rights
                     badge: 0,
                 }
             ));
         }
+
+        // Bind VPMU to the PD
+        let pd_idx = system.protection_domains.iter().position(|x| x == *pd).unwrap();
+        system_invocations.push(Invocation::new(
+            config,
+            InvocationArgs::TcbBindVpmu{
+                tcb: tcb_objs[pd_idx].cap_addr,
+                vpmu: vpmu_objects[vpmu_pd_idx].cap_addr,
+            }));
     }
 
     // All minting is complete at this point

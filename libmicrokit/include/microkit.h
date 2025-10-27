@@ -22,6 +22,8 @@ typedef seL4_MessageInfo_t microkit_msginfo;
 /* Only valid when the PD has been configured to make SMC calls */
 #define ARM_SMC_CAP 7
 #define ARM_PMU_CONTROL_CAP 8
+/* @kwinter: Temp placement of the vPMU cap */
+#define VPMU_CAP 9
 #define BASE_OUTPUT_NOTIFICATION_CAP 10
 #define BASE_ENDPOINT_CAP 74
 #define BASE_IRQ_CAP 138
@@ -29,7 +31,8 @@ typedef seL4_MessageInfo_t microkit_msginfo;
 #define BASE_VSPACE_CAP 266
 #define BASE_VM_TCB_CAP 330
 #define BASE_VCPU_CAP 394
-#define BASE_FRAME_CAP 458
+#define BASE_VPMU_CAP 458
+#define BASE_FRAME_CAP 522
 
 #define MICROKIT_MAX_CHANNELS 62
 #define MICROKIT_MAX_CHANNEL_ID (MICROKIT_MAX_CHANNELS - 1)
