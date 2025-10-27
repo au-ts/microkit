@@ -416,7 +416,9 @@ pub fn pd_write_symbols(
 
         let mut sgi_bits = 0;
         for (_, recv) in cross_core_receiver_channels.iter() {
-            sgi_bits |= 1 << recv.id;
+            if recv.pd == pd.name {
+                sgi_bits |= 1 << recv.id;
+            }
         }
 
         println!("writing sgi_bits {sgi_bits:#x}");
