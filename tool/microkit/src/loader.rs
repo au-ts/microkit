@@ -368,8 +368,7 @@ impl<'a> Loader<'a> {
             // TODO: What is type?
             println!(
                 "Adding shared (so zeroing) region into {:x}..{:x}",
-                shared_mr.base,
-                shared_mr.end,
+                shared_mr.base, shared_mr.end,
             );
             region_metadata.push(LoaderRegion64 {
                 load_addr: shared_mr.base,
@@ -452,7 +451,10 @@ impl<'a> Loader<'a> {
                     .len()
                     .try_into()
                     .expect("cannot fit # reserved regions into u8"),
-                _padding: [0; 4],
+                num_mpidrs: num_multikernels
+                    .try_into()
+                    .expect("cannot fit # mpidrs into u8"),
+                _padding: [0; 3],
             };
 
             kernel_bootinfos.push((

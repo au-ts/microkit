@@ -10,7 +10,8 @@ pub struct seL4_KernelBootInfo {
     pub num_ram_regions: u8,
     pub num_root_task_regions: u8,
     pub num_reserved_regions: u8,
-    pub _padding: [u8; 4usize],
+    pub num_mpidrs: u8,
+    pub _padding: [u8; 3usize],
 }
 #[repr(C, packed(8))]
 #[derive(Debug, Copy, Clone)]

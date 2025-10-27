@@ -1106,6 +1106,13 @@ volatile uint64_t curr_cpu_id;
 volatile uintptr_t curr_cpu_stack;
 static volatile int core_up[NUM_MULTIKERNELS];
 
+static volatile uint64_t mpidr_map[NUM_MULTIKERNELS];
+// TODO: derive this from the device tree. (note: this would be the MPIDR
+//       in the device tree but several boards e.g. odroidc4 use a "fake"
+//       MPIDR in the device tree used as an argument to PSCI_ON that's
+//       not the same as the core's actual MPIDR.)
+// static volatile uint64_t psci_cpu_on_param_map[NUM_MULTIKERNELS];
+
 volatile uint64_t cpu_magic;
 
 static inline void dsb(void)
@@ -1151,6 +1158,8 @@ void secondary_cpu_entry() {
     puts(") has MPIDR_EL1: ");
     puthex64(mpidr_el1);
     puts("\n");
+
+    mpidr_map[cpu] = mpidr_el1;
 
     puts("LDR|INFO: enabling MMU (CPU ");
     puthex32(cpu);
@@ -1288,9 +1297,9 @@ int main(void)
     disable_caches_el2();
 
     /* Get the CPU ID of the CPU we are booting on. */
-    uint64_t boot_cpu_id;
-    asm volatile("mrs %x0, mpidr_el1" : "=r"(boot_cpu_id) :: "cc");
-    boot_cpu_id = boot_cpu_id & 0x00ffffff;
+    uint64_t boot_cpu_id, mpidr_el1;
+    asm volatile("mrs %x0, mpidr_el1" : "=r"(mpidr_el1) :: "cc");
+    boot_cpu_id = mpidr_el1 & 0x00ffffff;
     if (boot_cpu_id >= NUM_MULTIKERNELS) {
         puts("LDR|ERROR: Boot CPU ID (");
         puthex32(boot_cpu_id);
@@ -1299,9 +1308,13 @@ int main(void)
         puts(")\n");
         goto fail;
     }
-    puts("LDR|INFO: Boot CPU ID (");
-    putc(boot_cpu_id + '0');
+    puts("LDR|INFO: Boot CPU MPIDR (");
+    puthex64(mpidr_el1);
     puts(")\n");
+
+    mpidr_map[0] = mpidr_el1;
+
+    // TODO: use psci_cpu_on_param_map
 
     /* Start each CPU, other than the one we are booting on. */
     for (int i = 0; i < NUM_MULTIKERNELS; i++) {
@@ -1330,6 +1343,29 @@ int main(void)
         while (!__atomic_load_n(&core_up[i], __ATOMIC_ACQUIRE));
         //for (volatile int i = 0; i < 100000000; i++); // delay boot 0
     }
+
+    puts("LDR|INFO: MPIDR Map:\n");
+    for (int i = 0; i < NUM_MULTIKERNELS; i++) {
+        puts("LDR|INFO: CPU");
+        putc(i + '0');
+        puts(" |-> ");
+        puthex64(mpidr_map[i]);
+        puts("\n");
+    }
+
+    for (int i = 0; i < NUM_MULTIKERNELS; i++) {
+        seL4_KernelBootInfo *bootinfo = &loader_data->kernel_bootinfos_and_regions[i].info;
+        void *descriptor_mem = &loader_data->kernel_bootinfos_and_regions[i].regions_memory;
+        seL4_KernelBoot_KernelRegion *kernel_regions = descriptor_mem;
+        seL4_KernelBoot_RamRegion *ram_regions = (void *)((uintptr_t)kernel_regions + (bootinfo->num_kernel_regions * sizeof(seL4_KernelBoot_KernelRegion)));
+        seL4_KernelBoot_RootTaskRegion *root_task_regions = (void *)((uintptr_t)ram_regions + (bootinfo->num_ram_regions * sizeof(seL4_KernelBoot_RamRegion)));
+        seL4_KernelBoot_ReservedRegion *reserved_regions = (void *)((uintptr_t)root_task_regions + (bootinfo->num_root_task_regions * sizeof(seL4_KernelBoot_RootTaskRegion)));
+        uint64_t *mpidr_values = (void *)((uintptr_t)reserved_regions + (bootinfo->num_reserved_regions * sizeof(seL4_KernelBoot_ReservedRegion)));
+        for (int j = 0; j < NUM_MULTIKERNELS; j++) {
+            mpidr_values[j] = mpidr_map[j];
+        }
+    }
+
 
 #endif
 
