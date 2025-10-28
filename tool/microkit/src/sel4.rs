@@ -256,7 +256,7 @@ impl ObjectType {
                 Arch::Aarch64 => Some(12),
                 _ => panic!("Unexpected architecture asking for vCPU size bits"),
             },
-            ObjectType::Vpmu => Some(13),
+            ObjectType::Vpmu => Some(14),
             _ => None,
         }
     }
@@ -463,6 +463,8 @@ enum InvocationLabel {
     SchedContextUnbindObject,
     SchedContextConsume,
     SchedContextYieldTo,
+    // ARM VPMU
+    VPMUSetVIRQ,
     // ARM VSpace
     ARMVSpaceCleanData,
     ARMVSpaceInvalidateData,
@@ -1110,6 +1112,10 @@ impl Invocation {
                 arg_strs.push(Invocation::fmt_field_cap("tcb", tcb, cap_lookup));
                 (vcpu, &cap_lookup[&vcpu])
             }
+            InvocationArgs::VpmuSetVirq { vpmu, irq_notif} => {
+                arg_strs.push(Invocation::fmt_field_cap("irq_notif", irq_notif, cap_lookup));
+                (vpmu, &cap_lookup[&vpmu])
+            }
         };
         _ = writeln!(
             f,
@@ -1146,6 +1152,7 @@ impl Invocation {
             InvocationLabel::CNodeCopy | InvocationLabel::CNodeMint => "CNode",
             InvocationLabel::SchedControlConfigureFlags => "SchedControl",
             InvocationLabel::ARMVCPUSetTCB => "VCPU",
+            InvocationLabel::VPMUSetVIRQ => "VPMU",
             _ => panic!(
                 "Internal error: unexpected label when getting object type '{:?}'",
                 self.label
@@ -1175,6 +1182,7 @@ impl Invocation {
             InvocationLabel::CNodeMint => "Mint",
             InvocationLabel::SchedControlConfigureFlags => "ConfigureFlags",
             InvocationLabel::ARMVCPUSetTCB => "VCPUSetTcb",
+            InvocationLabel::VPMUSetVIRQ => "VPMUSetVIRQ",
             _ => panic!(
                 "Internal error: unexpected label when getting method name '{:?}'",
                 self.label
@@ -1217,6 +1225,7 @@ impl InvocationArgs {
                 InvocationLabel::SchedControlConfigureFlags
             }
             InvocationArgs::ArmVcpuSetTcb { .. } => InvocationLabel::ARMVCPUSetTCB,
+            InvocationArgs::VpmuSetVirq { .. } => InvocationLabel::VPMUSetVIRQ,
         }
     }
 
@@ -1371,6 +1380,7 @@ impl InvocationArgs {
                 vec![sched_context],
             ),
             InvocationArgs::ArmVcpuSetTcb { vcpu, tcb } => (vcpu, vec![], vec![tcb]),
+            InvocationArgs::VpmuSetVirq { vpmu, irq_notif } => (vpmu, vec![], vec![irq_notif])
         }
     }
 }
@@ -1487,5 +1497,9 @@ pub enum InvocationArgs {
     ArmVcpuSetTcb {
         vcpu: u64,
         tcb: u64,
+    },
+    VpmuSetVirq {
+       vpmu: u64,
+       irq_notif: u64, 
     },
 }

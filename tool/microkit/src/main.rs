@@ -9,6 +9,7 @@
 
 use elf::{ElfFile, TableMetadata};
 use loader::Loader;
+use microkit_tool::sdf::SysVirtualPmu;
 use microkit_tool::{
     elf, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError, MemoryRegion,
     ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH, PGD,
@@ -1575,18 +1576,21 @@ fn build_system(
     let notification_caps = notification_objs.iter().map(|ntfn| ntfn.cap_addr).collect();
 
     // VPMU objects
-    let mut vpmu_pds: Vec<&ProtectionDomain> = Vec::new();
+    let mut vpmu_pds: Vec<(usize, &SysVirtualPmu)> = Vec::new();
 
-    for pd in &system.protection_domains {
-        if pd.pmu {
-            vpmu_pds.push(pd);
+    for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+        for vpmu in pd.vpmus.iter() {
+            vpmu_pds.push((pd_idx, vpmu));
+            println!("We are adding an element to vpmu_pds!!!\n");
         }
     }
 
     let mut vpmu_names = vec![];
-    for pd in &vpmu_pds {
-            vpmu_names.push(format!("VPMU: PD={}", pd.name));
+    for vpmu_pd in &vpmu_pds {
+            vpmu_names.push(format!("VPMU: PD={}", vpmu_pd.0));
+            println!("Adding a vpmu to the names list!!!\n");
     }
+
     let vpmu_objects = init_system.allocate_objects(ObjectType::Vpmu, vpmu_names, None);
 
     // Determine number of upper directory / directory / page table objects required
@@ -2190,6 +2194,37 @@ fn build_system(
         }
     }
 
+    let mut badged_virq_caps: HashMap<&SysVirtualPmu, u64> = HashMap::new();
+    for (notification_obj, pd) in zip(&notification_objs, &system.protection_domains) {
+        for vpmu in &pd.vpmus {
+            if vpmu.irq_ch.is_some() {
+                let badge = 1 << vpmu.irq_ch.unwrap();
+                let badged_cap_address = system_cap_address_mask | cap_slot;
+                system_invocations.push(Invocation::new(
+                    config,
+                    InvocationArgs::CnodeMint {
+                        cnode: system_cnode_cap,
+                        dest_index: cap_slot,
+                        dest_depth: system_cnode_bits,
+                        src_root: root_cnode_cap,
+                        src_obj: notification_obj.cap_addr,
+                        src_depth: config.cap_address_bits,
+                        rights: Rights::All as u64,
+                        badge,
+                    },
+                ));
+                let badged_name = format!(
+                    "{} (badge=0x{:x})",
+                    cap_address_names[&notification_obj.cap_addr], badge
+                );
+                cap_address_names.insert(badged_cap_address, badged_name);
+                badged_virq_caps.insert(vpmu, badged_cap_address);
+                cap_slot += 1;
+            }
+        }
+   }
+
+
     // Create a fault endpoint cap for each protection domain.
     // For root PDs, this shall be the system fault EP endpoint object.
     // For non-root PDs, this shall be the parent endpoint.
@@ -2591,53 +2626,47 @@ fn build_system(
     //             }
     //         ));
 
-    //         // @kwinter: TODO add a vpmu tag instead of using the pmu flag. (Actually figure out
+    //         // @kwinterF: TODO add a vpmu tag instead of using the pmu flag. (Actually figure out
     //         // how we are going to do vpmu's in general)???
     //     }
     // }
 
-    for (vpmu_pd_idx, pd) in vpmu_pds.iter().enumerate() {
+    for (vpmu_obj_idx, (vpmu_pd_idx, vpmu)) in vpmu_pds.into_iter().enumerate() {
         // First mint into the current PD
         let cnode_obj = &cnode_objs[vpmu_pd_idx];
         system_invocations.push(Invocation::new(
             config,
             InvocationArgs::CnodeMint{
                 cnode: cnode_obj.cap_addr,
-                dest_index: VPMU_CAP_IDX,
+                dest_index: BASE_VPMU_CAP + vpmu.vpmu_idx as u64,
                 dest_depth: PD_CAP_BITS,
                 src_root: root_cnode_cap,
-                src_obj: vpmu_objects[vpmu_pd_idx].cap_addr,
+                src_obj: vpmu_objects[vpmu_obj_idx].cap_addr,
                 src_depth: config.cap_address_bits,
                 rights: Rights::All as u64, // FIXME: Check rights
                 badge: 0,
             }
         ));
-        // If we have a parent, mint into the parent with base + index as the dest
-        if pd.parent.is_some() {
-            let parent_cnode_obj = &cnode_objs[pd.parent.unwrap()];
+
+        // Handle virq's
+        if vpmu.irq_ch.is_some() {
             system_invocations.push(Invocation::new(
                 config,
-                InvocationArgs::CnodeMint{
-                    cnode: parent_cnode_obj.cap_addr,
-                    dest_index: BASE_VPMU_CAP + pd.id.unwrap(),
-                    dest_depth: PD_CAP_BITS,
-                    src_root: root_cnode_cap,
-                    src_obj: vpmu_objects[vpmu_pd_idx].cap_addr,
-                    src_depth: config.cap_address_bits,
-                    rights: Rights::All as u64, // FIXME: Check rights
-                    badge: 0,
+                InvocationArgs::VpmuSetVirq {
+                    vpmu: vpmu_objects[vpmu_pd_idx].cap_addr,
+                    irq_notif: *badged_virq_caps.get(vpmu).unwrap(),
                 }
             ));
         }
-
-        // Bind VPMU to the PD
-        let pd_idx = system.protection_domains.iter().position(|x| x == *pd).unwrap();
-        system_invocations.push(Invocation::new(
-            config,
-            InvocationArgs::TcbBindVpmu{
-                tcb: tcb_objs[pd_idx].cap_addr,
-                vpmu: vpmu_objects[vpmu_pd_idx].cap_addr,
-            }));
+        // @kwinter: For now, skipping this step. 
+        // // Bind VPMU to the PD
+        // let pd_idx = system.protection_domains.iter().position(|x| x == *pd).unwrap();
+        // system_invocations.push(Invocation::new(
+        //     config,
+        //     InvocationArgs::TcbBindVpmu{
+        //         tcb: tcb_objs[pd_idx].cap_addr,
+        //         vpmu: vpmu_objects[vpmu_pd_idx].cap_addr,
+        //     }));
     }
 
     // All minting is complete at this point

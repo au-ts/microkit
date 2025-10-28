@@ -167,6 +167,12 @@ pub struct Channel {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
+pub struct SysVirtualPmu {
+    pub vpmu_idx: usize,
+    pub irq_ch: Option<u64>,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct ProtectionDomain {
     /// Only populated for child protection domains
     pub id: Option<u64>,
@@ -181,6 +187,7 @@ pub struct ProtectionDomain {
     pub program_image: PathBuf,
     pub maps: Vec<SysMap>,
     pub irqs: Vec<SysIrq>,
+    pub vpmus: Vec<SysVirtualPmu>,
     pub setvars: Vec<SysSetVar>,
     pub virtual_machine: Option<VirtualMachine>,
     /// Only used when parsing child PDs. All elements will be removed
@@ -501,6 +508,7 @@ impl ProtectionDomain {
 
         let mut maps = Vec::new();
         let mut irqs = Vec::new();
+        let mut vpmus = Vec::new();
         let mut setvars: Vec<SysSetVar> = Vec::new();
         let mut child_pds = Vec::new();
 
@@ -659,6 +667,32 @@ impl ProtectionDomain {
 
                     virtual_machine = Some(VirtualMachine::from_xml(config, xml_sdf, &child)?);
                 }
+                "vpmu" => {
+                    // @kwinter: I'm going to artificially limit the user to 64 virtual pmus
+                    // per PD. I'm nor sure of the best way to layout the cspace for a variable
+                    // number of vpmus.
+                    if vpmus.len() >= 64 {
+                        return Err(value_error(xml_sdf, &child, "Max of 64 VPMU's per PD".to_string()));
+                    }
+
+                    let vpmu_idx = vpmus.len();
+
+                    if let Some(xml_virq_id) = child.attribute("virq_id") {
+                        let virq_id = xml_virq_id.parse::<u64>().unwrap();
+
+                        if virq_id > PD_MAX_ID as u64 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                format!("id must be < {}", PD_MAX_ID + 1),
+                            ));
+                        }
+                        
+                        vpmus.push(SysVirtualPmu { vpmu_idx, irq_ch: Some(virq_id)});
+                    } else {
+                        vpmus.push(SysVirtualPmu { vpmu_idx, irq_ch: None })
+                    }
+                }
                 _ => {
                     let pos = xml_sdf.doc.text_pos_at(child.range().start);
                     return Err(format!(
@@ -713,6 +747,7 @@ impl ProtectionDomain {
             program_image: program_image.unwrap(),
             maps,
             irqs,
+            vpmus,
             setvars,
             child_pds,
             virtual_machine,
@@ -1367,6 +1402,18 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
                 ));
             }
             ch_ids[pd_idx].push(sysirq.id);
+        }
+        // Now, repeat the same for virqs
+        for vpmu in &pd.vpmus {
+            if vpmu.irq_ch.is_some() {
+                if ch_ids[pd_idx].contains(&vpmu.irq_ch.unwrap()) {
+                    return Err(format!(
+                        "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
+                        vpmu.irq_ch.unwrap(), pd.name, filename, pd.text_pos.row, pd.text_pos.col
+                    ));
+                }
+                ch_ids[pd_idx].push(vpmu.irq_ch.unwrap());
+            }
         }
     }
 
