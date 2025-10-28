@@ -142,7 +142,6 @@ void notified(microkit_channel ch)
     switch (ch) {
     case TIMER_IRQ_CH:
         microkit_dbg_puts("TIMER: Got timer interrupt!\n");
-        microkit_irq_ack(ch);
 
         uint32_t sr = timer.GPT1->SR;
         if (sr & ~GPTx_SR_OF1) {
@@ -155,6 +154,8 @@ void notified(microkit_channel ch)
 
         /* clear status register, w1c */
         timer.GPT1->SR = GPTx_SR_OF1;
+
+        microkit_irq_ack(ch);
 
         *shared = imx_get_time();
         microkit_notify(SEND_CH);
