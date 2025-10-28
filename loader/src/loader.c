@@ -149,6 +149,8 @@ char _stack[STACK_SIZE] ALIGN(16);
 #if defined(ARCH_aarch64)
 void switch_to_el1(void);
 void switch_to_el2(void);
+void el1_mmu_disable(void);
+void el2_mmu_disable(void);
 void el1_mmu_enable(uint64_t *pgd_down, uint64_t *pgd_up);
 void el2_mmu_enable(uint64_t *pgd_down);
 extern char arm_vector_table[1];
@@ -1262,6 +1264,7 @@ void set_exception_handler()
 
 int main(void)
 {
+
     uart_init();
     /* After any UART initialisation is complete, setup an arch-specific exception
      * handler in case we fault somewhere in the loader. */
@@ -1273,6 +1276,26 @@ int main(void)
         puts("LDR|ERROR: mismatch on loader data structure magic number\n");
         goto fail;
     }
+
+#ifdef ARCH_aarch64
+    enum el el;
+
+    /* Disable the MMU, as U-Boot will start in virtual memory on some platforms
+     * (https://docs.u-boot.org/en/latest/arch/arm64.html), which means that
+     * certain physical memory addresses contain page table information which
+     * the loader doesn't know about and would need to be careful not to
+     * overwrite.
+     */
+    puts("LDR|INFO: disabling MMU (if it was enabled)\n");
+    el = current_el();
+    if (el == EL1) {
+        el1_mmu_disable();
+    } else if (el == EL2) {
+        el2_mmu_disable();
+    } else {
+        puts("LDR|ERROR: unknown EL level for MMU disable\n");
+    }
+#endif
 
     regions = (void *) &(loader_data->kernel_bootinfos_and_regions[loader_data->num_kernels]);
 
@@ -1309,7 +1332,6 @@ int main(void)
 
 #ifdef ARCH_aarch64
     int r;
-    enum el el;
     r = ensure_correct_el();
     if (r != 0) {
         goto fail;

@@ -287,14 +287,12 @@ BEGIN_FUNC(switch_to_el2)
     eret
 END_FUNC(switch_to_el2)
 
-
-BEGIN_FUNC(el1_mmu_enable)
+BEGIN_FUNC(el1_mmu_disable)
     stp     x29, x30, [sp, #-16]!
     stp     x27, x28, [sp, #-16]!
     mov     x29, sp
-    mov     x27, x0
-    mov     x28, x1
 
+    /* Disable caches */
     bl      flush_dcache
 
     /* Ensure I-cache, D-cache and mmu are disabled for EL1/Stage1 */
@@ -305,6 +303,43 @@ BEGIN_FUNC(el1_mmu_enable)
      * speculatively are discarded.
      */
     bl      invalidate_icache
+
+    ldp     x27, x28, [sp], #16
+    ldp     x29, x30, [sp], #16
+    ret
+END_FUNC(el1_mmu_disable)
+
+BEGIN_FUNC(el2_mmu_disable)
+    stp     x29, x30, [sp, #-16]!
+    stp     x27, x28, [sp, #-16]!
+    mov     x29, sp
+
+    /* Disable caches */
+    bl      flush_dcache
+
+    /* Ensure I-cache, D-cache and mmu are disabled for EL2/Stage1 */
+    disable_mmu sctlr_el2, x8
+
+    /*
+     * Invalidate the local I-cache so that any instructions fetched
+     * speculatively are discarded.
+     */
+    bl      invalidate_icache
+
+    ldp     x27, x28, [sp], #16
+    ldp     x29, x30, [sp], #16
+    ret
+END_FUNC(el2_mmu_disable)
+
+BEGIN_FUNC(el1_mmu_enable)
+    stp     x29, x30, [sp, #-16]!
+    stp     x27, x28, [sp, #-16]!
+    mov     x29, sp
+    mov     x27, x0
+    mov     x28, x1
+
+    /* Disable the MMU */
+    bl      el1_mmu_disable
 
     /*
      *   DEVICE_nGnRnE      000     00000000
@@ -356,17 +391,8 @@ BEGIN_FUNC(el2_mmu_enable)
     mov     x29, sp
     mov     x27, x0
 
-    /* Disable caches */
-    bl      flush_dcache
-
-    /* Ensure I-cache, D-cache and mmu are disabled for EL2/Stage1 */
-    disable_mmu sctlr_el2, x8
-
-    /*
-     * Invalidate the local I-cache so that any instructions fetched
-     * speculatively are discarded.
-     */
-    bl      invalidate_icache
+    /* Disable the MMU */
+    bl      el2_mmu_disable
 
     /*
      *   DEVICE_nGnRnE      000     00000000
