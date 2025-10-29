@@ -1001,7 +1001,7 @@ _Static_assert(0x6100 == __builtin_offsetof(struct gic_dist_map, iroutern),
 
 
 #define GICD_CTLR_RWP                (1ULL << 31)
-#define GICD_CTLR_ARE_NS             (1ULL << 5)
+#define GICD_CTLR_ARE_NS             (1ULL << 4)
 #define GICD_CTLR_ENABLE_G1NS        (1ULL << 1)
 #define GICD_CTLR_ENABLE_G0          (1ULL << 0)
 
@@ -1016,6 +1016,12 @@ _Static_assert(0x6100 == __builtin_offsetof(struct gic_dist_map, iroutern),
 #define MPIDR_AFF2(x) ((x >> 16) & 0xff)
 #define MPIDR_AFF3(x) ((x >> 32) & 0xff)
 
+/** Need fro
+ * This field tracks writes to:
+•GICD_CTLR[2:0], the Group Enables, for transitions from 1 to 0 only.
+•GICD_CTLR[7:4], the ARE bits, E1NWF bit and DS bit.
+•GICD_ICENABLER<n>
+*/
 static void gicv3_dist_wait_for_rwp(void)
 {
     volatile struct gic_dist_map *gic_dist = (volatile void *)(GICD_BASE);
@@ -1048,7 +1054,6 @@ static void configure_gicv3(void)
     gicv3_dist_wait_for_rwp();
 
     type = gic_dist->typer;
-
     nr_lines = 32 * ((type & GICD_TYPE_LINESNR) + 1);
 
     /* Assume level-triggered */
@@ -1069,12 +1074,7 @@ static void configure_gicv3(void)
     }
 
     /* Turn on the distributor */
-    // TODO: Need to figure out what's going on here and the various modes that
-    //       are possible.
-    // Kent added extra changes https://github.com/kent-mcleod/seL4_tools/commit/9df404dd2ba50d46c649adb9a072a9d0117a1717
-    // but these don't even help as not all the bits even stay set.
-    gic_dist->ctlr = GICD_CTLR_ARE_NS | GICD_CTLR_ENABLE_G1NS | GICD_CTLR_ENABLE_G0;
-    gicv3_dist_wait_for_rwp();
+    gic_dist->ctlr = GICD_CTLR_ARE_NS | GICD_CTLR_ENABLE_G1NS;
 
     /* Route all global IRQs to this CPU (CPU 0) */
     affinity = mpidr_to_gic_affinity();
