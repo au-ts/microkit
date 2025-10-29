@@ -1050,8 +1050,23 @@ static void configure_gicv3(void)
 
     volatile struct gic_dist_map *gic_dist = (volatile void *)(GICD_BASE);
 
-    gic_dist->ctlr = 0;
-    gicv3_dist_wait_for_rwp();
+    uint32_t ctlr = gic_dist->ctlr;
+    const uint32_t ctlr_mask = GICD_CTLR_ARE_NS | GICD_CTLR_ENABLE_G1NS;
+    if ((ctlr & ctlr_mask) != ctlr_mask) {
+        if (ctlr !=  (ctlr & ~(GICD_CTLR_ENABLE_G1NS))) {
+            // printf("GICv3: GICD_CTLR 0x%x -> 0x%lx (Disabling Grp1NS)\n", ctlr, ctlr & ~(GICD_CTLR_ENABLE_G1NS));
+            ctlr = ctlr & ~(GICD_CTLR_ENABLE_G1NS);
+            gic_dist->ctlr = ctlr;
+            gicv3_dist_wait_for_rwp();
+        }
+
+        // printf("GICv3: GICD_CTLR 0x%x -> 0x%x (Enabling Grp1NS and ARE_NS)\n", ctlr, ctlr | ctlr_mask);
+        gic_dist->ctlr = ctlr | ctlr_mask;
+        gicv3_dist_wait_for_rwp();
+    }
+
+    // gic_dist->ctlr = 0;
+    // gicv3_dist_wait_for_rwp();
 
     type = gic_dist->typer;
     nr_lines = 32 * ((type & GICD_TYPE_LINESNR) + 1);
@@ -1074,7 +1089,7 @@ static void configure_gicv3(void)
     }
 
     /* Turn on the distributor */
-    gic_dist->ctlr = GICD_CTLR_ARE_NS | GICD_CTLR_ENABLE_G1NS;
+    // gic_dist->ctlr = GICD_CTLR_ARE_NS | GICD_CTLR_ENABLE_G1NS;
 
     /* Route all global IRQs to this CPU (CPU 0) */
     affinity = mpidr_to_gic_affinity();
