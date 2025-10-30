@@ -1327,6 +1327,8 @@ int main(void)
      */
     copy_data();
 
+// FIXME: These were taken from the seL4 kernel, which is GPL-licensed
+//        This is not like a thing that we should be doing.
 #if defined(GIC_VERSION)
 #if GIC_VERSION == 2
     puts("LDR|INFO: Initialising interrupt controller GICv2\n");
