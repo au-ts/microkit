@@ -141,6 +141,7 @@ SUPPORTED_BOARDS = (
             "KernelPlatform": "maaxboard",
             "KernelEnableMultikernelSupport": True,
             # TODO: Derive from device tree?
+            # "KernelMultikernelNumCPUs": 4,
             "KernelMultikernelNumCPUs": 2,
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
@@ -209,6 +210,7 @@ SUPPORTED_BOARDS = (
             "KernelArmVtimerUpdateVOffset": False,
             "KernelEnableMultikernelSupport": True,
             # TODO: Derive from device tree?
+            # "KernelMultikernelNumCPUs": 4,
             "KernelMultikernelNumCPUs": 2,
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
