@@ -1214,7 +1214,7 @@ void secondary_cpu_entry() {
     __atomic_store_n(&core_up[cpu], 1, __ATOMIC_RELEASE);
     dsb();
 
-#if 1
+#if 0
 #ifdef BOARD_odroidc4_multikernel
     for (volatile int i = 0; i < cpu * 10000000; i++);
 #elif defined(BOARD_maaxboard_multikernel)
