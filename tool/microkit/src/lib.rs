@@ -106,7 +106,7 @@ impl Region {
     }
 
     pub fn data<'a>(&self, elf: &'a elf::ElfFile) -> &'a Vec<u8> {
-        elf.segments[self.segment_idx].data()
+        &elf.segments[self.segment_idx].data
     }
 }
 
