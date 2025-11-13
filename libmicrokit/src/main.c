@@ -18,20 +18,22 @@
 #define PD_MASK 0xff
 #define CHANNEL_MASK 0x3f
 
+#define SECTION(sec) __attribute__((__section__(sec)))
+
 /* All globals are prefixed with microkit_* to avoid clashes with user defined globals. */
 
-bool microkit_passive;
-char microkit_name[MICROKIT_PD_NAME_LENGTH];
+bool microkit_passive SECTION(".data.patched");
+char microkit_name[MICROKIT_PD_NAME_LENGTH] SECTION(".data.patched");
 /* We use seL4 typedefs as this variable is exposed to the libmicrokit header
  * and we do not want to rely on compiler built-in defines. */
 seL4_Bool microkit_have_signal = seL4_False;
 seL4_CPtr microkit_signal_cap;
 seL4_MessageInfo_t microkit_signal_msg;
 
-seL4_Word microkit_irqs;
-seL4_Word microkit_notifications;
-seL4_Word microkit_pps;
-seL4_Word microkit_ioports;
+seL4_Word microkit_irqs SECTION(".data.patched");
+seL4_Word microkit_notifications SECTION(".data.patched");
+seL4_Word microkit_pps SECTION(".data.patched");
+seL4_Word microkit_ioports SECTION(".data.patched");
 
 extern seL4_IPCBuffer __sel4_ipc_buffer_obj;
 
