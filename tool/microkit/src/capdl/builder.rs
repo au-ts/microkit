@@ -1102,7 +1102,7 @@ pub fn build_capdl_spec(
 
         // Both have no paddr or equal paddr, break tie by object size (descending) and name.
         let a_size_bit = capdl_obj_physical_size_bits(&a.object, kernel_config);
-        let b_size_bit = capdl_obj_physical_size_bits(&a.object, kernel_config);
+        let b_size_bit = capdl_obj_physical_size_bits(&b.object, kernel_config);
 
         let size_cmp = a_size_bit.cmp(&b_size_bit).reverse();
         if size_cmp == Ordering::Equal {
