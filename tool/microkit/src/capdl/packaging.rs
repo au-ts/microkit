@@ -56,7 +56,7 @@ fn reserialise_spec(
                     .segments
                     .get(data.elf_seg_idx)
                     .unwrap()
-                    .data()[data.elf_seg_data_range.clone()],
+                    .data[data.elf_seg_data_range.clone()],
             )),
         });
 

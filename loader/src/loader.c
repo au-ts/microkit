@@ -84,8 +84,10 @@ static void print_loader_data(void)
         puthex32(i);
         puts("   addr: ");
         puthex64(r->load_addr);
-        puts("   size: ");
-        puthex64(r->size);
+        puts("   file size: ");
+        puthex64(r->file_size);
+        puts("   memory size: ");
+        puthex64(r->memory_size);
         puts("   offset: ");
         puthex64(r->offset);
         puts("   type: ");
@@ -102,7 +104,10 @@ static void copy_data(void)
         puts("LDR|INFO: copying region ");
         puthex32(i);
         puts("\n");
-        memcpy((void *)(uintptr_t)r->load_addr, base + r->offset, r->size);
+        memcpy((void *)(uintptr_t)r->load_addr, base + r->offset, r->file_size);
+
+        // we are guaranteed by the microkit tool that memory_size >= file_size
+        memzero((void *)(r->load_addr + r->file_size), r->memory_size - r->file_size);
     }
 }
 

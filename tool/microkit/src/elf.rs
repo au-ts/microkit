@@ -107,14 +107,9 @@ const PF_W: u32 = 0x2;
 const PF_R: u32 = 0x4;
 
 #[derive(Eq, PartialEq, Clone)]
-pub enum ElfSegmentData {
-    RealData(Vec<u8>),
-    UninitialisedData(u64),
-}
-
-#[derive(Eq, PartialEq, Clone)]
 pub struct ElfSegment {
-    pub data: ElfSegmentData,
+    pub data: Vec<u8>,
+    pub memory_size: u64,
     pub phys_addr: u64,
     pub virt_addr: u64,
     pub loadable: bool,
@@ -122,43 +117,8 @@ pub struct ElfSegment {
 }
 
 impl ElfSegment {
-    pub fn mem_size(&self) -> u64 {
-        match &self.data {
-            ElfSegmentData::RealData(bytes) => bytes.len() as u64,
-            ElfSegmentData::UninitialisedData(size) => *size,
-        }
-    }
-
     pub fn file_size(&self) -> u64 {
-        match &self.data {
-            ElfSegmentData::RealData(bytes) => bytes.len() as u64,
-            ElfSegmentData::UninitialisedData(_) => 0,
-        }
-    }
-
-    pub fn data(&self) -> &Vec<u8> {
-        match &self.data {
-            ElfSegmentData::RealData(bytes) => bytes,
-            ElfSegmentData::UninitialisedData(_) => {
-                unreachable!("internal bug: data() called on an uninitialised ELF segment.")
-            }
-        }
-    }
-
-    pub fn data_mut(&mut self) -> &mut Vec<u8> {
-        match &mut self.data {
-            ElfSegmentData::RealData(bytes) => bytes,
-            ElfSegmentData::UninitialisedData(_) => {
-                unreachable!("internal bug: data_mut() called on an uninitialised ELF segment.")
-            }
-        }
-    }
-
-    pub fn is_uninitialised(&self) -> bool {
-        match &self.data {
-            ElfSegmentData::RealData(_) => false,
-            ElfSegmentData::UninitialisedData(_) => true,
-        }
+        self.data.len() as u64
     }
 
     pub fn is_writable(&self) -> bool {
@@ -256,15 +216,12 @@ impl ElfFile {
                 continue;
             }
 
-            let mut segment_data_bytes = vec![0; phent.memsz as usize];
-            segment_data_bytes[..phent.filesz as usize]
-                .copy_from_slice(&bytes[segment_start..segment_end]);
-
-            let segment_data = ElfSegmentData::RealData(segment_data_bytes);
+            let segment_data_bytes = Vec::from(&bytes[segment_start..segment_end]);
 
             let flags = phent.flags;
             let segment = ElfSegment {
-                data: segment_data,
+                data: segment_data_bytes,
+                memory_size: phent.memsz,
                 phys_addr: phent.paddr,
                 virt_addr: phent.vaddr,
                 loadable: phent.type_ == PHENT_TYPE_LOADABLE,
@@ -372,26 +329,17 @@ impl ElfFile {
     pub fn write_symbol(&mut self, variable_name: &str, data: &[u8]) -> Result<(), String> {
         let (vaddr, size) = self.find_symbol(variable_name)?;
         for seg in &mut self.segments {
-            if vaddr >= seg.virt_addr && vaddr + size <= seg.virt_addr + seg.mem_size() {
+            // note: if the symbol is in the memory range, but not the file size,
+            // we can't really find somewhere to put it...
+            if vaddr >= seg.virt_addr && vaddr + size <= seg.virt_addr + seg.file_size() {
                 let offset = (vaddr - seg.virt_addr) as usize;
                 assert!(data.len() as u64 <= size);
-                seg.data_mut()[offset..offset + data.len()].copy_from_slice(data);
+                seg.data[offset..offset + data.len()].copy_from_slice(data);
                 return Ok(());
             }
         }
 
-        Err(format!("No symbol named {variable_name} found"))
-    }
-
-    pub fn get_data(&self, vaddr: u64, size: u64) -> Option<&[u8]> {
-        for seg in &self.segments {
-            if vaddr >= seg.virt_addr && vaddr + size <= seg.virt_addr + seg.mem_size() {
-                let offset = (vaddr - seg.virt_addr) as usize;
-                return Some(&seg.data()[offset..offset + size as usize]);
-            }
-        }
-
-        None
+        Err(format!("symbol {variable_name} not backed by data inside the ELF file"))
     }
 
     fn get_string(strtab: &[u8], idx: usize) -> Result<&str, String> {
@@ -426,7 +374,7 @@ impl ElfFile {
         let existing_vaddrs: Vec<u64> = self
             .loadable_segments()
             .iter()
-            .map(|segm| segm.virt_addr + segm.mem_size())
+            .map(|segm| segm.virt_addr + segm.memory_size)
             .collect();
         *existing_vaddrs.iter().max().unwrap()
     }
@@ -442,7 +390,8 @@ impl ElfFile {
         write: bool,
         execute: bool,
         vaddr: u64,
-        data: ElfSegmentData,
+        memory_size: u64,
+        data: Vec<u8>,
     ) {
         let r = if read { PF_R } else { 0 };
         let w = if write { PF_W } else { 0 };
@@ -450,6 +399,7 @@ impl ElfFile {
 
         let elf_segment = ElfSegment {
             data,
+            memory_size,
             phys_addr: vaddr,
             virt_addr: vaddr,
             loadable: true,
@@ -526,7 +476,7 @@ impl ElfFile {
                 vaddr: seg.virt_addr,
                 paddr: seg.phys_addr,
                 filesz: seg.file_size(),
-                memsz: seg.mem_size(),
+                memsz: seg.memory_size,
                 align: 0,
             };
 
@@ -547,10 +497,9 @@ impl ElfFile {
         for (i, seg) in self
             .loadable_segments()
             .iter()
-            .filter(|seg| !seg.is_uninitialised())
             .enumerate()
         {
-            elf_file.write_all(seg.data()).unwrap_or_else(|_| {
+            elf_file.write_all(&seg.data).unwrap_or_else(|_| {
                 panic!(
                     "Failed to write ELF segment data #{} for '{}'",
                     i,

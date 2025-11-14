@@ -176,19 +176,14 @@ impl CapDLSpec {
         // For each loadable segment in the ELF, map it into the address space of this PD.
         let mut frame_sequence = 0; // For object naming purpose only.
         for (seg_idx, segment) in elf.loadable_segments().iter().enumerate() {
-            if segment.data().is_empty() {
-                continue;
-            }
-
             let seg_base_vaddr = segment.virt_addr;
-            let seg_mem_size: u64 = segment.mem_size();
 
             let page_size = PageSize::Small;
             let page_size_bytes = page_size as u64;
 
             // Create and map all frames for this segment.
             let mut cur_vaddr = round_down(seg_base_vaddr, page_size_bytes);
-            while cur_vaddr < seg_base_vaddr + seg_mem_size {
+            while cur_vaddr < seg_base_vaddr + segment.memory_size {
                 let mut frame_init_maybe: Option<FrameInit> = None;
 
                 // Now compute the ELF file offset to fill in this page.
@@ -203,10 +198,10 @@ impl CapDLSpec {
 
                 let target_vaddr_start = cur_vaddr + dest_offset;
                 let section_offset = target_vaddr_start - seg_base_vaddr;
-                if section_offset < seg_mem_size {
+                if section_offset < segment.memory_size {
                     // We have data to load
                     let len_to_cpy =
-                        min(page_size_bytes - dest_offset, seg_mem_size - section_offset);
+                        min(page_size_bytes - dest_offset, segment.memory_size - section_offset);
 
                     frame_init_maybe = Some(FrameInit::Fill(Fill {
                         entries: [FillEntry {
@@ -581,7 +576,7 @@ pub fn build_capdl_spec(
 
             for elf_seg in elf_obj.loadable_segments().iter() {
                 let elf_seg_vaddr_range = elf_seg.virt_addr
-                    ..elf_seg.virt_addr + round_up(elf_seg.mem_size(), PageSize::Small as u64);
+                    ..elf_seg.virt_addr + round_up(elf_seg.memory_size, PageSize::Small as u64);
                 if ranges_overlap(&mr_vaddr_range, &elf_seg_vaddr_range) {
                     return Err(format!("ERROR: mapping MR '{}' to PD '{}' with vaddr [0x{:x}..0x{:x}) will overlap with an ELF segment at [0x{:x}..0x{:x})", map.mr, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, elf_seg_vaddr_range.start, elf_seg_vaddr_range.end));
                 }

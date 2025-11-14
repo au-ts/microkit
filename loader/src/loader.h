@@ -13,7 +13,10 @@
 
 struct region {
     uintptr_t load_addr;
-    uintptr_t size;
+    // The size of this region in the loader data 'file'
+    uintptr_t file_size;
+    // The size of this region in memory, zero-padded
+    uintptr_t memory_size;
     uintptr_t offset;
     uintptr_t type;
 };

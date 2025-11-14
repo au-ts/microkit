@@ -18,6 +18,14 @@ void *memcpy(void *dst, const void *src, size_t sz)
     return dst;
 }
 
+void memzero(void *dst, size_t sz)
+{
+    char *dst_ = dst;
+    for (size_t i = 0; i < sz; i++) {
+        dst_[i] = 0x0;
+    }
+}
+
 void *memmove(void *restrict dest, const void *restrict src, size_t n)
 {
     unsigned char *d = (unsigned char *)dest;
@@ -44,3 +52,4 @@ void *memmove(void *restrict dest, const void *restrict src, size_t n)
 
     return dest;
 }
+

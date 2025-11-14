@@ -79,10 +79,10 @@ impl Riscv64 {
 
 /// Checks that each region in the given list does not overlap with any other region.
 /// Panics upon finding an overlapping region
-fn check_non_overlapping(regions: &Vec<(u64, &[u8])>) {
+fn check_non_overlapping(regions: &Vec<(u64, &[u8], u64)>) {
     let mut checked: Vec<(u64, u64)> = Vec::new();
-    for (base, data) in regions {
-        let end = base + data.len() as u64;
+    for (base, _, mem_size) in regions {
+        let end = base + mem_size;
         // Check that this does not overlap with any checked regions
         for (b, e) in &checked {
             if !(end <= *b || *base >= *e) {
@@ -97,7 +97,10 @@ fn check_non_overlapping(regions: &Vec<(u64, &[u8])>) {
 #[repr(C)]
 struct LoaderRegion64 {
     load_addr: u64,
-    size: u64,
+    // The size of the region data in the loader
+    loader_size: u64,
+    // The memory size of the region once expanded by the loader
+    memory_size: u64,
     offset: u64,
     r#type: u64,
 }
@@ -118,7 +121,7 @@ pub struct Loader<'a> {
     image: Vec<u8>,
     header: LoaderHeader64,
     region_metadata: Vec<LoaderRegion64>,
-    regions: Vec<(u64, &'a [u8])>,
+    regions: Vec<(u64, &'a [u8], u64)>,
 }
 
 impl<'a> Loader<'a> {
@@ -146,7 +149,7 @@ impl<'a> Loader<'a> {
             ),
         };
 
-        let mut regions: Vec<(u64, &[u8])> = Vec::new();
+        let mut regions: Vec<(u64, &[u8], u64)> = Vec::new();
 
         let mut kernel_first_vaddr = None;
         let mut kernel_last_vaddr = None;
@@ -160,10 +163,10 @@ impl<'a> Loader<'a> {
                 }
 
                 if kernel_last_vaddr.is_none()
-                    || segment.virt_addr + segment.mem_size() > kernel_last_vaddr.unwrap()
+                    || segment.virt_addr + segment.memory_size > kernel_last_vaddr.unwrap()
                 {
                     kernel_last_vaddr =
-                        Some(round_up(segment.virt_addr + segment.mem_size(), mb(2)));
+                        Some(round_up(segment.virt_addr + segment.memory_size, mb(2)));
                 }
 
                 if kernel_first_paddr.is_none() || segment.phys_addr < kernel_first_paddr.unwrap() {
@@ -178,31 +181,20 @@ impl<'a> Loader<'a> {
                     kernel_p_v_offset = Some(segment.virt_addr - segment.phys_addr);
                 }
 
-                regions.push((segment.phys_addr, segment.data().as_slice()));
+                regions.push((segment.phys_addr, segment.data.as_slice(), segment.memory_size));
             }
         }
 
         assert!(kernel_first_paddr.is_some());
 
-        // We support an initial task ELF with multiple segments. This is implemented by amalgamating all the segments
-        // into 1 segment, so if your segments are sparse, a lot of memory will be wasted.
-        let initial_task_segments = initial_task_elf.loadable_segments();
-
         // Compute an available physical memory segment large enough to house the initial task (CapDL initialiser with spec)
         // that is after the kernel window.
-        let inittask_p_v_offset = initial_task_vaddr_range.start - initial_task_phy_base;
+        let inittask_p_v_offset = initial_task_vaddr_range.start.wrapping_sub(initial_task_phy_base);
         let inittask_v_entry = initial_task_elf.entry;
-
-        // initialiser.rs will always place the heap as the last region in the initial task's address space.
-        // So instead of copying a bunch of useless zeroes into the image, we can just leave it uninitialised.
-        assert!(initial_task_segments.last().unwrap().is_uninitialised());
-        // Skip heap segment
-        for segment in initial_task_segments[..initial_task_segments.len() - 1].iter() {
-            if segment.mem_size() > 0 {
-                let segment_paddr =
-                    initial_task_phy_base + (segment.virt_addr - initial_task_vaddr_range.start);
-                regions.push((segment_paddr, segment.data()));
-            }
+        for segment in initial_task_elf.loadable_segments().iter() {
+            let segment_paddr =
+                initial_task_phy_base + (segment.virt_addr - initial_task_vaddr_range.start);
+            regions.push((segment_paddr, segment.data.as_slice(), segment.memory_size));
         }
 
         // Determine the pagetable variables
@@ -232,7 +224,7 @@ impl<'a> Loader<'a> {
         // We have to clone here as the image executable is part of this function return object,
         // and the loader ELF is deserialised in this scope, so its lifetime will be shorter than
         // the return object.
-        let mut image = image_segment.data().clone();
+        let mut image = image_segment.data.clone();
 
         if image_vaddr != loader_elf.entry {
             panic!("The loader entry point must be the first byte in the image");
@@ -254,17 +246,20 @@ impl<'a> Loader<'a> {
         let ui_p_reg_end = initial_task_vaddr_range.end - inittask_p_v_offset;
         assert!(ui_p_reg_end > ui_p_reg_start);
 
-        // This clone isn't too bad as it is just a Vec<(u64, &[u8])>
+        // This clone isn't too bad as it is just a Vec<(u64, &[u8], u64)>
         let mut all_regions_with_loader = regions.clone();
-        all_regions_with_loader.push((image_vaddr, &image));
+        all_regions_with_loader.push((image_vaddr, &image, image.len() as u64));
         check_non_overlapping(&all_regions_with_loader);
 
         let mut region_metadata = Vec::new();
         let mut offset: u64 = 0;
-        for (addr, data) in &regions {
+        for &(addr, data, memory_size) in regions.iter() {
+            assert!(data.len() as u64 <= memory_size);
+
             region_metadata.push(LoaderRegion64 {
-                load_addr: *addr,
-                size: data.len() as u64,
+                load_addr: addr,
+                loader_size: data.len() as u64,
+                memory_size,
                 offset,
                 r#type: 1,
             });
@@ -273,7 +268,7 @@ impl<'a> Loader<'a> {
 
         let size = std::mem::size_of::<LoaderHeader64>() as u64
             + region_metadata.iter().fold(0_u64, |acc, x| {
-                acc + x.size + std::mem::size_of::<LoaderRegion64>() as u64
+                acc + x.loader_size + std::mem::size_of::<LoaderRegion64>() as u64
             });
 
         let header = LoaderHeader64 {
@@ -322,7 +317,7 @@ impl<'a> Loader<'a> {
         }
 
         // Now we can write out all the region data
-        for (_, data) in &self.regions {
+        for (_, data, _) in self.regions.iter() {
             loader_buf
                 .write_all(data)
                 .expect("Failed to write region data to loader");
