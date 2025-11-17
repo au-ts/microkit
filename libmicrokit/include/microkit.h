@@ -17,6 +17,7 @@ typedef unsigned int microkit_child;
 typedef unsigned int microkit_ioport;
 typedef seL4_MessageInfo_t microkit_msginfo;
 
+#define VSPACE_CAP 3
 #define MONITOR_EP 5
 /* Only valid in the 'benchmark' configuration */
 #define TCB_CAP 6
@@ -26,6 +27,7 @@ typedef seL4_MessageInfo_t microkit_msginfo;
 #define BASE_ENDPOINT_CAP 74
 #define BASE_IRQ_CAP 138
 #define BASE_TCB_CAP 202
+#define BASE_VSPACE_CAP
 #define BASE_VM_TCB_CAP 266
 #define BASE_VCPU_CAP 330
 #define BASE_IOPORT_CAP 394
