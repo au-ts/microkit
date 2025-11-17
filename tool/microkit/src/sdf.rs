@@ -238,6 +238,18 @@ pub struct Channel {
     pub end_b: ChannelEnd,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageTablesEntries {
+    pub source_pd: String,
+    pub table_index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageTableCopies {
+    pub setvar: String,
+    pub entries: Vec<PageTablesEntries>,
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CpuCore(pub u8);
 
@@ -273,6 +285,7 @@ pub struct ProtectionDomain {
     /// Index into the total list of protection domains if a parent
     /// protection domain exists
     pub parent: Option<usize>,
+    pub page_table_copies: Option<PageTableCopies>,
     /// Value of the setvar_id attribute, if a parent protection domain exists
     pub setvar_id: Option<String>,
     /// Location in the parsed SDF file
@@ -416,6 +429,46 @@ impl SysMap {
     }
 }
 
+impl PageTableCopies {
+    fn from_xml(
+        xml_sdf: &XmlSystemDescription,
+        node: &roxmltree::Node,
+    ) -> Result<PageTableCopies, String> {
+        check_attributes(xml_sdf, node, &["setvar"])?;
+        let setvar = checked_lookup(xml_sdf, node, "setvar")?.to_string();
+        let mut pds = Vec::new();
+        for child in node.children() {
+            if !child.is_element() {
+                continue;
+            }
+            match child.tag_name().name() {
+                "pd" => {
+                    check_attributes(xml_sdf, &child, &["name", "index"])?;
+                    let source_pd = checked_lookup(xml_sdf, &child, "name")?.to_string();
+                    let index =
+                        sdf_parse_number(checked_lookup(xml_sdf, &child, "index")?, &child)?;
+                    let page_table_copy = PageTablesEntries {
+                        source_pd,
+                        table_index: index as usize,
+                    };
+                    pds.push(page_table_copy);
+                }
+                _ => {
+                    return Err(format!(
+                        "Invalid XML element '{}' in page_table",
+                        child.tag_name().name(),
+                    ));
+                }
+            }
+        }
+
+        Ok(PageTableCopies {
+            setvar,
+            entries: pds,
+        })
+    }
+}
+
 impl ProtectionDomain {
     pub fn needs_ep(&self, self_id: usize, channels: &[Channel]) -> bool {
         self.has_children
@@ -461,6 +514,7 @@ impl ProtectionDomain {
             // but we do the error-checking further down.
             "smc",
             "cpu",
+            "child_pts",
         ];
         if is_child {
             attrs.push("id");
@@ -594,6 +648,7 @@ impl ProtectionDomain {
         let mut setvars: Vec<SysSetVar> = Vec::new();
         let mut child_pds = Vec::new();
 
+        let mut page_tables = None;
         let mut program_image = None;
         let mut program_image_for_symbols = None;
         let mut virtual_machine = None;
@@ -1048,6 +1103,9 @@ impl ProtectionDomain {
 
                     virtual_machine = Some(vm);
                 }
+                "page_tables" => {
+                    page_tables = Some(PageTableCopies::from_xml(xml_sdf, &child)?);
+                }
                 _ => {
                     let pos = xml_sdf.doc.text_pos_at(child.range().start);
                     return Err(format!(
@@ -1089,6 +1147,7 @@ impl ProtectionDomain {
             virtual_machine,
             has_children,
             parent: None,
+            page_table_copies: page_tables,
             setvar_id,
             text_pos: Some(xml_sdf.doc.text_pos_at(node.range().start)),
         })
