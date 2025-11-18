@@ -6,7 +6,6 @@
 
 use std::ops::Range;
 
-use crate::elf::ElfSegmentData;
 use crate::util::round_up;
 use crate::{elf::ElfFile, sel4::PageSize};
 use crate::{serialise_ut, UntypedObject};
@@ -16,7 +15,7 @@ use crate::{serialise_ut, UntypedObject};
 pub const DEFAULT_INITIALISER_HEAP_MULTIPLIER: f64 = 2.0;
 const INITIALISER_HEAP_ADD_ON_CONSTANT: u64 = 64 * 4096;
 // Page size used for allocating the spec and heap segments.
-pub const INITIALISER_GRANULE_SIZE: PageSize = PageSize::Small;
+pub const INITIALISER_PAGE_SIZE: PageSize = PageSize::Small;
 
 pub struct CapDLInitialiserSpecMetadata {
     pub spec_size: u64,
@@ -41,7 +40,7 @@ impl CapDLInitialiser {
     }
 
     pub fn image_bound(&self) -> Range<u64> {
-        self.elf.lowest_vaddr()..round_up(self.elf.highest_vaddr(), INITIALISER_GRANULE_SIZE as u64)
+        self.elf.lowest_vaddr()..round_up(self.elf.highest_vaddr(), INITIALISER_PAGE_SIZE as u64)
     }
 
     pub fn add_spec(&mut self, payload: Vec<u8>) {
@@ -49,14 +48,15 @@ impl CapDLInitialiser {
             unreachable!("internal bug: CapDLInitialiser::add_spec() called more than once");
         }
 
-        let spec_vaddr = self.elf.next_vaddr(INITIALISER_GRANULE_SIZE);
+        let spec_vaddr = self.elf.next_vaddr(INITIALISER_PAGE_SIZE);
         let spec_size = payload.len() as u64;
         self.elf.add_segment(
             true,
             false,
             false,
             spec_vaddr,
-            ElfSegmentData::RealData(payload),
+            spec_size,
+            payload,
         );
 
         // These symbol names must match rust-sel4/crates/sel4-capdl-initializer/src/main.rs
@@ -73,18 +73,18 @@ impl CapDLInitialiser {
             )
             .unwrap();
 
-        // Very important to make the heap the last region in memory so we can optimise the bootable image size later.
-        let heap_vaddr = self.elf.next_vaddr(INITIALISER_GRANULE_SIZE);
+        let heap_vaddr = self.elf.next_vaddr(INITIALISER_PAGE_SIZE);
         let heap_size = round_up(
             (spec_size as f64 * self.heap_multiplier) as u64 + INITIALISER_HEAP_ADD_ON_CONSTANT,
-            INITIALISER_GRANULE_SIZE as u64,
+            INITIALISER_PAGE_SIZE as u64,
         );
         self.elf.add_segment(
             true,
             true,
             false,
             heap_vaddr,
-            ElfSegmentData::UninitialisedData(heap_size),
+            heap_size,
+            vec![],
         );
         self.elf
             .write_symbol(

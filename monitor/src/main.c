@@ -50,16 +50,19 @@
 #define BASE_SCHED_CONTEXT_CAP 138
 #define BASE_NOTIFICATION_CAP 202
 
+#define SECTION(sec) __attribute__((__section__(sec)))
+#define UNUSED __attribute__((unused))
+
 extern seL4_IPCBuffer __sel4_ipc_buffer_obj;
 seL4_IPCBuffer *__sel4_ipc_buffer = &__sel4_ipc_buffer_obj;
 
-char pd_names[MAX_PDS][MAX_NAME_LEN];
-seL4_Word pd_names_len;
-char vm_names[MAX_VMS][MAX_NAME_LEN] __attribute__((unused));
-seL4_Word vm_names_len;
+char pd_names[MAX_PDS][MAX_NAME_LEN] SECTION(".data.patched");
+seL4_Word pd_names_len SECTION(".data.patched");
+char vm_names[MAX_VMS][MAX_NAME_LEN] SECTION(".data.patched") UNUSED;
+seL4_Word vm_names_len SECTION(".data.patched");
 
 /* For reporting potential stack overflows, keep track of the stack regions for each PD. */
-seL4_Word pd_stack_bottom_addrs[MAX_PDS];
+seL4_Word pd_stack_bottom_addrs[MAX_PDS] SECTION(".data.patched");
 
 /* Sanity check that the architecture specific macro have been set. */
 #if defined(ARCH_aarch64)
