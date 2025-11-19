@@ -494,8 +494,9 @@ impl ElfFile {
         self.segments.iter().filter(|s| s.loadable).collect()
     }
 
-    /// Re-create a minimal ELF file with all the segments.
-    pub fn reserialise(&self, out: &std::path::Path) -> Result<u64, String> {
+    pub fn as_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
         let ehsize = size_of::<ElfHeader64>();
 
         let phnum = self.loadable_segments().len();
@@ -504,19 +505,6 @@ impl ElfFile {
         let shnum = self.loadable_segments().len() + 1; // First entry is reserved
         let shentsize = size_of::<ElfSectionHeader64>();
 
-        let mut elf_file = match File::create(out) {
-            Ok(file) => file,
-            Err(e) => {
-                return Err(format!(
-                    "ELF: cannot reserialise '{}' to '{}': {}",
-                    self.path.display(),
-                    out.display(),
-                    e
-                ))
-            }
-        };
-
-        // ELF header
         let header = ElfHeader64 {
             ident_magic: u32::from_le_bytes(*ELF_MAGIC),
             ident_class: 2, // 64-bits object
@@ -541,22 +529,18 @@ impl ElfFile {
             shnum: shnum as u16,
             shstrndx: 0,
         };
-        elf_file
-            .write_all(unsafe {
-                from_raw_parts((&header as *const ElfHeader64) as *const u8, ehsize)
-            })
-            .unwrap_or_else(|_| panic!("Failed to write ELF header for '{}'", out.display()));
+        bytes.extend_from_slice(unsafe { struct_to_bytes(header) });
 
-        // Keep a running file offset where segment data will be written, which is after
+        // Keep a running offset where segment data will be, which is after
         // all the various headers.
         let mut data_off_watermark = (ehsize as u64)
             + (phnum as u64) * (phentsize as u64)
             + (shnum as u64) * (shentsize as u64);
         let mut data_offs = [].to_vec();
 
-        // First write out the program headers table
+        // First copy out the program headers table
         for (i, seg) in self.loadable_segments().iter().enumerate() {
-            let ph_serialised = ElfProgramHeader64 {
+            let program_header = ElfProgramHeader64 {
                 type_: PHENT_TYPE_LOADABLE, // loadable
                 flags: seg.attrs,
                 offset: data_off_watermark,
@@ -568,18 +552,29 @@ impl ElfFile {
             };
             data_offs.push(data_off_watermark);
 
-            elf_file
-                .write_all(unsafe { struct_to_bytes(&ph_serialised) })
-                .unwrap_or_else(|_| {
-                    panic!(
-                        "Failed to write ELF program header #{} for '{}'",
-                        i,
-                        out.display()
-                    )
-                });
+            bytes.extend_from_slice(unsafe { struct_to_bytes(program_header) });
 
             data_off_watermark += seg.file_size();
         }
+
+        
+
+        bytes
+    }
+
+    /// Re-create a minimal ELF file with all the segments.
+    pub fn reserialise(&self, out: &std::path::Path) -> Result<u64, String> {
+        let mut elf_file = match File::create(out) {
+            Ok(file) => file,
+            Err(e) => {
+                return Err(format!(
+                    "ELF: cannot reserialise '{}' to '{}': {}",
+                    self.path.display(),
+                    out.display(),
+                    e
+                ))
+            }
+        };
 
         // Then the section headers table, which describe the same thing as the program headers.
         // This is needed for U-Boot's `bootelf` command to work properly without adding the `-p` flag
