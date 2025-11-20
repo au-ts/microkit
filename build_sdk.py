@@ -351,12 +351,32 @@ SUPPORTED_BOARDS = (
         } | DEFAULT_KERNEL_OPTIONS_RISCV64,
     ),
     BoardInfo(
+        name="hifive_p550_4_cores",
+        arch=KernelArch.RISCV64,
+        gcc_cpu=None,
+        loader_link_address=0x90000000,
+        kernel_options={
+            "KernelPlatform": "hifive-p550",
+            "KernelMaxNumNodes": 4,
+        } | DEFAULT_KERNEL_OPTIONS_RISCV64,
+    ),
+    BoardInfo(
         name="star64",
         arch=KernelArch.RISCV64,
         gcc_cpu=None,
         loader_link_address=0x60000000,
         kernel_options={
             "KernelPlatform": "star64",
+        } | DEFAULT_KERNEL_OPTIONS_RISCV64,
+    ),
+    BoardInfo(
+        name="star64_4_cores",
+        arch=KernelArch.RISCV64,
+        gcc_cpu=None,
+        loader_link_address=0x60000000,
+        kernel_options={
+            "KernelPlatform": "star64",
+            "KernelMaxNumNodes": 4,
         } | DEFAULT_KERNEL_OPTIONS_RISCV64,
     ),
     BoardInfo(

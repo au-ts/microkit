@@ -6,7 +6,7 @@
  */
 
 #include "uart.h"
-#if CONFIG_ARCH_RISCV64
+#if defined(CONFIG_ARCH_RISCV)
 #include "riscv/sbi.h"
 #endif
 
