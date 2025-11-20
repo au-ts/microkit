@@ -223,6 +223,16 @@ SUPPORTED_BOARDS = (
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
+        name="odroidc4_4_cores",
+        arch=KernelArch.AARCH64,
+        gcc_cpu="cortex-a55",
+        loader_link_address=0x20000000,
+        kernel_options={
+            "KernelPlatform": "odroidc4",
+            "KernelMaxNumNodes": 4,
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
+    ),
+    BoardInfo(
         name="ultra96v2",
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a53",
