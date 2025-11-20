@@ -105,7 +105,7 @@ hsm_switch_hart:
    */
   mv a0, s0 /* restore a0 to hold hart ID passed by OpenSBI */
   li a7, SBI_HSM_BASE_EID
-  li a6, 0x2
+  li a6, 0x1
   ecall
 
 relocate:

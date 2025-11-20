@@ -81,6 +81,12 @@ int plat_start_cpu(int logical_cpu)
     uint64_t sp = stack_top;
 
     int hart_id = logical_to_hart_id[logical_cpu];
+    // struct sbi_ret ret = sbi_call(SBI_EXT_HSM, SBI_HSM_HART_STOP, hart_id, 0, 0, 0, 0, 0);
+    // if (ret.error != SBI_SUCCESS) {
+    //     LDR_PRINT("ERROR", 0, "could not stop CPU, SBI call returned: ");
+    //     puts(sbi_error_as_string(ret.error));
+    //     puts("\n");
+    // }
     struct sbi_ret ret = sbi_call(SBI_EXT_HSM, SBI_HSM_HART_START, hart_id, (uint64_t)riscv_secondary_cpu_entry_asm, sp, 0, 0, 0);
 
     if (ret.error != SBI_SUCCESS) {

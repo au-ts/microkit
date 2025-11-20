@@ -144,7 +144,7 @@ void start_kernel(int logical_cpu)
         0,
         0
     );
-#elif defined(CONFIG_PLAT_RISCV)
+#elif defined(CONFIG_ARCH_RISCV)
     ((sel4_entry)(loader_data->kernel_entry))(
         loader_data->ui_p_reg_start,
         loader_data->ui_p_reg_end,
@@ -153,8 +153,10 @@ void start_kernel(int logical_cpu)
         0,
         0,
         hart_id,
-        logical_cpu,
+        logical_cpu
     );
+#else
+#error "Unknown seL4 entry architecture"
 #endif
 
     LDR_PRINT("ERROR", logical_cpu, "seL4 kernel entry returned\n");
