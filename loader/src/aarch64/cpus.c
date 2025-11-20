@@ -25,7 +25,7 @@ size_t cpu_mpidrs[NUM_ACTIVE_CPUS];
 
 void plat_save_hw_id(int logical_cpu, size_t hw_id)
 {
-    cpu_mpidrs[logical_cpu] = hw_id;
+    cpu_mpidrs[(uint8_t)logical_cpu] = hw_id;
 }
 
 /**
