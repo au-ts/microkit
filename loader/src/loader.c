@@ -107,6 +107,10 @@ static void copy_data(void)
 static int cpu_up = 0;
 #endif
 
+#ifdef CONFIG_ARCH_RISCV
+extern int logical_to_hart_id[];
+#endif
+
 void start_kernel(int logical_cpu)
 {
     LDR_PRINT("INFO", logical_cpu, "enabling MMU\n");
@@ -120,10 +124,18 @@ void start_kernel(int logical_cpu)
 
     LDR_PRINT("INFO", logical_cpu, "jumping to kernel\n");
 
+#ifdef CONFIG_ARCH_RISCV
+    int hart_id = logical_to_hart_id[logical_cpu];
+    LDR_PRINT("INFO", logical_cpu, "hart id is ");
+    puthex32(hart_id);
+    puts("\n");
+#endif
+
 #ifdef CONFIG_PRINTING
     __atomic_store_n(&cpu_up, 1, __ATOMIC_RELEASE);
 #endif
 
+#ifdef CONFIG_ARCH_AARCH64
     ((sel4_entry)(loader_data->kernel_entry))(
         loader_data->ui_p_reg_start,
         loader_data->ui_p_reg_end,
@@ -132,6 +144,18 @@ void start_kernel(int logical_cpu)
         0,
         0
     );
+#elif defined(CONFIG_PLAT_RISCV)
+    ((sel4_entry)(loader_data->kernel_entry))(
+        loader_data->ui_p_reg_start,
+        loader_data->ui_p_reg_end,
+        loader_data->pv_offset,
+        loader_data->v_entry,
+        0,
+        0,
+        hart_id,
+        logical_cpu,
+    );
+#endif
 
     LDR_PRINT("ERROR", logical_cpu, "seL4 kernel entry returned\n");
     for (;;) {}

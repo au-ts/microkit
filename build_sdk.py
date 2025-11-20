@@ -280,6 +280,19 @@ SUPPORTED_BOARDS = (
         } | DEFAULT_KERNEL_OPTIONS_RISCV64,
     ),
     BoardInfo(
+        name="qemu_virt_riscv64_4_cores",
+        arch=KernelArch.RISCV64,
+        gcc_cpu=None,
+        loader_link_address=0x90000000,
+        kernel_options={
+            "KernelPlatform": "qemu-riscv-virt",
+            "QEMU_MEMORY": "2048",
+            "KernelRiscvExtD": True,
+            "KernelRiscvExtF": True,
+            "KernelMaxNumNodes": 4,
+        } | DEFAULT_KERNEL_OPTIONS_RISCV64,
+    ),
+    BoardInfo(
         name="rpi4b_1gb",
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a72",
