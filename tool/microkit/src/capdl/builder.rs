@@ -318,7 +318,7 @@ impl CapDLSpecContainer {
 
         let tcb_extra_info = object::TcbExtraInfo {
             ipc_buffer_addr: ipcbuf_vaddr.into(),
-            affinity: pd_cpu.0.into(),
+            affinity: Word(pd_cpu.0.into()),
             prio: 0,
             max_prio: 0,
             resume: false,
@@ -902,7 +902,7 @@ pub fn build_capdl_spec(
                         slots: caps_to_bind_to_vm_tcbs,
                         extra: Box::new(object::TcbExtraInfo {
                             ipc_buffer_addr: Word(0),
-                            affinity: Word(vcpu.cpu.0)
+                            affinity: Word(vcpu.cpu.0.into()),
                             prio: virtual_machine.priority,
                             max_prio: virtual_machine.priority,
                             resume: false,

@@ -56,7 +56,7 @@ fn create_irq_obj(
                 slots: [].to_vec(),
                 extra: Box::new(object::ArmIrqExtraInfo {
                     trigger: trigger as u8,
-                    target: Word(pd_cpu.0)
+                    target: Word(pd_cpu.0.into()),
                 }),
             }),
             Arch::Riscv64 => Object::RiscvIrq(object::RiscvIrq {
