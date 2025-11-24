@@ -26,20 +26,6 @@ _Static_assert(sizeof(uintptr_t) == 8 || sizeof(uintptr_t) == 4, "Expect uintptr
 #define MAGIC 0x5e14dead14de5ead
 #endif
 
-typedef void (*sel4_entry)(
-    uintptr_t ui_p_reg_start,
-    uintptr_t ui_p_reg_end,
-    intptr_t pv_offset,
-    uintptr_t v_entry,
-    uintptr_t dtb_addr_p,
-    uintptr_t dtb_size
-#if defined(CONFIG_ARCH_RISCV) && defined(CONFIG_ENABLE_SMP_SUPPORT)
-    ,
-    uint64_t hart_id,
-    uint64_t core_id
-#endif
-);
-
 extern char _text;
 extern char _bss_end;
 const struct loader_data *loader_data = (void *) &_bss_end;
@@ -112,10 +98,6 @@ static void copy_data(void)
 static int cpu_up = 0;
 #endif
 
-#ifdef CONFIG_ARCH_RISCV
-extern int logical_to_hart_id[];
-#endif
-
 void start_kernel(int logical_cpu)
 {
     LDR_PRINT("INFO", logical_cpu, "enabling MMU\n");
@@ -129,40 +111,11 @@ void start_kernel(int logical_cpu)
 
     LDR_PRINT("INFO", logical_cpu, "jumping to kernel\n");
 
-#ifdef CONFIG_ARCH_RISCV
-    int hart_id = logical_to_hart_id[logical_cpu];
-    LDR_PRINT("INFO", logical_cpu, "hart id is ");
-    puthex32(hart_id);
-    puts("\n");
-#endif
-
 #ifdef CONFIG_PRINTING
     __atomic_store_n(&cpu_up, 1, __ATOMIC_RELEASE);
 #endif
 
-#ifdef CONFIG_ARCH_AARCH64
-    ((sel4_entry)(loader_data->kernel_entry))(
-        loader_data->ui_p_reg_start,
-        loader_data->ui_p_reg_end,
-        loader_data->pv_offset,
-        loader_data->v_entry,
-        0,
-        0
-    );
-#elif defined(CONFIG_ARCH_RISCV)
-    ((sel4_entry)(loader_data->kernel_entry))(
-        loader_data->ui_p_reg_start,
-        loader_data->ui_p_reg_end,
-        loader_data->pv_offset,
-        loader_data->v_entry,
-        0,
-        0,
-        hart_id,
-        logical_cpu
-    );
-#else
-#error "Unknown seL4 entry architecture"
-#endif
+    arch_jump_to_kernel(logical_cpu);
 
     LDR_PRINT("ERROR", logical_cpu, "seL4 kernel entry returned\n");
     for (;;) {}

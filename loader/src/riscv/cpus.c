@@ -14,44 +14,54 @@
 #include "sbi.h"
 
 #ifdef CONFIG_PLAT_STAR64
-int logical_to_hart_id[4] = {0x1, 0x2, 0x3, 0x4};
+static const uint64_t hart_ids[4] = {0x1, 0x2, 0x3, 0x4};
 #elif defined(CONFIG_PLAT_QEMU_RISCV_VIRT)
-int logical_to_hart_id[4] = {0x0, 0x1, 0x2, 0x3};
+static const uint64_t hart_ids[4] = {0x0, 0x1, 0x2, 0x3};
 #elif defined(CONFIG_PLAT_HIFIVE_P550)
-int logical_to_hart_id[4] = {0x0, 0x1, 0x2, 0x3};
+static const uint64_t hart_ids[4] = {0x0, 0x1, 0x2, 0x3};
 #else
-#error "Unsupported platform TODO"
+#error "hart_ids not defined for this board"
 #endif
 
-int hart_id_to_logical(int hart_id);
-void riscv_secondary_cpu_entry(int hart_id);
+_Static_assert(NUM_ACTIVE_CPUS <= ARRAY_SIZE(hart_ids),
+               "active CPUs cannot be more than available CPUs");
 
-int hart_id_to_logical(int hart_id)
+void plat_save_hw_id(int logical_cpu, uint64_t hart_id)
 {
-    for (int i = 0; i < sizeof(logical_to_hart_id) / sizeof(int); i++) {
-        if (hart_id == logical_to_hart_id[i]) {
-            return i;
-        }
-    }
+    /** RISC-V appears to be nice and the hart_id given by the entrypoint
+     *  should always match that of the IDs we use to start it. Here we don't
+     *  need to do anything, but we can check that we are correct
+     **/
 
-    return -1;
+    if (hart_ids[logical_cpu] != hart_id) {
+        LDR_PRINT("ERROR", logical_cpu, "runtime hart id ");
+        puthex64(hart_id);
+        puts("does not match build-time value ");
+        puthex64(hart_ids[logical_cpu]);
+        puts("\n");
+
+        for (;;) {}
+    }
+}
+
+uint64_t plat_get_hw_id(int logical_cpu)
+{
+    return hart_ids[logical_cpu];
 }
 
 /** defined in crt0.S */
 extern char riscv_secondary_cpu_entry_asm[1];
+/** called from crt0.S */
+void riscv_secondary_cpu_entry(int logical_cpu, uint64_t hart_id);
 
-void riscv_secondary_cpu_entry(int hart_id)
+void riscv_secondary_cpu_entry(int logical_cpu, uint64_t hart_id)
 {
-    int logical_cpu = hart_id_to_logical(hart_id);
-    if (logical_cpu == -1) {
-        LDR_PRINT("ERROR", logical_cpu, "invalid hart ID\n");
-        goto fail;
-    }
-    // TODO: print hart_id and check logical cpu is not -1
-    LDR_PRINT("INFO", logical_cpu, "secondary CPU entry\n");
+    LDR_PRINT("INFO", logical_cpu, "secondary CPU entry with hart id ");
+    puthex64(hart_id);
+    puts("\n");
 
     if (logical_cpu == 0) {
-        LDR_PRINT("ERROR", logical_cpu, "secondary CPU should not have loader id 0!!!\n");
+        LDR_PRINT("ERROR", logical_cpu, "secondary CPU should not have logical id 0!!!\n");
         goto fail;
     } else if (logical_cpu >= NUM_ACTIVE_CPUS) {
         LDR_PRINT("ERROR", logical_cpu, "secondary CPU should not be >NUM_ACTIVE_CPUS\n");
@@ -81,7 +91,7 @@ int plat_start_cpu(int logical_cpu)
     uint64_t stack_top = stack_base + STACK_SIZE;
     uint64_t sp = stack_top;
 
-    int hart_id = logical_to_hart_id[logical_cpu];
+    uint64_t hart_id = plat_get_hw_id(logical_cpu);
     // struct sbi_ret ret = sbi_call(SBI_EXT_HSM, SBI_HSM_HART_STOP, hart_id, 0, 0, 0, 0, 0);
     // if (ret.error != SBI_SUCCESS) {
     //     LDR_PRINT("ERROR", 0, "could not stop CPU, SBI call returned: ");
