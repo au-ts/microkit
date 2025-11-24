@@ -95,7 +95,7 @@ static void copy_data(void)
 }
 
 #ifdef CONFIG_PRINTING
-static int cpu_up = 0;
+static int print_lock = 0;
 #endif
 
 void start_kernel(int logical_cpu)
@@ -112,7 +112,7 @@ void start_kernel(int logical_cpu)
     LDR_PRINT("INFO", logical_cpu, "jumping to kernel\n");
 
 #ifdef CONFIG_PRINTING
-    __atomic_store_n(&cpu_up, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&print_lock, 1, __ATOMIC_RELEASE);
 #endif
 
     arch_jump_to_kernel(logical_cpu);
@@ -179,9 +179,9 @@ int main(void)
 
 #ifdef CONFIG_PRINTING
         /* wait for boot */
-        while (__atomic_load_n(&cpu_up, __ATOMIC_ACQUIRE) != 1);
+        while (__atomic_load_n(&print_lock, __ATOMIC_ACQUIRE) != 1);
         /* allow the next CPU to boot */
-        __atomic_store_n(&cpu_up, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&print_lock, 0, __ATOMIC_RELEASE);
 #endif
     }
 
