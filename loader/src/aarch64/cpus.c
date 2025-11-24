@@ -207,9 +207,7 @@ fail:
 int plat_start_cpu(int logical_cpu)
 {
     LDR_PRINT("INFO", 0, "Starting CPU ");
-    puts((const char[]) {
-        '0' + logical_cpu, '\0'
-    });
+    putdecimal(logical_cpu);
     puts("\n");
 
     if (logical_cpu >= NUM_ACTIVE_CPUS) {
