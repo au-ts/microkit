@@ -171,7 +171,7 @@ int main(void)
         r = plat_start_cpu(cpu);
         if (r != 0) {
             LDR_PRINT("ERROR", 0, "unable to start CPU ");
-            puthex32(cpu);
+            putdecimal(cpu);
             puts(" returned error: ");
             puthex32(r);
             goto fail;
