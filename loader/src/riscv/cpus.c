@@ -13,6 +13,10 @@
 #include "../uart.h"
 #include "sbi.h"
 
+/**
+ * TODO(ivanv): explain how hart IDs are used for RISC-V
+ **/
+
 #ifdef CONFIG_PLAT_STAR64
 static const uint64_t hart_ids[4] = {0x1, 0x2, 0x3, 0x4};
 #elif defined(CONFIG_PLAT_QEMU_RISCV_VIRT)
