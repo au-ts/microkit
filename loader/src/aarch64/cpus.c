@@ -13,8 +13,6 @@
 #include "../loader.h"
 #include "../uart.h"
 
-uint64_t arm_smc64_call(uint32_t function_id, uint64_t arg0, uint64_t arg1, uint64_t arg2);
-uint32_t arm_smc32_call(uint32_t function_id, uint32_t arg0, uint32_t arg1, uint32_t arg2);
 void arm_secondary_cpu_entry(int logical_cpu, uint64_t mpidr_el1);
 
 /**
