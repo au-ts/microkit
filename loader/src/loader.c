@@ -50,7 +50,7 @@ static void print_loader_data(void)
 {
     puts("LDR|INFO: flags:\n");
     print_flags();
-    puts("LDR|INFO: fernel:      entry:   ");
+    puts("LDR|INFO: kernel:      entry:   ");
     puthex64(loader_data->kernel_entry);
     puts("\n");
 
