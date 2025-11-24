@@ -130,7 +130,7 @@ static inline const char *psci_return_as_string(uint32_t ret)
  **/
 uint64_t arm_smc64_call(uint32_t function_id, uint64_t arg0, uint64_t arg1, uint64_t arg2)
 {
-    // Per Table 2-1, it should be 1 for SMC64.
+    // Per Table 2-1, BIT(30)==1 defines the SMC64 calling convention
     if ((function_id & BIT(30)) == 0) {
         puts("LDR|ERROR: SMC32 function used in SMC64 call\n");
         return PSCI_RETURN_INVALID_PARAMETERS;
@@ -156,7 +156,7 @@ uint64_t arm_smc64_call(uint32_t function_id, uint64_t arg0, uint64_t arg1, uint
  **/
 uint32_t arm_smc32_call(uint32_t function_id, uint32_t arg0, uint32_t arg1, uint32_t arg2)
 {
-    // Per Table 2-1, it should be 0 for SMC32.
+    // Per Table 2-1, BIT(30)==0 defines the SMC32 calling convention
     if ((function_id & BIT(30)) == BIT(30)) {
         puts("LDR|ERROR: SMC64 function used in SMC32 call\n");
         return PSCI_RETURN_INVALID_PARAMETERS;
