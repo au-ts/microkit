@@ -221,7 +221,7 @@ int plat_start_cpu(int logical_cpu)
      * In correspondence with what arm_secondary_cpu_entry does, we push
      * some useful information to the stack.
      **/
-    uint64_t* stack_base = _stack[logical_cpu];
+    uint64_t *stack_base = _stack[logical_cpu];
     /* aarch64 expects stack to be 16-byte aligned, and we push to the stack
        to have space for the arguments to the entrypoint */
     uint64_t *sp = (uint64_t *)((uintptr_t)stack_base + STACK_SIZE - 2 * sizeof(uint64_t));

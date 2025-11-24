@@ -96,7 +96,7 @@ int plat_start_cpu(int logical_cpu)
         return 1;
     }
 
-    uint64_t* stack_base = _stack[logical_cpu];
+    uint64_t *stack_base = _stack[logical_cpu];
     /* riscv expects stack to be 128-bit (16 byte) aligned, and we push to the stack
        to have space for the arguments to the entrypoint */
     uint64_t *sp = (uint64_t *)((uintptr_t)stack_base + STACK_SIZE - 2 * sizeof(uint64_t));
@@ -114,12 +114,12 @@ int plat_start_cpu(int logical_cpu)
     //     puts("\n");
     // }
     struct sbi_ret ret = sbi_call(
-        SBI_EXT_HSM,
-        SBI_HSM_HART_START,
-        /* hartid */ hart_id,
-        /* start_addr */ (uint64_t)riscv_secondary_cpu_entry_asm,
-        /* opaque */ (uint64_t)sp,
-        /* unused for this call */ 0,0, 0);
+                             SBI_EXT_HSM,
+                             SBI_HSM_HART_START,
+                             /* hartid */ hart_id,
+                             /* start_addr */ (uint64_t)riscv_secondary_cpu_entry_asm,
+                             /* opaque */ (uint64_t)sp,
+                             /* unused for this call */ 0, 0, 0);
 
     if (ret.error != SBI_SUCCESS) {
         LDR_PRINT("ERROR", 0, "could not start CPU, SBI call returned: ");
