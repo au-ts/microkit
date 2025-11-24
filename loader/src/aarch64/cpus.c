@@ -87,7 +87,7 @@ fail:
 
 int plat_start_cpu(int logical_cpu)
 {
-    LDR_PRINT("INFO", 0, "Starting CPU ");
+    LDR_PRINT("INFO", 0, "starting CPU ");
     putdecimal(logical_cpu);
     puts("\n");
 
