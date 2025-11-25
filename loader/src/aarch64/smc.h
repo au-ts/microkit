@@ -40,6 +40,8 @@
 #define PSCI_RETURN_DISABLED -8
 #define PSCI_RETURN_INVALID_ADDRESS -9
 
+/* this is fine for both 64-bit and 32-bit return codes as a 0xFFFFFFFF'XXXXXXXX code
+   will get truncated to the 0xXXXXXXXX which is still -1 as 32-bit */
 static inline const char *psci_return_as_string(uint32_t ret)
 {
     switch (ret) {
