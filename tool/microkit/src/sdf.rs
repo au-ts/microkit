@@ -178,6 +178,7 @@ pub struct ProtectionDomain {
     pub stack_size: u64,
     pub smc: bool,
     pub program_images: Vec<PathBuf>,
+    pub control: bool,
     pub maps: Vec<SysMap>,
     pub irqs: Vec<SysIrq>,
     pub setvars: Vec<SysSetVar>,
@@ -355,6 +356,7 @@ impl ProtectionDomain {
         let mut attrs = vec![
             "name",
             "priority",
+            "controller",
             "budget",
             "period",
             "passive",
@@ -491,6 +493,12 @@ impl ProtectionDomain {
             0
         };
 
+        let control = if let Some(xml_control) = node.attribute("controller") {
+            str_to_bool(xml_control).unwrap()
+        } else {
+            false
+        };
+
         if priority > PD_MAX_PRIORITY as u64 {
             return Err(value_error(
                 xml_sdf,
@@ -516,7 +524,7 @@ impl ProtectionDomain {
                     // }
 
                     // some other checks: check that the paths aren't the same
-                    // 
+                    //
 
                     let program_image_path = checked_lookup(xml_sdf, &child, "path")?;
                     // program_image = Some(Path::new(program_image_path).to_path_buf());
@@ -689,6 +697,7 @@ impl ProtectionDomain {
             has_children,
             parent: None,
             text_pos: xml_sdf.doc.text_pos_at(node.range().start),
+            control,
         })
     }
 }

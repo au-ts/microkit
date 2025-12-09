@@ -36,7 +36,7 @@ MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
 DOUBLE_ELF_OBJS := double_elf.o
 SECONDARY_OBJS := secondary.o
-CONTROLLER_OBJS := secondary.o
+CONTROLLER_OBJS := controller.o
 
 IMAGES := double_elf.elf secondary.elf controller.elf
 CFLAGS := -mstrict-align -nostdlib -ffreestanding -g -O3 -Wall  -Wno-unused-function -Werror -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
@@ -61,7 +61,7 @@ $(BUILD_DIR)/controller.elf: $(addprefix $(BUILD_DIR)/, $(CONTROLLER_OBJS))
 	$(LD) $(LDFLAGS) $^ $(LIBS) -Tmicrokit.ld -o $@
 
 $(BUILD_DIR)/secondary.elf: $(addprefix $(BUILD_DIR)/, $(SECONDARY_OBJS))
-	$(LD) $(LDFLAGS) $^ $(LIBS) -Tmicrokit_secondary.ld -o $@
+	$(LD) $(LDFLAGS) $^ $(LIBS) -Tmicrokit.ld -o $@
 
 $(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) double_elf.system
 	$(MICROKIT_TOOL) double_elf.system --search-path $(BUILD_DIR) --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE)

@@ -9,4 +9,7 @@
         <program_image path="double_elf.elf" /> 
         <program_image path="secondary.elf" />
     </protection_domain>
+    <protection_domain name="controller" priority="253">
+        <program_image path="controller.elf" />
+    </protection_domain>
 </system>

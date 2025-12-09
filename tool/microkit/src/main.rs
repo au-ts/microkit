@@ -9,6 +9,7 @@
 
 use elf::ElfFile;
 use loader::Loader;
+use microkit_tool::sdf::{SysSetVar, SysSetVarKind};
 use microkit_tool::{
     elf, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError, MemoryRegion,
     ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH,
@@ -421,8 +422,7 @@ pub fn pd_write_symbols(
                 if result.is_err() {
                     return Err(format!(
                         "No symbol named '{}' in ELF for PD '{}'",
-                        setvar.symbol,
-                        pd.name
+                        setvar.symbol, pd.name
                     ));
                 }
             }
@@ -488,7 +488,6 @@ fn virt_mem_regions_from_elf(elf: &ElfFile, alignment: u64) -> Vec<MemoryRegion>
 fn virt_mem_region_from_elf(elf: &ElfFile, alignment: u64) -> MemoryRegion {
     assert!(alignment > 0);
     assert!(elf.segments.iter().filter(|s| s.loadable).count() == 1);
-
     virt_mem_regions_from_elf(elf, alignment)[0]
 }
 
@@ -736,7 +735,7 @@ fn build_system(
     pd_elf_files: &Vec<Vec<ElfFile>>,
     kernel_elf: &ElfFile,
     monitor_elf: &ElfFile,
-    system: &SystemDescription,
+    system: &mut SystemDescription,
     invocation_table_size: u64,
     system_cnode_size: u64,
 ) -> Result<BuiltSystem, String> {
@@ -1174,7 +1173,8 @@ fn build_system(
     // Now we create additional MRs (and mappings) for the ELF files.
 
     // pd_elf_regions - a vector (pds) of vectors (elfs) of vectors (regions for the elf)
-    let mut pd_elf_regions: Vec<Vec<Vec<Region>>> = Vec::with_capacity(system.protection_domains.len());
+    let mut pd_elf_regions: Vec<Vec<Vec<Region>>> =
+        Vec::with_capacity(system.protection_domains.len());
     let mut extra_mrs = Vec::new();
     let mut pd_extra_maps: HashMap<&ProtectionDomain, Vec<SysMap>> = HashMap::new();
     for (i, pd) in system.protection_domains.iter().enumerate() {
@@ -1186,7 +1186,8 @@ fn build_system(
                     continue;
                 }
 
-                let segment_phys_addr = phys_addr_next + (segment.virt_addr % config.minimum_page_size);
+                let segment_phys_addr =
+                    phys_addr_next + (segment.virt_addr % config.minimum_page_size);
                 let region = Region::new(
                     format!("PD-ELF {}-{}-{}", pd.name, seg_idx, j),
                     segment_phys_addr,
@@ -1521,7 +1522,6 @@ fn build_system(
     let mut all_pd_ds: Vec<(usize, u64)> = Vec::new();
     let mut all_pd_pts: Vec<(usize, u64)> = Vec::new();
     for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
-
         let mut upper_directory_vaddrs = HashSet::new();
         let mut directory_vaddrs = HashSet::new();
         let mut page_table_vaddrs = HashSet::new();
@@ -2052,6 +2052,40 @@ fn build_system(
         cap_slot += 1;
     }
 
+    // // Create a TCB write cap for every PD and assign it to the controller PD.
+    // // find the pd index that corresponds to a controller pd
+
+    // let control_pds: Vec<&ProtectionDomain> = system
+    //     .protection_domains
+    //     .iter()
+    //     .filter(|pd| pd.control)
+    //     .collect();
+
+    // // can only have one controller pd per system (0 is ok as well)
+    // assert!(control_pds.len() <= 1);
+
+    // if control_pds.len() > 0 {
+    //     let control_pd = control_pds[0];
+
+    //     for (pd_idx, _) in system.protection_domains.iter().enumerate() {
+    //         let cap_idx = BASE_PD_TCB_CAP + pd_idx as u64;
+    //         assert!(cap_idx < PD_CAP_SIZE);
+    //         system_invocations.push(Invocation::new(
+    //             config,
+    //             InvocationArgs::CnodeMint {
+    //                 cnode: cnode_objs_by_pd[control_pd].cap_addr,
+    //                 dest_index: cap_idx,
+    //                 dest_depth: PD_CAP_BITS,
+    //                 src_root: root_cnode_cap,
+    //                 src_obj: tcb_objs[pd_idx].cap_addr,
+    //                 src_depth: config.cap_address_bits,
+    //                 rights: Rights::All as u64,
+    //                 badge: 0,
+    //             },
+    //         ));
+    //     }
+    // }
+
     // Create a fault endpoint cap for each virtual machine.
     // This will be the endpoint for the parent protection domain of the virtual machine.
     for vm in &virtual_machines {
@@ -2218,6 +2252,96 @@ fn build_system(
                             src_depth: config.cap_address_bits,
                             rights: Rights::All as u64,
                             badge: 0,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+
+    // Mint access to the child cnode in the CSpace of root PDs
+    for (pd_idx, _) in system.protection_domains.iter().enumerate() {
+        for (maybe_child_idx, maybe_child_pd) in system.protection_domains.iter().enumerate() {
+            // Before doing anything, check if we are dealing with a child PD
+            if let Some(parent_idx) = maybe_child_pd.parent {
+                // We are dealing with a child PD, now check if the index of its parent
+                // matches this iteration's PD.
+                if parent_idx == pd_idx {
+                    let cap_idx = BASE_PD_TCB_CAP
+                        + (system.protection_domains.len() as u64) // offset slot size as we used for tcb objs
+                        + maybe_child_pd.id.unwrap();
+                    assert!(cap_idx < PD_CAP_SIZE);
+                    system_invocations.push(Invocation::new(
+                        config,
+                        InvocationArgs::CnodeMint {
+                            cnode: cnode_objs[pd_idx].cap_addr,
+                            dest_index: cap_idx,
+                            dest_depth: PD_CAP_BITS,
+                            src_root: root_cnode_cap,
+                            src_obj: cnode_objs[maybe_child_idx].cap_addr,
+                            src_depth: config.cap_address_bits,
+                            rights: Rights::All as u64,
+                            badge: 0,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+
+    // Mint access to the child vnode in the CSpace of root PDs
+    for (pd_idx, _) in system.protection_domains.iter().enumerate() {
+        for (maybe_child_idx, maybe_child_pd) in system.protection_domains.iter().enumerate() {
+            // Before doing anything, check if we are dealing with a child PD
+            if let Some(parent_idx) = maybe_child_pd.parent {
+                // We are dealing with a child PD, now check if the index of its parent
+                // matches this iteration's PD.
+                if parent_idx == pd_idx {
+                    let cap_idx = BASE_PD_TCB_CAP
+                        + (2 * system.protection_domains.len() as u64) // offset slot size as we used for tcb objs
+                        + maybe_child_pd.id.unwrap();
+                    assert!(cap_idx < PD_CAP_SIZE);
+                    system_invocations.push(Invocation::new(
+                        config,
+                        InvocationArgs::CnodeMint {
+                            cnode: cnode_objs[pd_idx].cap_addr,
+                            dest_index: cap_idx,
+                            dest_depth: PD_CAP_BITS,
+                            src_root: root_cnode_cap,
+                            src_obj: vspace_objs[maybe_child_idx].cap_addr,
+                            src_depth: config.cap_address_bits,
+                            rights: Rights::All as u64,
+                            badge: 0,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+
+    // Mint access to the child vnode in the CSpace of root PDs
+    for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+        for (maybe_child_idx, maybe_child_pd) in system.protection_domains.iter().enumerate() {
+            // Before doing anything, check if we are dealing with a child PD
+            if let Some(parent_idx) = maybe_child_pd.parent {
+                // We are dealing with a child PD, now check if the index of its parent
+                // matches this iteration's PD.
+                if parent_idx == pd_idx {
+                    let cap_idx = BASE_PD_TCB_CAP
+                        + (3 * system.protection_domains.len() as u64) // offset slot size as we used for tcb objs
+                        + maybe_child_pd.id.unwrap();
+                    assert!(cap_idx < PD_CAP_SIZE);
+                    system_invocations.push(Invocation::new(
+                        config,
+                        InvocationArgs::CnodeMint {
+                            cnode: cnode_objs[pd_idx].cap_addr,
+                            dest_index: cap_idx,
+                            dest_depth: PD_CAP_BITS,
+                            src_root: root_cnode_cap,
+                            src_obj: fault_ep_endpoint_object.cap_addr,
+                            src_depth: config.cap_address_bits,
+                            rights: Rights::All as u64,
+                            badge: pd_idx as u64 + 1,
                         },
                     ));
                 }
@@ -2762,6 +2886,63 @@ fn build_system(
     let mut system_invocation_data: Vec<u8> = Vec::new();
     for system_invocation in &system_invocations {
         system_invocation.add_raw_invocation(config, &mut system_invocation_data);
+    }
+
+    // patch in cspace and vspace root and entry for each pd into controller
+
+    if let Some(control_id) = system
+        .protection_domains
+        .iter()
+        .position(|pd| pd.control == true)
+    {
+        let mut setvars: Vec<SysSetVar> = Vec::new();
+
+        for (pd_idx, pd) in system.protection_domains.iter().enumerate() {
+            if pd_idx != control_id {
+                let csymname = format!("pd_{pd_idx}_cnode_addr");
+                let vsymname = format!("pd_{pd_idx}_vnode_addr");
+                let capsymname = format!("pd_{pd_idx}_tcb_cap");
+                let entryname: String = format!("pd_{pd_idx}_entry_point");
+                setvars.push(SysSetVar {
+                    symbol: vsymname,
+                    kind: SysSetVarKind::Vaddr {
+                        address: pd_vspace_objs[pd_idx].cap_addr,
+                    },
+                });
+
+                setvars.push(SysSetVar {
+                    symbol: csymname,
+                    kind: SysSetVarKind::Vaddr {
+                        address: cnode_objs_by_pd[pd].cap_addr,
+                    },
+                });
+
+                setvars.push(SysSetVar {
+                    symbol: capsymname,
+                    kind: SysSetVarKind::Vaddr {
+                        address: tcb_objs[pd_idx].cap_addr,
+                    },
+                });
+
+                setvars.push(SysSetVar {
+                    symbol: entryname,
+                    kind: SysSetVarKind::Vaddr {
+                        address: pd_elf_files[pd_idx][0].entry,
+                    },
+                });
+            }
+        }
+
+        setvars.push(SysSetVar {
+            symbol: "fault_ep_addr".to_string(),
+            kind: SysSetVarKind::Vaddr {
+                address: fault_ep_endpoint_object.cap_addr,
+            },
+        });
+
+        if let Some(control_pd_insert) = system.protection_domains.get_mut(control_id) {
+            control_pd_insert.setvars.extend(setvars);
+        }
     }
 
     let pd_setvar_values: Vec<Vec<u64>> = system
@@ -3312,7 +3493,7 @@ fn main() -> Result<(), String> {
         "Microkit tool has various assumptions about the word size being 64-bits."
     );
 
-    let system = match parse(args.system, &xml, &kernel_config) {
+    let mut system = match parse(args.system, &xml, &kernel_config) {
         Ok(system) => system,
         Err(err) => {
             eprintln!("{err}");
@@ -3354,16 +3535,11 @@ fn main() -> Result<(), String> {
                     let elf = ElfFile::from_path(&path);
                     match elf {
                         // don't add elf to pd elfs if can't validate ELF
-                        Ok(el) => { per_pd_elfs.push(el) }
-                        Err(e) => { return Err(e) }
+                        Ok(el) => per_pd_elfs.push(el),
+                        Err(e) => return Err(e),
                     }
                 }
-                None => {
-                    return Err(format!(
-                        "unable to find program image: '{}'",
-                        img.display()
-                    ))
-                }
+                None => return Err(format!("unable to find program image: '{}'", img.display())),
             }
         }
         pd_elf_files.push(per_pd_elfs);
@@ -3379,7 +3555,7 @@ fn main() -> Result<(), String> {
             &pd_elf_files,
             &kernel_elf,
             &monitor_elf,
-            &system,
+            &mut system,
             invocation_table_size,
             system_cnode_size,
         )?;
@@ -3580,8 +3756,8 @@ fn main() -> Result<(), String> {
     )];
 
     // for every elf FILE
-        // for every REGION in the elf file
-            // push a region with the data of that specific elf file.
+    // for every REGION in the elf file
+    // push a region with the data of that specific elf file.
 
     for (i, pds) in built_system.pd_elf_regions.iter().enumerate() {
         for (e, elf_regions) in pds.iter().enumerate() {

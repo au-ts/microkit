@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright 2021, Breakaway Consulting Pty. Ltd.
+
+ SPDX-License-Identifier: BSD-2-Clause
+-->
+<system>
+    <protection_domain name="controller" priority="254" controller="true">
+        <program_image path="controller.elf" />
+        <protection_domain name="double_elf" priority="253" id="1">
+            <program_image path="double_elf.elf" />
+        </protection_domain>
+        <protection_domain name="secondary" priority="252" id="2"> 
+            <program_image path="secondary.elf" />
+        </protection_domain>
+    </protection_domain>
+
+    <channel>
+        <end pd="double_elf" id="0" pp="true" />
+        <end pd="controller" id="1" />
+    </channel>
+</system>
+
