@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<system>
+    <memory_region name="dynamic_elfs_region" size="0x100000" />
+    
+    <protection_domain name="controller" priority="254" controller="true">
+        <program_image path="controller.elf" />
+        <map mr="dynamic_elfs_region" vaddr="0x10000000" perms="r" />
+        
+        <protection_domain name="double_elf" priority="253" id="1">
+            <program_image path="double_elf.elf" />
+        </protection_domain>
+        <protection_domain name="secondary" priority="252" id="2"> 
+            <program_image path="secondary.elf" />
+        </protection_domain>
+    </protection_domain>
+
+    <channel>
+        <end pd="double_elf" id="0" pp="true" />
+        <end pd="controller" id="1" />
+    </channel>
+</system>

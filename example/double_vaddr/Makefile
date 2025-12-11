@@ -32,11 +32,17 @@ endif
 CC := $(TOOLCHAIN)-gcc
 LD := $(TOOLCHAIN)-ld
 AS := $(TOOLCHAIN)-as
+OBJCOPY := $(TOOLCHAIN)-objcopy
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
 DOUBLE_ELF_OBJS := double_elf.o
 SECONDARY_OBJS := secondary.o
 CONTROLLER_OBJS := controller.o
+
+# compiled but NOT in system description
+DYNAMIC_PD_SOURCES := dynamic_proc.c
+DYNAMIC_PD_OBJS := $(DYNAMIC_PD_SOURCES:.c=.o)
+DYNAMIC_PD_ELFS := $(DYNAMIC_PD_SOURCES:.c=.elf)
 
 IMAGES := double_elf.elf secondary.elf controller.elf
 CFLAGS := -mstrict-align -nostdlib -ffreestanding -g -O3 -Wall  -Wno-unused-function -Werror -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
@@ -45,6 +51,7 @@ LIBS := -lmicrokit
 
 IMAGE_FILE = $(BUILD_DIR)/loader.img
 REPORT_FILE = $(BUILD_DIR)/report.txt
+DYNAMIC_ELFS_BIN = $(BUILD_DIR)/dynamic_elfs.bin
 
 all: $(IMAGE_FILE)
 
@@ -63,5 +70,19 @@ $(BUILD_DIR)/controller.elf: $(addprefix $(BUILD_DIR)/, $(CONTROLLER_OBJS))
 $(BUILD_DIR)/secondary.elf: $(addprefix $(BUILD_DIR)/, $(SECONDARY_OBJS))
 	$(LD) $(LDFLAGS) $^ $(LIBS) -Tmicrokit.ld -o $@
 
-$(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) double_elf.system
+$(BUILD_DIR)/%.elf: $(BUILD_DIR)/%.o
+	$(LD) $(LDFLAGS) $^ $(LIBS) -Tmicrokit.ld -o $@
+
+$(DYNAMIC_ELFS_BIN): $(addprefix $(BUILD_DIR)/, $(DYNAMIC_PD_ELFS))
+	@mkdir -p $(BUILD_DIR)
+	@cat $^ > $@
+
+# Convert binary blob to object file with linker symbols
+$(BUILD_DIR)/dynamic_elfs.o: $(DYNAMIC_ELFS_BIN)
+	$(OBJCOPY) -I binary -O elf64-littleaarch64 \
+		--rename-section .data=.dynamic_elfs \
+		$< $@
+
+$(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) double_elf.system $(BUILD_DIR)/dynamic_elfs.o
 	$(MICROKIT_TOOL) double_elf.system --search-path $(BUILD_DIR) --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE)
+	@echo "Dynamic ELFs embedded in monitor"

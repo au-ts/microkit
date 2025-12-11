@@ -31,6 +31,14 @@ SECTIONS
         _data_end = .;
     } :all
 
+    /* Dynamic ELF modules embedded by objcopy */
+    .dynamic_elfs :
+    {
+        __dynamic_elfs_start = .;
+        *(.dynamic_elfs)
+        __dynamic_elfs_end = .;
+    } :all
+
     .bss :
     {
         _bss = .;

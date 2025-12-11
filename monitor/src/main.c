@@ -120,6 +120,78 @@ seL4_Word *system_invocation_data = (void *)0x80000000;
 
 struct untyped_info untyped_info;
 
+/* Dynamic ELF module library */
+#define MAX_DYNAMIC_MODULES 16
+
+struct dynamic_elf_module {
+    uintptr_t vaddr;
+    uint32_t size;
+};
+
+struct dynamic_elf_library {
+    uint32_t num_modules;
+    struct dynamic_elf_module modules[MAX_DYNAMIC_MODULES];
+};
+
+static struct dynamic_elf_library dynamic_elf_library = {0};
+
+/* Linker symbols for embedded dynamic ELFs */
+extern char __dynamic_elfs_start[];
+extern char __dynamic_elfs_end[];
+
+/* Check if data at address is a valid ELF */
+static int is_elf(const void *data)
+{
+    const uint32_t *magic = (const uint32_t *)data;
+    return *magic == 0x464c457f;  /* 0x7f, 'E', 'L', 'F' */
+}
+
+/* Initialize dynamic ELF library by scanning the embedded blob */
+static void init_dynamic_elf_library(void)
+{
+    uintptr_t blob_start = (uintptr_t)__dynamic_elfs_start;
+    uintptr_t blob_end = (uintptr_t)__dynamic_elfs_end;
+    uint32_t module_count = 0;
+    uintptr_t addr = blob_start;
+    
+    puts("MON|INFO: Scanning dynamic ELF blob at ");
+    puthex64(blob_start);
+    puts(" - ");
+    puthex64(blob_end);
+    puts("\n");
+    
+    while (addr < blob_end && module_count < MAX_DYNAMIC_MODULES) {
+        if (is_elf((void *)addr)) {
+            /* Found an ELF - find its end by scanning for next ELF or blob end */
+            uintptr_t next_addr = addr + 4;
+            while (next_addr < blob_end && !is_elf((void *)next_addr)) {
+                next_addr++;
+            }
+            
+            dynamic_elf_library.modules[module_count].vaddr = addr;
+            dynamic_elf_library.modules[module_count].size = next_addr - addr;
+            
+            puts("MON|INFO: Dynamic module ");
+            puthex32(module_count);
+            puts(" at ");
+            puthex64(addr);
+            puts(" size ");
+            puthex32(dynamic_elf_library.modules[module_count].size);
+            puts("\n");
+            
+            module_count++;
+            addr = next_addr;
+        } else {
+            addr++;
+        }
+    }
+    
+    dynamic_elf_library.num_modules = module_count;
+    puts("MON|INFO: Found ");
+    puthex32(module_count);
+    puts(" dynamic ELF modules\n");
+}
+
 void dump_untyped_info()
 {
     puts("\nUntyped Info Expected Memory Ranges\n");
@@ -1078,6 +1150,9 @@ void main(seL4_BootInfo *bi)
         dump_untyped_info();
         fail("MON|ERROR: found mismatch between boot info and untyped info");
     }
+
+    /* Initialize dynamic ELF module library */
+    init_dynamic_elf_library();
 
     puts("MON|INFO: Number of bootstrap invocations: ");
     puthex32(bootstrap_invocation_count);
