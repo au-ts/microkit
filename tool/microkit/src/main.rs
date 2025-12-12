@@ -7,6 +7,8 @@
 // we want our asserts, even if the compiler figures out they hold true already during compile-time
 #![allow(clippy::assertions_on_constants)]
 
+use elf::ElfFile;
+use loader::Loader;
 use microkit_tool::capdl::allocation::{
     simulate_capdl_object_alloc_algorithm, CapDLAllocEmulationErrorLevel,
 };
@@ -17,6 +19,7 @@ use microkit_tool::elf::ElfFile;
 use microkit_tool::loader::Loader;
 use microkit_tool::report::write_report;
 use microkit_tool::sdf::{parse, SysMemoryRegion, SysMemoryRegionPaddr};
+use microkit_tool::sdf::{SysSetVar, SysSetVarKind};
 use microkit_tool::sel4::{
     emulate_kernel_boot, emulate_kernel_boot_partial, Arch, Config, PlatformConfig,
     RiscvVirtualMemory,
@@ -25,17 +28,12 @@ use microkit_tool::symbols::patch_symbols;
 use microkit_tool::util::{
     human_size_strict, json_str, json_str_as_bool, json_str_as_u64, round_down, round_up,
 };
-use microkit_tool::{DisjointMemoryRegion, MemoryRegion};
-use std::collections::HashMap;
-use std::fs::{self, metadata};
-use elf::ElfFile;
-use loader::Loader;
-use microkit_tool::sdf::{SysSetVar, SysSetVarKind};
 use microkit_tool::{
     elf, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError, MemoryRegion,
     ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH,
     VM_MAX_NAME_LENGTH,
 };
+use microkit_tool::{DisjointMemoryRegion, MemoryRegion};
 use sdf::{
     parse, Channel, ProtectionDomain, SysMap, SysMapPerms, SysMemoryRegion, SysMemoryRegionKind,
     SystemDescription, VirtualMachine,
@@ -46,8 +44,10 @@ use sel4::{
     RiscvVirtualMemory, RiscvVmAttributes,
 };
 use std::cmp::{max, min};
+use std::collections::HashMap;
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::fs::{self, metadata};
 use std::io::{BufWriter, Write};
 use std::iter::zip;
 use std::mem::size_of;
@@ -584,7 +584,6 @@ fn main() -> Result<(), String> {
     );
 
     let mut system = match parse(args.system, &xml, &kernel_config) {
-    let mut system = match parse(args.system, &xml, &kernel_config) {
         Ok(system) => system,
         Err(err) => {
             eprintln!("{err}");
@@ -1091,12 +1090,7 @@ fn main() -> Result<(), String> {
     };
 
     let mut report_buf = BufWriter::new(report);
-    match write_report(
-        &mut report_buf,
-        &kernel_config,
-        &built_system,
-        &bootstrap_invocation_data,
-    ) {
+    match write_report(&mut report_buf, &kernel_config, &built_system) {
         Ok(()) => report_buf.flush().unwrap(),
         Err(err) => {
             return Err(format!(
