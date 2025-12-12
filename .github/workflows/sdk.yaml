@@ -15,6 +15,16 @@ on:
   push:
     branches: [ "main" ]
 
+env:
+  SEL4_VERSION: 14.0.0
+
+# To reduce the load we cancel any older runs of this workflow for the current
+# PR. For deployment to the main branch, the workflow will run on each push,
+# and the `run_id` parameter will prevent cancellation.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build_linux:
     name: Build SDK (Linux x86-64, ARM64)
@@ -29,16 +39,21 @@ jobs:
         uses: actions/checkout@v4
         with:
             repository: seL4/seL4
-            ref: microkit
+            ref: ${{ env.SEL4_VERSION }}
             path: seL4
       - name: Install SDK dependencies
         run: |
+          rustup install 1.90.0
+          rustup default 1.90.0
           rustup target add x86_64-unknown-linux-musl
+          rustup component add rust-src --toolchain 1.90.0-x86_64-unknown-linux-gnu
           rustup target add aarch64-unknown-linux-musl
+          rustup component add rust-src --toolchain 1.90.0-aarch64-unknown-linux-musl
           sudo apt update
           sudo apt install software-properties-common
           sudo add-apt-repository ppa:deadsnakes/ppa
           sudo apt install \
+            gcc-x86-64-linux-gnu \
             gcc-riscv64-unknown-elf \
             cmake pandoc device-tree-compiler ninja-build \
             texlive-latex-base texlive-latex-recommended \
@@ -72,7 +87,7 @@ jobs:
           path: release/microkit-sdk-${{ env.SDK_VERSION }}-linux-aarch64.tar.gz
   build_macos:
     name: Build SDK (macOS x86-64, ARM64)
-    runs-on: macos-14
+    runs-on: [self-hosted, macos, ARM64]
     steps:
       - name: Checkout Microkit repository
         uses: actions/checkout@v4
@@ -83,34 +98,21 @@ jobs:
         uses: actions/checkout@v4
         with:
             repository: seL4/seL4
-            ref: microkit
+            ref: ${{ env.SEL4_VERSION }}
             path: seL4
-      - name: Install SDK dependencies
-        run: |
-          rustup target add x86_64-apple-darwin
-          rustup target add aarch64-apple-darwin
-          brew tap riscv-software-src/riscv
-          brew install riscv-tools
-          brew install pandoc cmake dtc ninja qemu libxml2 python@3.12 coreutils texlive qemu
-          python3.12 -m venv pyenv
-          ./pyenv/bin/pip install --upgrade pip setuptools wheel
-          ./pyenv/bin/pip install -r requirements.txt
-      - name: Install AArch64 GCC toolchain
-        run: |
-          wget -O aarch64-toolchain.tar.gz https://sel4-toolchains.s3.us-east-2.amazonaws.com/arm-gnu-toolchain-12.2.rel1-darwin-x86_64-aarch64-none-elf.tar.xz%3Frev%3D09b11f159fc24fdda01e05bb32695dd5%26hash%3D6AAF4239F28AE17389AB3E611DFFE0A6
-          tar xf aarch64-toolchain.tar.gz
-          echo "$(pwd)/arm-gnu-toolchain-12.2.rel1-darwin-x86_64-aarch64-none-elf/bin" >> $GITHUB_PATH
+      - name: Get Nix dependencies
+        run: nix develop -c bash -c 'echo Hello World'
       - name: Set version
         run: echo "SDK_VERSION=$(./ci/dev_version.sh)" >> $GITHUB_ENV
       - name: Build SDK (x86-64)
-        run: ./pyenv/bin/python build_sdk.py --sel4=seL4 --version ${{ env.SDK_VERSION }}-macos-x86-64 --tool-target-triple=x86_64-apple-darwin
+        run: nix develop --ignore-environment -c bash -c "python3 build_sdk.py --sel4=seL4 --version ${{ env.SDK_VERSION }}-macos-x86-64 --gcc-toolchain-prefix-x86_64 x86_64-elf --gcc-toolchain-prefix-riscv64 riscv64-none-elf --tool-target-triple=x86_64-apple-darwin"
       - name: Upload SDK (x86-64)
         uses: actions/upload-artifact@v4
         with:
           name: microkit-sdk-${{ env.SDK_VERSION }}-macos-x86-64
           path: release/microkit-sdk-${{ env.SDK_VERSION }}-macos-x86-64.tar.gz
       - name: Build SDK (ARM64)
-        run: ./pyenv/bin/python build_sdk.py --sel4=seL4 --version ${{ env.SDK_VERSION }}-macos-aarch64 --tool-target-triple=aarch64-apple-darwin
+        run: nix develop --ignore-environment -c bash -c "python3 build_sdk.py --sel4=seL4 --version ${{ env.SDK_VERSION }}-macos-aarch64 --gcc-toolchain-prefix-x86_64 x86_64-elf --gcc-toolchain-prefix-riscv64 riscv64-none-elf --tool-target-triple=aarch64-apple-darwin"
       - name: Upload SDK (ARM64)
         uses: actions/upload-artifact@v4
         with:

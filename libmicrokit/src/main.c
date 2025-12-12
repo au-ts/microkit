@@ -31,6 +31,7 @@ seL4_MessageInfo_t microkit_signal_msg;
 seL4_Word microkit_irqs;
 seL4_Word microkit_notifications;
 seL4_Word microkit_pps;
+seL4_Word microkit_ioports;
 
 extern seL4_IPCBuffer __sel4_ipc_buffer_obj;
 
@@ -67,6 +68,23 @@ static void handler_loop(void)
 {
     bool have_reply = false;
     seL4_MessageInfo_t reply_tag;
+
+    /**
+     * Because of https://github.com/seL4/seL4/issues/1536
+     * let's acknowledge all the IRQs after we've started.
+     */
+    {
+        seL4_Word irqs_to_ack = microkit_irqs;
+        unsigned int idx = 0;
+        do {
+            if (irqs_to_ack & 1) {
+                microkit_irq_ack(idx);
+            }
+
+            irqs_to_ack >>= 1;
+            idx++;
+        } while (irqs_to_ack != 0);
+    }
 
     for (;;) {
         seL4_Word badge;

@@ -11,8 +11,24 @@ ifeq ($(strip $(ARCH)),)
 $(error ARCH must be specified)
 endif
 
-ifeq ($(strip $(TOOLCHAIN)),)
-$(error TOOLCHAIN must be specified)
+ifeq ($(strip $(TARGET_TRIPLE)),)
+$(error TARGET_TRIPLE must be specified)
+endif
+
+ifeq ($(strip $(LLVM)),True)
+  CC = clang -target $(TARGET_TRIPLE)
+  CPP = clang-cpp -target $(TARGET_TRIPLE)
+  AS = clang -target $(TARGET_TRIPLE)
+  LD = ld.lld
+  AR = llvm-ar
+  CFLAGS_TOOLCHAIN :=
+else
+  CC = $(TARGET_TRIPLE)-gcc
+  CPP = $(TARGET_TRIPLE)-cpp
+  AS = $(TARGET_TRIPLE)-as
+  LD = $(TARGET_TRIPLE)-ld
+  AR = $(TARGET_TRIPLE)-ar
+  CFLAGS_TOOLCHAIN := -Wno-maybe-uninitialized
 endif
 
 ifeq ($(ARCH),aarch64)
@@ -24,31 +40,37 @@ ifeq ($(ARCH),aarch64)
 else ifeq ($(ARCH),riscv64)
 	ASM_CPP_FLAGS := -x assembler-with-cpp -c -g -march=rv64imac_zicsr_zifencei -mabi=lp64
 	ASM_FLAGS := -march=rv64imac_zicsr_zifencei -mabi=lp64
-	CFLAGS_ARCH := -mcmodel=medany -march=rv64imac_zicsr_zifencei -mabi=lp64 -DARCH_riscv64
+	CFLAGS_ARCH := -mcmodel=medany -march=rv64imac_zicsr_zifencei -mabi=lp64
 
 	ARCH_DIR := riscv
+else ifeq ($(ARCH),x86_64)
+	CFLAGS_ARCH := -march=x86-64 -mtune=$(GCC_CPU)
+	ASM_CPP_FLAGS := -x assembler-with-cpp -c -g
+	ASM_FLAGS := -g -march=generic64
+
+	ARCH_DIR := x86_64
 else
 	$(error ARCH is unsupported)
 endif
 
-CFLAGS := -std=gnu11 -g -O3 -nostdlib -ffreestanding -Wall -Wno-maybe-uninitialized -Werror -I$(SEL4_SDK)/include $(CFLAGS_ARCH) -DARCH_$(ARCH)
+CFLAGS := -std=gnu11 -g -O3 -nostdlib -ffreestanding -Wall $(CFLAGS_TOOLCHAIN) -Werror -I$(SEL4_SDK)/include $(CFLAGS_ARCH) -DARCH_$(ARCH)
 
 PROGS := monitor.elf
-OBJECTS := main.o crt0.o debug.o util.o
-LINKSCRIPT := monitor.ld
+OBJECTS := main.o crt0.o util.o
+LINKSCRIPT := ../libmicrokit/microkit.ld
 
 $(BUILD_DIR)/%.o : src/$(ARCH_DIR)/%.S
-	$(TOOLCHAIN)gcc $(ASM_CPP_FLAGS) $< -o $@
+	$(CC) $(ASM_CPP_FLAGS) $< -o $@
 
 $(BUILD_DIR)/%.o : src/$(ARCH_DIR)/%.s
-	$(TOOLCHAIN)as -g $(ASM_FLAGS) $< -o $@
+	$(AS) -c -g $(ASM_FLAGS) $< -o $@
 
 $(BUILD_DIR)/%.o : src/%.c
-	$(TOOLCHAIN)gcc -c $(CFLAGS)  $< -o $@
+	$(CC) -c $(CFLAGS)  $< -o $@
 
 OBJPROG = $(addprefix $(BUILD_DIR)/, $(PROGS))
 
 all: $(OBJPROG)
 
 $(OBJPROG): $(addprefix $(BUILD_DIR)/, $(OBJECTS)) $(LINKSCRIPT)
-	$(TOOLCHAIN)ld -T$(LINKSCRIPT) $(addprefix $(BUILD_DIR)/, $(OBJECTS)) -o $@
+	$(LD) -z noexecstack -T$(LINKSCRIPT) $(addprefix $(BUILD_DIR)/, $(OBJECTS)) -o $@

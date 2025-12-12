@@ -1,5 +1,5 @@
 //
-// Copyright 2024, UNSW
+// Copyright 2025, UNSW
 //
 // SPDX-License-Identifier: BSD-2-Clause
 //
@@ -16,9 +16,13 @@
 /// but few seem to be concerned with giving any introspection regarding the parsed
 /// XML. The roxmltree project allows us to work on a lower-level than something based
 /// on serde and so we can report proper user errors.
-use crate::sel4::{Config, IrqTrigger, PageSize};
-use crate::util::str_to_bool;
+use crate::sel4::{
+    Arch, ArmRiscvIrqTrigger, Config, PageSize, X86IoapicIrqPolarity, X86IoapicIrqTrigger,
+};
+use crate::util::{ranges_overlap, str_to_bool};
 use crate::MAX_PDS;
+use std::collections::HashSet;
+use std::fmt::Display;
 use std::path::{Path, PathBuf};
 
 /// Events that come through entry points (e.g notified or protected) are given an
@@ -33,12 +37,15 @@ use std::path::{Path, PathBuf};
 const PD_MAX_ID: u64 = 61;
 const VCPU_MAX_ID: u64 = PD_MAX_ID;
 
+pub const MONITOR_PRIORITY: u8 = 255;
 const PD_MAX_PRIORITY: u8 = 254;
 /// In microseconds
-const BUDGET_DEFAULT: u64 = 1000;
+pub const BUDGET_DEFAULT: u64 = 1000;
 
-/// Default to a stack size of a single page
-const PD_DEFAULT_STACK_SIZE: u64 = 0x1000;
+pub const MONITOR_PD_NAME: &str = "monitor";
+
+/// Default to a stack size of 8KiB
+pub const PD_DEFAULT_STACK_SIZE: u64 = 0x2000;
 const PD_MIN_STACK_SIZE: u64 = 0x1000;
 const PD_MAX_STACK_SIZE: u64 = 1024 * 1024 * 16;
 
@@ -78,7 +85,7 @@ pub enum SysMapPerms {
     Execute = 4,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SysMap {
     pub mr: String,
     pub vaddr: u64,
@@ -89,20 +96,30 @@ pub struct SysMap {
     pub text_pos: Option<roxmltree::TextPos>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum SysMemoryRegionKind {
     User,
     Elf,
     Stack,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum SysMemoryRegionPaddr {
+    Unspecified,
+    // ToolAllocated means that the MR doesn't have an explicit paddr in SDF, but
+    // is a subject of a setvar region_paddr.
+    ToolAllocated(Option<u64>),
+    Specified(u64),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SysMemoryRegion {
     pub name: String,
     pub size: u64,
+    page_size_specified_by_user: bool,
     pub page_size: PageSize,
     pub page_count: u64,
-    pub phys_addr: Option<u64>,
+    pub phys_addr: SysMemoryRegionPaddr,
     pub text_pos: Option<roxmltree::TextPos>,
     /// For error reporting is useful to know whether the MR was created
     /// due to the user's SDF or created by the tool for setting up the
@@ -116,7 +133,7 @@ impl SysMemoryRegion {
     pub fn optimal_page_size(&self, config: &Config) -> u64 {
         let page_sizes = config.page_sizes();
         for i in (0..page_sizes.len()).rev() {
-            if self.size % page_sizes[i] == 0 {
+            if self.size.is_multiple_of(page_sizes[i]) {
                 return page_sizes[i];
             }
         }
@@ -127,16 +144,65 @@ impl SysMemoryRegion {
     pub fn page_size_bytes(&self) -> u64 {
         self.page_size as u64
     }
+
+    pub fn paddr(&self) -> Option<u64> {
+        match self.phys_addr {
+            SysMemoryRegionPaddr::Unspecified => None,
+            SysMemoryRegionPaddr::ToolAllocated(paddr_maybe) => paddr_maybe,
+            SysMemoryRegionPaddr::Specified(sdf_paddr) => Some(sdf_paddr),
+        }
+    }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
+pub enum SysIrqKind {
+    Conventional {
+        irq: u64,
+        trigger: ArmRiscvIrqTrigger,
+    },
+    /// x86-64 specific
+    IOAPIC {
+        ioapic: u64,
+        pin: u64,
+        trigger: X86IoapicIrqTrigger,
+        polarity: X86IoapicIrqPolarity,
+        vector: u64,
+    },
+    /// x86-64 specific
+    MSI {
+        pci_bus: u64,
+        pci_dev: u64,
+        pci_func: u64,
+        handle: u64,
+        vector: u64,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct SysIrq {
-    pub irq: u64,
     pub id: u64,
-    pub trigger: IrqTrigger,
+    pub kind: SysIrqKind,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+impl SysIrq {
+    pub fn irq_num(&self) -> u64 {
+        match self.kind {
+            SysIrqKind::Conventional { irq, .. } => irq,
+            SysIrqKind::IOAPIC { vector, .. } => vector,
+            SysIrqKind::MSI { vector, .. } => vector,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct IOPort {
+    pub id: u64,
+    pub addr: u64,
+    pub size: u64,
+    pub text_pos: roxmltree::TextPos,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum SysSetVarKind {
     // For size we do not store the size since when we parse mappings
     // we do not have access to the memory region yet. The size is resolved
@@ -144,9 +210,11 @@ pub enum SysSetVarKind {
     Size { mr: String },
     Vaddr { address: u64 },
     Paddr { region: String },
+    Id { id: u64 },
+    X86IoPortAddr { address: u64 },
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct SysSetVar {
     pub symbol: String,
     pub kind: SysSetVarKind,
@@ -158,6 +226,7 @@ pub struct ChannelEnd {
     pub id: u64,
     pub notify: bool,
     pub pp: bool,
+    pub setvar_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -166,7 +235,16 @@ pub struct Channel {
     pub end_b: ChannelEnd,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CpuCore(pub u8);
+
+impl Display for CpuCore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("cpu{:02}", self.0))
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct ProtectionDomain {
     /// Only populated for child protection domains
     pub id: Option<u64>,
@@ -179,8 +257,10 @@ pub struct ProtectionDomain {
     pub smc: bool,
     pub program_images: Vec<PathBuf>,
     pub control: bool,
+    pub cpu: CpuCore,
     pub maps: Vec<SysMap>,
     pub irqs: Vec<SysIrq>,
+    pub ioports: Vec<IOPort>,
     pub setvars: Vec<SysSetVar>,
     pub virtual_machine: Option<VirtualMachine>,
     /// Only used when parsing child PDs. All elements will be removed
@@ -190,11 +270,13 @@ pub struct ProtectionDomain {
     /// Index into the total list of protection domains if a parent
     /// protection domain exists
     pub parent: Option<usize>,
+    /// Value of the setvar_id attribute, if a parent protection domain exists
+    pub setvar_id: Option<String>,
     /// Location in the parsed SDF file
-    text_pos: roxmltree::TextPos,
+    text_pos: Option<roxmltree::TextPos>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct VirtualMachine {
     pub vcpus: Vec<VirtualCpu>,
     pub name: String,
@@ -204,9 +286,11 @@ pub struct VirtualMachine {
     pub period: u64,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct VirtualCpu {
     pub id: u64,
+    pub setvar_id: Option<String>,
+    pub cpu: CpuCore,
 }
 
 /// To avoid code duplication for handling protection domains
@@ -273,7 +357,7 @@ impl SysMap {
             return Err(value_error(
                 xml_sdf,
                 node,
-                format!("vaddr (0x{:x}) must be less than 0x{:x}", vaddr, max_vaddr),
+                format!("vaddr (0x{vaddr:x}) must be less than 0x{max_vaddr:x}"),
             ));
         }
 
@@ -347,6 +431,15 @@ impl ProtectionDomain {
         irqs
     }
 
+    pub fn ioport_bits(&self) -> u64 {
+        let mut ioports = 0;
+        for ioport in &self.ioports {
+            ioports |= 1 << ioport.id;
+        }
+
+        ioports
+    }
+
     fn from_xml(
         config: &Config,
         xml_sdf: &XmlSystemDescription,
@@ -364,21 +457,22 @@ impl ProtectionDomain {
             // The SMC field is only available in certain configurations
             // but we do the error-checking further down.
             "smc",
+            "cpu",
         ];
         if is_child {
             attrs.push("id");
+            attrs.push("setvar_id");
         }
         check_attributes(xml_sdf, node, &attrs)?;
 
         let name = checked_lookup(xml_sdf, node, "name")?.to_string();
 
-        let id = if is_child {
-            Some(sdf_parse_number(
-                checked_lookup(xml_sdf, node, "id")?,
-                node,
-            )?)
+        let (id, setvar_id) = if is_child {
+            let id = sdf_parse_number(checked_lookup(xml_sdf, node, "id")?, node)?;
+            let setvar_id = node.attribute("setvar_id").map(ToOwned::to_owned);
+            (Some(id), setvar_id)
         } else {
-            None
+            (None, None)
         };
 
         // If we do not have an explicit budget the period is equal to the default budget.
@@ -396,10 +490,7 @@ impl ProtectionDomain {
             return Err(value_error(
                 xml_sdf,
                 node,
-                format!(
-                    "budget ({}) must be less than, or equal to, period ({})",
-                    budget, period
-                ),
+                format!("budget ({budget}) must be less than, or equal to, period ({period})"),
             ));
         }
 
@@ -455,19 +546,35 @@ impl ProtectionDomain {
             }
         }
 
+        let cpu = CpuCore(
+            sdf_parse_number(node.attribute("cpu").unwrap_or("0"), node)?
+                .try_into()
+                .expect("cpu core must be between 0 and 255"),
+        );
+
+        if cpu.0 >= config.num_cores {
+            return Err(value_error(
+                xml_sdf,
+                node,
+                format!(
+                    "cpu core must be less than {}, got {}",
+                    config.num_cores, cpu.0
+                ),
+            ));
+        }
+
         #[allow(clippy::manual_range_contains)]
         if stack_size < PD_MIN_STACK_SIZE || stack_size > PD_MAX_STACK_SIZE {
             return Err(value_error(
                 xml_sdf,
                 node,
                 format!(
-                    "stack size must be between 0x{:x} bytes and 0x{:x} bytes",
-                    PD_MIN_STACK_SIZE, PD_MAX_STACK_SIZE
+                    "stack size must be between 0x{PD_MIN_STACK_SIZE:x} bytes and 0x{PD_MAX_STACK_SIZE:x} bytes"
                 ),
             ));
         }
 
-        if stack_size % config.page_sizes()[0] != 0 {
+        if !stack_size.is_multiple_of(config.page_sizes()[0]) {
             return Err(value_error(
                 xml_sdf,
                 node,
@@ -480,6 +587,7 @@ impl ProtectionDomain {
 
         let mut maps = Vec::new();
         let mut irqs = Vec::new();
+        let mut ioports = Vec::new();
         let mut setvars: Vec<SysSetVar> = Vec::new();
         let mut child_pds = Vec::new();
 
@@ -503,7 +611,7 @@ impl ProtectionDomain {
             return Err(value_error(
                 xml_sdf,
                 node,
-                format!("priority must be between 0 and {}", PD_MAX_PRIORITY),
+                format!("priority must be between 0 and {PD_MAX_PRIORITY}"),
             ));
         }
 
@@ -536,48 +644,24 @@ impl ProtectionDomain {
                     let map = SysMap::from_xml(xml_sdf, &child, true, map_max_vaddr)?;
 
                     if let Some(setvar_vaddr) = child.attribute("setvar_vaddr") {
-                        // Check that the symbol does not already exist
-                        for setvar in &setvars {
-                            if setvar_vaddr == setvar.symbol {
-                                return Err(value_error(
-                                    xml_sdf,
-                                    &child,
-                                    format!("setvar on symbol '{}' already exists", setvar_vaddr),
-                                ));
-                            }
-                        }
-
-                        setvars.push(SysSetVar {
+                        let setvar = SysSetVar {
                             symbol: setvar_vaddr.to_string(),
                             kind: SysSetVarKind::Vaddr { address: map.vaddr },
-                        });
+                        };
+                        checked_add_setvar(&mut setvars, setvar, xml_sdf, &child)?;
                     }
 
                     if let Some(setvar_size) = child.attribute("setvar_size") {
-                        // Check that the symbol does not already exist
-                        for setvar in &setvars {
-                            if setvar_size == setvar.symbol {
-                                return Err(value_error(
-                                    xml_sdf,
-                                    &child,
-                                    format!("setvar on symbol '{}' already exists", setvar_size),
-                                ));
-                            }
-                        }
-
-                        setvars.push(SysSetVar {
+                        let setvar = SysSetVar {
                             symbol: setvar_size.to_string(),
                             kind: SysSetVarKind::Size { mr: map.mr.clone() },
-                        });
+                        };
+                        checked_add_setvar(&mut setvars, setvar, xml_sdf, &child)?;
                     }
 
                     maps.push(map);
                 }
                 "irq" => {
-                    check_attributes(xml_sdf, &child, &["irq", "id", "trigger"])?;
-                    let irq = checked_lookup(xml_sdf, &child, "irq")?
-                        .parse::<u64>()
-                        .unwrap();
                     let id = checked_lookup(xml_sdf, &child, "id")?
                         .parse::<i64>()
                         .unwrap();
@@ -592,53 +676,363 @@ impl ProtectionDomain {
                         return Err(value_error(xml_sdf, &child, "id must be >= 0".to_string()));
                     }
 
-                    let trigger = if let Some(trigger_str) = child.attribute("trigger") {
-                        match trigger_str {
-                            "level" => IrqTrigger::Level,
-                            "edge" => IrqTrigger::Edge,
-                            _ => {
-                                return Err(value_error(
-                                    xml_sdf,
-                                    &child,
-                                    "trigger must be either 'level' or 'edge'".to_string(),
-                                ))
-                            }
-                        }
-                    } else {
-                        // Default the level triggered
-                        IrqTrigger::Level
-                    };
+                    if let Some(setvar_id) = child.attribute("setvar_id") {
+                        let setvar = SysSetVar {
+                            symbol: setvar_id.to_string(),
+                            kind: SysSetVarKind::Id { id: id as u64 },
+                        };
+                        checked_add_setvar(&mut setvars, setvar, xml_sdf, &child)?;
+                    }
 
-                    let irq = SysIrq {
-                        irq,
-                        id: id as u64,
-                        trigger,
-                    };
-                    irqs.push(irq);
-                }
-                "setvar" => {
-                    check_attributes(xml_sdf, &child, &["symbol", "region_paddr"])?;
-                    let symbol = checked_lookup(xml_sdf, &child, "symbol")?.to_string();
-                    let region = checked_lookup(xml_sdf, &child, "region_paddr")?.to_string();
-                    // Check that the symbol does not already exist
-                    for setvar in &setvars {
-                        if symbol == setvar.symbol {
+                    if let Some(irq_str) = child.attribute("irq") {
+                        if config.arch == Arch::X86_64 {
                             return Err(value_error(
                                 xml_sdf,
                                 &child,
-                                format!("setvar on symbol '{}' already exists", symbol),
+                                "ARM and RISC-V IRQs are not supported on x86".to_string(),
                             ));
                         }
+
+                        // ARM and RISC-V interrupts must have an "irq" attribute.
+                        check_attributes(xml_sdf, &child, &["irq", "id", "setvar_id", "trigger"])?;
+                        let irq = irq_str.parse::<u64>().unwrap();
+                        let trigger = if let Some(trigger_str) = child.attribute("trigger") {
+                            match trigger_str {
+                                "level" => ArmRiscvIrqTrigger::Level,
+                                "edge" => ArmRiscvIrqTrigger::Edge,
+                                _ => {
+                                    return Err(value_error(
+                                        xml_sdf,
+                                        &child,
+                                        "trigger must be either 'level' or 'edge'".to_string(),
+                                    ))
+                                }
+                            }
+                        } else {
+                            // Default to level triggered
+                            ArmRiscvIrqTrigger::Level
+                        };
+                        let irq = SysIrq {
+                            id: id as u64,
+                            kind: SysIrqKind::Conventional { irq, trigger },
+                        };
+                        irqs.push(irq);
+                    } else if let Some(pin_str) = child.attribute("pin") {
+                        if config.arch != Arch::X86_64 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "x86 I/O APIC IRQ isn't supported on ARM and RISC-V".to_string(),
+                            ));
+                        }
+
+                        // IOAPIC interrupts (X86_64) must have a "pin" attribute.
+                        check_attributes(
+                            xml_sdf,
+                            &child,
+                            &[
+                                "id",
+                                "setvar_id",
+                                "ioapic",
+                                "pin",
+                                "trigger",
+                                "polarity",
+                                "vector",
+                            ],
+                        )?;
+
+                        let ioapic = if let Some(ioapic_str) = child.attribute("ioapic") {
+                            ioapic_str.parse::<i64>().unwrap()
+                        } else {
+                            // Default to the first unit.
+                            0
+                        };
+                        if ioapic < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "ioapic must be >= 0".to_string(),
+                            ));
+                        }
+
+                        let pin = pin_str.parse::<i64>().unwrap();
+                        if pin < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "pin must be >= 0".to_string(),
+                            ));
+                        }
+
+                        let trigger = if let Some(trigger_str) = child.attribute("trigger") {
+                            match trigger_str {
+                                "level" => X86IoapicIrqTrigger::Level,
+                                "edge" => X86IoapicIrqTrigger::Edge,
+                                _ => {
+                                    return Err(value_error(
+                                        xml_sdf,
+                                        &child,
+                                        "trigger must be either 'level' or 'edge'".to_string(),
+                                    ))
+                                }
+                            }
+                        } else {
+                            // Default to level trigger.
+                            X86IoapicIrqTrigger::Level
+                        };
+                        let polarity = if let Some(polarity_str) = child.attribute("polarity") {
+                            match polarity_str {
+                                "low" => X86IoapicIrqPolarity::LowTriggered,
+                                "high" => X86IoapicIrqPolarity::HighTriggered,
+                                _ => {
+                                    return Err(value_error(
+                                        xml_sdf,
+                                        &child,
+                                        "polarity must be either 'low' or 'high'".to_string(),
+                                    ))
+                                }
+                            }
+                        } else {
+                            // Default to normal polarity
+                            X86IoapicIrqPolarity::HighTriggered
+                        };
+                        let vector = checked_lookup(xml_sdf, &child, "vector")?
+                            .parse::<i64>()
+                            .unwrap();
+                        if vector < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "vector must be >= 0".to_string(),
+                            ));
+                        }
+
+                        let irq = SysIrq {
+                            id: id as u64,
+                            kind: SysIrqKind::IOAPIC {
+                                ioapic: ioapic as u64,
+                                pin: pin as u64,
+                                trigger,
+                                polarity,
+                                vector: vector as u64,
+                            },
+                        };
+                        irqs.push(irq);
+                    } else if let Some(pcidev_str) = child.attribute("pcidev") {
+                        if config.arch != Arch::X86_64 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "x86 MSI IRQ isn't supported on ARM and RISC-V".to_string(),
+                            ));
+                        }
+
+                        // MSI interrupts (X86_64) have a "pcidev" attribute.
+                        check_attributes(
+                            xml_sdf,
+                            &child,
+                            &["id", "setvar_id", "pcidev", "handle", "vector"],
+                        )?;
+
+                        let pci_parts: Vec<i64> = pcidev_str
+                            .split([':', '.'])
+                            .map(str::trim)
+                            .map(|x| {
+                                i64::from_str_radix(x, 16).expect(
+                                    "Error: Failed to parse parts of the PCI device address",
+                                )
+                            })
+                            .collect();
+                        if pci_parts.len() != 3 {
+                            return Err(format!(
+                                "Error: failed to parse PCI address '{}' on element '{}'",
+                                pcidev_str,
+                                child.tag_name().name()
+                            ));
+                        }
+                        if pci_parts[0] < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "PCI bus must be >= 0".to_string(),
+                            ));
+                        }
+                        if pci_parts[1] < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "PCI device must be >= 0".to_string(),
+                            ));
+                        }
+                        if pci_parts[2] < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "PCI function must be >= 0".to_string(),
+                            ));
+                        }
+
+                        let handle = checked_lookup(xml_sdf, &child, "handle")?
+                            .parse::<i64>()
+                            .unwrap();
+                        if handle < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "handle must be >= 0".to_string(),
+                            ));
+                        }
+
+                        let vector = checked_lookup(xml_sdf, &child, "vector")?
+                            .parse::<i64>()
+                            .unwrap();
+                        if vector < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "vector must be >= 0".to_string(),
+                            ));
+                        }
+
+                        let irq = SysIrq {
+                            id: id as u64,
+                            kind: SysIrqKind::MSI {
+                                pci_bus: pci_parts[0] as u64,
+                                pci_dev: pci_parts[1] as u64,
+                                pci_func: pci_parts[2] as u64,
+                                handle: handle as u64,
+                                vector: vector as u64,
+                            },
+                        };
+                        irqs.push(irq);
+                    } else {
+                        // We can't figure out what type interrupt is specified.
+                        // Trigger an error.
+                        match config.arch {
+                            Arch::Aarch64 | Arch::Riscv64 => {
+                                checked_lookup(xml_sdf, &child, "irq")?
+                            }
+                            Arch::X86_64 => {
+                                checked_lookup(xml_sdf, &child, "pin")?;
+                                checked_lookup(xml_sdf, &child, "pcidev")?
+                            }
+                        };
                     }
-                    setvars.push(SysSetVar {
+                }
+                "ioport" => {
+                    if let Arch::X86_64 = config.arch {
+                        check_attributes(
+                            xml_sdf,
+                            &child,
+                            &["id", "setvar_id", "setvar_addr", "addr", "size"],
+                        )?;
+
+                        let id = checked_lookup(xml_sdf, &child, "id")?
+                            .parse::<i64>()
+                            .unwrap();
+                        if id > PD_MAX_ID as i64 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                format!("id must be < {}", PD_MAX_ID + 1),
+                            ));
+                        }
+                        if id < 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "id must be >= 0".to_string(),
+                            ));
+                        }
+
+                        if let Some(setvar_id) = child.attribute("setvar_id") {
+                            let setvar = SysSetVar {
+                                symbol: setvar_id.to_string(),
+                                kind: SysSetVarKind::Id { id: id as u64 },
+                            };
+                            checked_add_setvar(&mut setvars, setvar, xml_sdf, &child)?;
+                        }
+
+                        let addr =
+                            sdf_parse_number(checked_lookup(xml_sdf, &child, "addr")?, &child)?;
+
+                        if let Some(setvar_addr) = child.attribute("setvar_addr") {
+                            let setvar = SysSetVar {
+                                symbol: setvar_addr.to_string(),
+                                kind: SysSetVarKind::X86IoPortAddr { address: addr },
+                            };
+                            checked_add_setvar(&mut setvars, setvar, xml_sdf, &child)?;
+                        }
+
+                        let size = checked_lookup(xml_sdf, &child, "size")?
+                            .parse::<i64>()
+                            .unwrap();
+                        if size <= 0 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &child,
+                                "size must be > 0".to_string(),
+                            ));
+                        }
+
+                        ioports.push(IOPort {
+                            id: id as u64,
+                            addr,
+                            size: size as u64,
+                            text_pos: xml_sdf.doc.text_pos_at(node.range().start),
+                        })
+                    } else {
+                        return Err(value_error(
+                            xml_sdf,
+                            node,
+                            "I/O Ports are only available on x86".to_string(),
+                        ));
+                    }
+                }
+                "setvar" => {
+                    match config.arch {
+                        Arch::Aarch64 | Arch::Riscv64 => {}
+                        Arch::X86_64 => {
+                            return Err(value_error(
+                                xml_sdf,
+                                node,
+                                "setvar with 'region_paddr' for MR without a specified paddr is unsupported on x86_64".to_string(),
+                            ));
+                        }
+                    };
+
+                    check_attributes(xml_sdf, &child, &["symbol", "region_paddr"])?;
+                    let symbol = checked_lookup(xml_sdf, &child, "symbol")?.to_string();
+                    let region = checked_lookup(xml_sdf, &child, "region_paddr")?.to_string();
+                    let setvar = SysSetVar {
                         symbol,
                         kind: SysSetVarKind::Paddr { region },
-                    })
+                    };
+                    checked_add_setvar(&mut setvars, setvar, xml_sdf, &child)?;
                 }
                 "protection_domain" => {
-                    child_pds.push(ProtectionDomain::from_xml(config, xml_sdf, &child, true)?)
+                    let child_pd = ProtectionDomain::from_xml(config, xml_sdf, &child, true)?;
+
+                    if let Some(setvar_id) = &child_pd.setvar_id {
+                        let setvar = SysSetVar {
+                            symbol: setvar_id.to_string(),
+                            kind: SysSetVarKind::Id {
+                                id: child_pd.id.unwrap(),
+                            },
+                        };
+                        checked_add_setvar(&mut setvars, setvar, xml_sdf, &child)?;
+                    }
+
+                    child_pds.push(child_pd);
                 }
                 "virtual_machine" => {
+                    if !config.hypervisor {
+                        return Err(value_error(
+                            xml_sdf,
+                            node,
+                            "seL4 has not been built as a hypervisor, virtual machiens are disabled".to_string()
+                        ));
+                    }
                     if virtual_machine.is_some() {
                         return Err(value_error(
                             xml_sdf,
@@ -647,7 +1041,19 @@ impl ProtectionDomain {
                         ));
                     }
 
-                    virtual_machine = Some(VirtualMachine::from_xml(config, xml_sdf, &child)?);
+                    let vm = VirtualMachine::from_xml(config, xml_sdf, &child)?;
+
+                    for vcpu in &vm.vcpus {
+                        if let Some(setvar_id) = &vcpu.setvar_id {
+                            let setvar = SysSetVar {
+                                symbol: setvar_id.to_string(),
+                                kind: SysSetVarKind::Id { id: vcpu.id },
+                            };
+                            checked_add_setvar(&mut setvars, setvar, xml_sdf, &child)?;
+                        }
+                    }
+
+                    virtual_machine = Some(vm);
                 }
                 _ => {
                     let pos = xml_sdf.doc.text_pos_at(child.range().start);
@@ -669,8 +1075,7 @@ impl ProtectionDomain {
 
         if program_images.len() == 0 {
             return Err(format!(
-                "Error: missing 'program_image' element on protection_domain: '{}'",
-                name
+                "Error: missing 'program_image' element on protection_domain: '{name}'"
             ));
         }
 
@@ -688,16 +1093,19 @@ impl ProtectionDomain {
             stack_size,
             smc,
             // program_image: program_image.unwrap(),
+            control,
+            cpu,
             program_images,
             maps,
             irqs,
+            ioports,
             setvars,
             child_pds,
             virtual_machine,
             has_children,
             parent: None,
-            text_pos: xml_sdf.doc.text_pos_at(node.range().start),
-            control,
+            setvar_id,
+            text_pos: Some(xml_sdf.doc.text_pos_at(node.range().start)),
         })
     }
 }
@@ -726,10 +1134,7 @@ impl VirtualMachine {
             return Err(value_error(
                 xml_sdf,
                 node,
-                format!(
-                    "budget ({}) must be less than, or equal to, period ({})",
-                    budget, period
-                ),
+                format!("budget ({budget}) must be less than, or equal to, period ({period})"),
             ));
         }
 
@@ -750,7 +1155,7 @@ impl VirtualMachine {
             let child_name = child.tag_name().name();
             match child_name {
                 "vcpu" => {
-                    check_attributes(xml_sdf, &child, &["id"])?;
+                    check_attributes(xml_sdf, &child, &["id", "setvar_id", "cpu"])?;
                     let id = checked_lookup(xml_sdf, &child, "id")?
                         .parse::<u64>()
                         .unwrap();
@@ -774,7 +1179,26 @@ impl VirtualMachine {
                         }
                     }
 
-                    vcpus.push(VirtualCpu { id });
+                    let setvar_id = node.attribute("setvar_id").map(ToOwned::to_owned);
+
+                    let cpu = CpuCore(
+                        sdf_parse_number(child.attribute("cpu").unwrap_or("0"), node)?
+                            .try_into()
+                            .expect("cpu # fits in u8"),
+                    );
+
+                    if cpu.0 >= config.num_cores {
+                        return Err(value_error(
+                            xml_sdf,
+                            &child,
+                            format!(
+                                "cpu core must be less than {}, got {}",
+                                config.num_cores, cpu
+                            ),
+                        ));
+                    }
+
+                    vcpus.push(VirtualCpu { id, setvar_id, cpu });
                 }
                 "map" => {
                     // Virtual machines do not have program images and so we do not allow
@@ -795,8 +1219,7 @@ impl VirtualMachine {
 
         if vcpus.is_empty() {
             return Err(format!(
-                "Error: missing 'vcpu' element on virtual_machine: '{}'",
-                name
+                "Error: missing 'vcpu' element on virtual_machine: '{name}'"
             ));
         }
 
@@ -823,8 +1246,10 @@ impl SysMemoryRegion {
 
         let name = checked_lookup(xml_sdf, node, "name")?;
         let size = sdf_parse_number(checked_lookup(xml_sdf, node, "size")?, node)?;
+        let mut page_size_specified_by_user = false;
 
         let page_size = if let Some(xml_page_size) = node.attribute("page_size") {
+            page_size_specified_by_user = true;
             sdf_parse_number(xml_page_size, node)?
         } else {
             config.page_sizes()[0]
@@ -835,11 +1260,11 @@ impl SysMemoryRegion {
             return Err(value_error(
                 xml_sdf,
                 node,
-                format!("page size 0x{:x} not supported", page_size),
+                format!("page size 0x{page_size:x} not supported"),
             ));
         }
 
-        if size % page_size != 0 {
+        if !size.is_multiple_of(page_size) {
             return Err(value_error(
                 xml_sdf,
                 node,
@@ -848,17 +1273,20 @@ impl SysMemoryRegion {
         }
 
         let phys_addr = if let Some(xml_phys_addr) = node.attribute("phys_addr") {
-            Some(sdf_parse_number(xml_phys_addr, node)?)
+            SysMemoryRegionPaddr::Specified(sdf_parse_number(xml_phys_addr, node)?)
         } else {
-            None
+            // At this point it is unsure whether this MR is a subject of a setvar region_paddr.
+            SysMemoryRegionPaddr::Unspecified
         };
 
-        if phys_addr.is_some() && phys_addr.unwrap() % page_size != 0 {
-            return Err(value_error(
-                xml_sdf,
-                node,
-                "phys_addr is not aligned to the page size".to_string(),
-            ));
+        if let SysMemoryRegionPaddr::Specified(sdf_paddr) = phys_addr {
+            if !sdf_paddr.is_multiple_of(page_size) {
+                return Err(value_error(
+                    xml_sdf,
+                    node,
+                    "phys_addr is not aligned to the page size".to_string(),
+                ));
+            }
         }
 
         let page_count = size / page_size;
@@ -867,6 +1295,7 @@ impl SysMemoryRegion {
             name: name.to_string(),
             size,
             page_size: page_size.into(),
+            page_size_specified_by_user,
             page_count,
             phys_addr,
             text_pos: Some(xml_sdf.doc.text_pos_at(node.range().start)),
@@ -891,7 +1320,7 @@ impl ChannelEnd {
             ));
         }
 
-        check_attributes(xml_sdf, node, &["pd", "id", "pp", "notify"])?;
+        check_attributes(xml_sdf, node, &["pd", "id", "pp", "notify", "setvar_id"])?;
         let end_pd = checked_lookup(xml_sdf, node, "pd")?;
         let end_id = checked_lookup(xml_sdf, node, "id")?.parse::<i64>().unwrap();
 
@@ -928,11 +1357,13 @@ impl ChannelEnd {
             })?;
 
         if let Some(pd_idx) = pds.iter().position(|pd| pd.name == end_pd) {
+            let setvar_id = node.attribute("setvar_id").map(ToOwned::to_owned);
             Ok(ChannelEnd {
                 pd: pd_idx,
                 id: end_id.try_into().unwrap(),
                 notify,
                 pp,
+                setvar_id,
             })
         } else {
             Err(value_error(
@@ -1007,7 +1438,7 @@ fn check_maps(
         let pos = map.text_pos.unwrap();
         match maybe_mr {
             Some(mr) => {
-                if map.vaddr % mr.page_size_bytes() != 0 {
+                if !map.vaddr.is_multiple_of(mr.page_size_bytes()) {
                     return Err(format!(
                         "Error: invalid vaddr alignment on 'map' @ {}",
                         loc_string(xml_sdf, pos)
@@ -1148,7 +1579,7 @@ fn pd_tree_to_list(
                 "Error: duplicate id: {} in protection domain: '{}' @ {}",
                 child_id,
                 pd.name,
-                loc_string(xml_sdf, child_pd.text_pos)
+                loc_string(xml_sdf, child_pd.text_pos.unwrap())
             ));
         }
         // Also check that the child ID does not clash with any vCPU IDs, if the PD has a virtual machine
@@ -1156,7 +1587,7 @@ fn pd_tree_to_list(
             for vcpu in &vm.vcpus {
                 if child_id == vcpu.id {
                     return Err(format!("Error: duplicate id: {} clashes with virtual machine vcpu id in protection domain: '{}' @ {}",
-                                        child_id, pd.name, loc_string(xml_sdf, child_pd.text_pos)));
+                                        child_id, pd.name, loc_string(xml_sdf, child_pd.text_pos.unwrap())));
                 }
             }
         }
@@ -1210,7 +1641,7 @@ fn pd_flatten(
 pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescription, String> {
     let doc = match roxmltree::Document::parse(xml) {
         Ok(doc) => doc,
-        Err(err) => return Err(format!("Could not parse '{}': {}", filename, err)),
+        Err(err) => return Err(format!("Could not parse '{filename}': {err}")),
     };
 
     let xml_sdf = XmlSystemDescription {
@@ -1266,10 +1697,28 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         }
     }
 
-    let pds = pd_flatten(&xml_sdf, root_pds)?;
+    let mut pds = pd_flatten(&xml_sdf, root_pds)?;
 
     for node in channel_nodes {
-        channels.push(Channel::from_xml(&xml_sdf, &node, &pds)?);
+        let ch = Channel::from_xml(&xml_sdf, &node, &pds)?;
+
+        if let Some(setvar_id) = &ch.end_a.setvar_id {
+            let setvar = SysSetVar {
+                symbol: setvar_id.to_string(),
+                kind: SysSetVarKind::Id { id: ch.end_a.id },
+            };
+            checked_add_setvar(&mut pds[ch.end_a.pd].setvars, setvar, &xml_sdf, &node)?;
+        }
+
+        if let Some(setvar_id) = &ch.end_b.setvar_id {
+            let setvar = SysSetVar {
+                symbol: setvar_id.to_string(),
+                kind: SysSetVarKind::Id { id: ch.end_b.id },
+            };
+            checked_add_setvar(&mut pds[ch.end_b.pd].setvars, setvar, &xml_sdf, &node)?;
+        }
+
+        channels.push(ch);
     }
 
     // Now that we have parsed everything in the system description we can validate any
@@ -1294,6 +1743,11 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
                 pd.name
             ));
         }
+        if pd.name == MONITOR_PD_NAME {
+            return Err(
+                "Error: the PD name 'monitor' is reserved for the Microkit Monitor.".to_string(),
+            );
+        }
     }
 
     for mr in &mrs {
@@ -1305,16 +1759,16 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         }
     }
 
-    let mut vms = vec![];
+    let mut vms: Vec<&String> = vec![];
     for pd in &pds {
         if let Some(vm) = &pd.virtual_machine {
-            if vms.contains(&vm) {
+            if vms.contains(&&vm.name) {
                 return Err(format!(
                     "Error: duplicate virtual machine name '{}'.",
                     vm.name
                 ));
             }
-            vms.push(vm);
+            vms.push(&vm.name);
         }
     }
 
@@ -1322,13 +1776,17 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
     let mut all_irqs = Vec::new();
     for pd in &pds {
         for sysirq in &pd.irqs {
-            if all_irqs.contains(&sysirq.irq) {
+            if all_irqs.contains(&sysirq.irq_num()) {
                 return Err(format!(
                     "Error: duplicate irq: {} in protection domain: '{}' @ {}:{}:{}",
-                    sysirq.irq, pd.name, filename, pd.text_pos.row, pd.text_pos.col
+                    sysirq.irq_num(),
+                    pd.name,
+                    filename,
+                    pd.text_pos.unwrap().row,
+                    pd.text_pos.unwrap().col
                 ));
             }
-            all_irqs.push(sysirq.irq);
+            all_irqs.push(sysirq.irq_num());
         }
     }
 
@@ -1340,7 +1798,11 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             if ch_ids[pd_idx].contains(&sysirq.id) {
                 return Err(format!(
                     "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
-                    sysirq.id, pd.name, filename, pd.text_pos.row, pd.text_pos.col
+                    sysirq.id,
+                    pd.name,
+                    filename,
+                    pd.text_pos.unwrap().row,
+                    pd.text_pos.unwrap().col
                 ));
             }
             ch_ids[pd_idx].push(sysirq.id);
@@ -1352,7 +1814,11 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             let pd = &pds[ch.end_a.pd];
             return Err(format!(
                 "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
-                ch.end_a.id, pd.name, filename, pd.text_pos.row, pd.text_pos.col
+                ch.end_a.id,
+                pd.name,
+                filename,
+                pd.text_pos.unwrap().row,
+                pd.text_pos.unwrap().col
             ));
         }
 
@@ -1360,7 +1826,11 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             let pd = &pds[ch.end_b.pd];
             return Err(format!(
                 "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
-                ch.end_b.id, pd.name, filename, pd.text_pos.row, pd.text_pos.col
+                ch.end_b.id,
+                pd.name,
+                filename,
+                pd.text_pos.unwrap().row,
+                pd.text_pos.unwrap().col
             ));
         }
 
@@ -1384,6 +1854,56 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         ch_ids[ch.end_b.pd].push(ch.end_b.id);
     }
 
+    // Ensure no duplicate I/O Ports
+    for pd in &pds {
+        let mut seen_ioport_ids: Vec<u64> = Vec::new();
+        for ioport in &pd.ioports {
+            if seen_ioport_ids.contains(&ioport.id) {
+                return Err(format!(
+                    "Error: duplicate I/O port id: {} in protection domain: '{}' @ {}:{}:{}",
+                    ioport.id,
+                    pd.name,
+                    filename,
+                    pd.text_pos.unwrap().row,
+                    pd.text_pos.unwrap().col
+                ));
+            } else {
+                seen_ioport_ids.push(ioport.id);
+            }
+        }
+    }
+
+    // Ensure I/O Ports' size are valid and they don't overlap.
+    let mut seen_ioports: Vec<(&str, &IOPort)> = Vec::new();
+    for pd in &pds {
+        for this_ioport in &pd.ioports {
+            for (seen_pd_name, seen_ioport) in &seen_ioports {
+                let left_range = this_ioport.addr..this_ioport.addr + this_ioport.size - 1;
+                let right_range = seen_ioport.addr..seen_ioport.addr + seen_ioport.size - 1;
+                if ranges_overlap(&left_range, &right_range) {
+                    return Err(format!(
+                            "Error: I/O port id: {}, inclusive range: [{:#x}, {:#x}] in protection domain: '{}' @ {}:{}:{} overlaps with I/O port id: {}, inclusive range: [{:#x}, {:#x}] in protection domain: '{}' @ {}:{}:{}",
+                            this_ioport.id,
+                            left_range.start,
+                            left_range.end,
+                            pd.name,
+                            filename,
+                            this_ioport.text_pos.row,
+                            this_ioport.text_pos.col,
+                            seen_ioport.id,
+                            right_range.start,
+                            right_range.end,
+                            seen_pd_name,
+                            filename,
+                            seen_ioport.text_pos.row,
+                            seen_ioport.text_pos.col
+                        ));
+                }
+            }
+            seen_ioports.push((&pd.name, this_ioport));
+        }
+    }
+
     // Ensure that all maps are correct
     for pd in &pds {
         check_maps(&xml_sdf, &mrs, pd, &pd.maps)?;
@@ -1395,9 +1915,9 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
     // Ensure MRs with physical addresses do not overlap
     let mut checked_mrs = Vec::with_capacity(mrs.len());
     for mr in &mrs {
-        if let Some(phys_addr) = mr.phys_addr {
-            let mr_start = phys_addr;
-            let mr_end = phys_addr + mr.size;
+        if let SysMemoryRegionPaddr::Specified(sdf_paddr) = mr.phys_addr {
+            let mr_start = sdf_paddr;
+            let mr_end = sdf_paddr + mr.size;
 
             for (name, start, end) in &checked_mrs {
                 if !(mr_start >= *end || mr_end <= *start) {
@@ -1443,12 +1963,16 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         }
     }
 
-    // Optimise page size of MRs, if we can
+    // Optimise page size of MRs, if the page size is not specified
     for mr in &mut mrs {
+        if mr.page_size_specified_by_user {
+            continue;
+        }
+
         // If the largest possible page size based on the MR's size is already
         // set as its page size, skip it.
-        let mr_larget_page_size = mr.optimal_page_size(config);
-        if mr.page_size_bytes() == mr_larget_page_size {
+        let mr_largest_page_size = mr.optimal_page_size(config);
+        if mr.page_size_bytes() == mr_largest_page_size {
             continue;
         }
 
@@ -1463,8 +1987,8 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
                 }
             })
             .collect();
-        if let Some(paddr) = mr.phys_addr {
-            addrs.push(paddr);
+        if let SysMemoryRegionPaddr::Specified(sdf_paddr) = mr.phys_addr {
+            addrs.push(sdf_paddr);
         }
 
         // Get all page sizes larger than the MR's current one, sorted from
@@ -1478,7 +2002,10 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         // Go through potential page sizes and check if the alignment is valid
         // on all addresses we're mapping the MR into.
         for larger_page_size in larger_page_sizes {
-            if addrs.iter().any(|addr| addr % larger_page_size != 0) {
+            if addrs
+                .iter()
+                .any(|addr| !addr.is_multiple_of(larger_page_size))
+            {
                 continue;
             }
 
@@ -1488,9 +2015,49 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         }
     }
 
+    // If any MRs are subject of a setvar region_paddr, update its phys_addr field to indicate tool allocated.
+    let mut mr_names_with_setvar_paddr = HashSet::new();
+    for pd in pds.iter() {
+        for setvar in pd.setvars.iter() {
+            if let SysSetVarKind::Paddr { region } = &setvar.kind {
+                mr_names_with_setvar_paddr.insert(region);
+            };
+        }
+    }
+    for mr in mrs.iter_mut() {
+        if mr_names_with_setvar_paddr.contains(&mr.name)
+            && mr.phys_addr == SysMemoryRegionPaddr::Unspecified
+        {
+            // The actual allocation is done by another part of the tool.
+            mr.phys_addr = SysMemoryRegionPaddr::ToolAllocated(None);
+        }
+    }
+
     Ok(SystemDescription {
         protection_domains: pds,
         memory_regions: mrs,
         channels,
     })
+}
+
+fn checked_add_setvar(
+    setvars: &mut Vec<SysSetVar>,
+    setvar: SysSetVar,
+    xml_sdf: &XmlSystemDescription<'_>,
+    node: &roxmltree::Node<'_, '_>,
+) -> Result<(), String> {
+    // Check that the symbol does not already exist
+    for other_setvar in setvars.iter() {
+        if setvar.symbol == other_setvar.symbol {
+            return Err(value_error(
+                xml_sdf,
+                node,
+                format!("setvar on symbol '{}' already exists", setvar.symbol),
+            ));
+        }
+    }
+
+    setvars.push(setvar);
+
+    Ok(())
 }

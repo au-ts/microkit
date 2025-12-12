@@ -7,21 +7,16 @@
 .extern main
 .extern __global_pointer$
 
-#ifndef FIRST_HART_ID
+#include <kernel/gen_config.h>
+
+#ifndef CONFIG_FIRST_HART_ID
 #error "Loader must be defined with FIRST_HART_ID"
 #endif
 
+#include "../loader.h"
+#include "sbi.h"
+
 .section ".text.start"
-
-#define STACK_SIZE 4096
-
-/* SBI commands for the HSM extension */
-#define SBI_HSM_BASE_EID 0x48534DULL
-#define SBI_HSM_BASE_HART_START_FID 0
-#define SBI_HSM_BASE_HART_STOP_FID 1
-/* SBI commands for the base extension */
-#define SBI_EXT_BASE_EID 0x10
-#define SBI_EXT_BASE_PROBE_EXT_FID 3
 
 /* Unfortunately, the latest version of the SBI (v1.0.0) specification does not
  * specify the starting state of supervisor software.
@@ -73,9 +68,9 @@ _start:
    * error code if not. On SBI_SUCCESS the value in a1 is 0 if the extension is
    * not available or an extension-specific non-zero value if it is available.
    */
-  li a7, SBI_EXT_BASE_EID
-  li a6, SBI_EXT_BASE_PROBE_EXT_FID
-  li a0, SBI_HSM_BASE_EID
+  li a7, SBI_BASE_EID
+  li a6, SBI_BASE_PROBE_EXT_FID
+  li a0, SBI_BASE_EID
   ecall /* call SBI to probe for HSM extension */
   mv a2, a0 /* move SBI call generic return code to a2 as we need a0 */
   mv a3, a1 /* move SBI call error return code to a3 as we need a1 */
@@ -85,23 +80,27 @@ _start:
   beqz a3, _start1 /* goto _start1 if HSM extension is missing */
 
   /* Check if we are running on the hart we expect on, FIRST_HART_ID */
-  li s1, FIRST_HART_ID
+  li s1, CONFIG_FIRST_HART_ID
   beq  a0, s1, _start1 /* goto _start1 if we are on FIRST_HART_ID */
 
   /* Use HSM extension to start hart FIRST_HART_ID. */
 hsm_switch_hart:
-  li a7, SBI_HSM_BASE_EID
-  li a6, SBI_HSM_BASE_HART_START_FID
-  li a0, FIRST_HART_ID
+  li a7, SBI_HSM_EID
+  li a6, SBI_HSM_HART_START_FID
+  li a0, CONFIG_FIRST_HART_ID
   mv a2, s2 /* dtb address to be passed in a1 when new hart starts is 3rd parameter */
   la a1, _start1 /* where to start the hart */
   ecall /* call SBI to start hart FIRST_HART_ID */
 
-  /* Since we are not the designated primary hart, continue the boot process as
-   * secondary hart
+  /*
+   * We are not the intended boot hart, we turn the hart off by doing a SBI call.
+   * In the case of booting seL4 with multiple harts, this hart will be turned on
+   * explicitly later on in the booting process.
    */
   mv a0, s0 /* restore a0 to hold hart ID passed by OpenSBI */
-  j spin_hart /* Spin any hart that isn't FIRST_HART_ID since we only support single-core right now. */
+  li a7, SBI_HSM_EID
+  li a6, SBI_HSM_HART_STOP_FID
+  ecall
 
 relocate:
   /* Save the return address */
@@ -224,3 +223,19 @@ secondary_harts:
 spin_hart:
   wfi
   j spin_hart
+
+.global riscv_secondary_cpu_entry_asm
+riscv_secondary_cpu_entry_asm:
+
+.option push
+.option norelax
+1:auipc gp, %pcrel_hi(__global_pointer$)
+  addi  gp, gp, %pcrel_lo(1b)
+.option pop
+
+  /* the HSM passes a0 as hartid, and a1 the 'opaque' value (our stack) */
+  mv sp, a1
+  /* retrieve our saved logical cpu and put in a1 */
+  ld a1, 0(sp)
+  la s0, riscv_secondary_cpu_entry
+  jr s0

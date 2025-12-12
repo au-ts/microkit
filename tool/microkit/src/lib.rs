@@ -4,15 +4,23 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
+use std::{cmp::min, fmt};
+
+use crate::{
+    sel4::{Config, PageSize},
+    util::struct_to_bytes,
+};
+
+pub mod capdl;
+pub mod crc32;
 pub mod elf;
 pub mod loader;
+pub mod report;
 pub mod sdf;
 pub mod sel4;
+pub mod symbols;
+pub mod uimage;
 pub mod util;
-
-use sel4::Config;
-use std::cmp::min;
-use std::fmt;
 
 // Note that these values are used in the monitor so should also be changed there
 // if any of these were to change.
@@ -24,11 +32,37 @@ pub const MAX_VMS: usize = 63;
 pub const PD_MAX_NAME_LENGTH: usize = 64;
 pub const VM_MAX_NAME_LENGTH: usize = 64;
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UntypedObject {
     pub cap: u64,
     pub region: MemoryRegion,
     pub is_device: bool,
+}
+
+pub const UNTYPED_DESC_PADDING: usize = size_of::<u64>() - (2 * size_of::<u8>());
+#[repr(C)]
+struct SeL4UntypedDesc {
+    paddr: u64,
+    size_bits: u8,
+    is_device: u8,
+    padding: [u8; UNTYPED_DESC_PADDING],
+}
+
+impl From<&UntypedObject> for SeL4UntypedDesc {
+    fn from(value: &UntypedObject) -> Self {
+        Self {
+            paddr: value.base(),
+            size_bits: value.size_bits() as u8,
+            is_device: if value.is_device { 1 } else { 0 },
+            padding: [0u8; UNTYPED_DESC_PADDING],
+        }
+    }
+}
+
+/// Getting a `seL4_UntypedDesc` for patching into the initialiser
+pub fn serialise_ut(ut: &UntypedObject) -> Vec<u8> {
+    let sel4_untyped_desc: SeL4UntypedDesc = ut.into();
+    unsafe { struct_to_bytes(&sel4_untyped_desc).to_vec() }
 }
 
 impl UntypedObject {
@@ -74,7 +108,7 @@ impl Region {
     }
 
     pub fn data<'a>(&self, elf: &'a elf::ElfFile) -> &'a Vec<u8> {
-        &elf.segments[self.segment_idx].data
+        elf.segments[self.segment_idx].data()
     }
 }
 
@@ -125,11 +159,11 @@ impl MemoryRegion {
         // based on the kernel virtual addresses, rather than the physical
         // memory addresses. This has a subtle side affect in the process of
         // creating untypeds as even though all the kernel virtual addresses are
-        // a constant offest of the corresponding physical address, overflow can
+        // a constant offset of the corresponding physical address, overflow can
         // occur when dealing with virtual addresses. This precisely occurs in
         // this function, causing different regions depending on whether
         // you use kernel virtual or physical addresses. In order to properly
-        // emulate the kernel booting process, we also have to emulate the unsigned interger
+        // emulate the kernel booting process, we also have to emulate the unsigned integer
         // overflow that can occur.
         let mut regions = Vec::new();
         let mut base = config.paddr_to_kernel_vaddr(self.base);
@@ -158,7 +192,7 @@ impl MemoryRegion {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 pub struct DisjointMemoryRegion {
     pub regions: Vec<MemoryRegion>,
 }
@@ -176,6 +210,13 @@ impl DisjointMemoryRegion {
     }
 
     pub fn insert_region(&mut self, base: u64, end: u64) {
+        assert!(base < end);
+
+        if self.regions.is_empty() {
+            self.regions.push(MemoryRegion::new(base, end));
+            return;
+        }
+
         let mut insert_idx = self.regions.len();
         for (idx, region) in self.regions.iter().enumerate() {
             if end <= region.base {
@@ -183,10 +224,19 @@ impl DisjointMemoryRegion {
                 break;
             }
         }
-        // FIXME: Should extend here if adjacent rather than
-        // inserting now
-        self.regions
-            .insert(insert_idx, MemoryRegion::new(base, end));
+        // Merge if contiguous
+        if insert_idx == 0 && self.regions.first().unwrap().base == end {
+            self.regions.first_mut().unwrap().base = base;
+        } else if insert_idx == self.regions.len() && self.regions.last().unwrap().end == base {
+            self.regions.last_mut().unwrap().end = end;
+        } else if insert_idx < self.regions.len() && end == self.regions[insert_idx].base {
+            self.regions[insert_idx].base = base;
+        } else if insert_idx < self.regions.len() && base == self.regions[insert_idx].end {
+            self.regions[insert_idx].end = end;
+        } else {
+            self.regions
+                .insert(insert_idx, MemoryRegion::new(base, end));
+        }
         self.check();
     }
 
@@ -199,7 +249,7 @@ impl DisjointMemoryRegion {
             }
         }
         if maybe_idx.is_none() {
-            panic!("Internal error: attempting to remove region [0x{:x}-0x{:x}) that is not currently covered", base, end);
+            panic!("Internal error: attempting to remove region [0x{base:x}-0x{end:x}) that is not currently covered");
         }
 
         let idx = maybe_idx.unwrap();
@@ -240,29 +290,34 @@ impl DisjointMemoryRegion {
 
     /// Allocate region of 'size' bytes, returning the base address.
     /// The allocated region is removed from the disjoint memory region.
-    /// Allocation policy is simple first fit.
+    /// Allocation policy is simple first fit in bottom up direction.
     /// Possibly a 'best fit' policy would be better.
     /// 'best' may be something that best matches a power-of-two
     /// allocation
-    pub fn allocate(&mut self, size: u64) -> u64 {
+    pub fn allocate(&mut self, size: u64, align_page_sz: PageSize) -> Option<u64> {
         let mut region_to_remove: Option<MemoryRegion> = None;
-        for region in &self.regions {
-            if size <= region.size() {
+
+        for region in self.regions.iter() {
+            if size <= region.size()
+                && region.base.next_multiple_of(align_page_sz as u64) + size <= region.end
+            {
                 region_to_remove = Some(*region);
                 break;
             }
         }
 
+        // Got a region that fits, block out the target area, split up the remaining region if necessary.
         match region_to_remove {
             Some(region) => {
-                self.remove_region(region.base, region.base + size);
-                region.base
+                let base = region.base.next_multiple_of(align_page_sz as u64);
+                self.remove_region(base, base + size);
+                Some(base)
             }
-            None => panic!("Unable to allocate {} bytes", size),
+            None => None,
         }
     }
 
-    pub fn allocate_from(&mut self, size: u64, lower_bound: u64) -> u64 {
+    pub fn allocate_from(&mut self, size: u64, lower_bound: u64) -> Option<u64> {
         let mut region_to_remove = None;
         for region in &self.regions {
             if size <= region.size() && region.base >= lower_bound {
@@ -274,239 +329,9 @@ impl DisjointMemoryRegion {
         match region_to_remove {
             Some(region) => {
                 self.remove_region(region.base, region.base + size);
-                region.base
+                Some(region.base)
             }
-            None => panic!(
-                "Unable to allocate {} bytes from lower_bound 0x{:x}",
-                size, lower_bound
-            ),
+            None => None,
         }
-    }
-}
-
-#[derive(Copy, Clone)]
-pub struct KernelAllocation {
-    pub untyped_cap_address: u64, // FIXME: possibly this is an object, not an int?
-    pub phys_addr: u64,
-    pub size: u64,
-}
-
-pub struct UntypedAllocator {
-    untyped_object: UntypedObject,
-    allocation_point: u64,
-    allocations: Vec<KernelAllocation>,
-}
-
-impl UntypedAllocator {
-    pub fn new(
-        untyped_object: UntypedObject,
-        allocation_point: u64,
-        allocations: Vec<KernelAllocation>,
-    ) -> UntypedAllocator {
-        UntypedAllocator {
-            untyped_object,
-            allocation_point,
-            allocations,
-        }
-    }
-
-    pub fn base(&self) -> u64 {
-        self.untyped_object.region.base
-    }
-
-    pub fn end(&self) -> u64 {
-        self.untyped_object.region.end
-    }
-}
-
-/// Allocator for kernel objects.
-///
-/// This tracks the space available in a set of untyped objects.
-/// On allocation an untyped with sufficient remaining space is
-/// returned (while updating the internal tracking).
-///
-/// Within an untyped object this mimics the kernel's allocation
-/// policy (basically a bump allocator with alignment).
-///
-/// The only 'choice' this allocator has is which untyped object
-/// to use. The current algorithm is simply first fit: the first
-/// untyped that has sufficient space. This is not optimal.
-///
-/// Note: The allocator does not generate the Retype invocations;
-/// this must be done with more knowledge (specifically the destination
-/// cap) which is distinct.
-///
-/// It is critical that invocations are generated in the same order
-/// as the allocations are made.
-pub struct ObjectAllocator {
-    pub init_capacity: u64,
-    allocation_idx: u64,
-    pub untyped: Vec<UntypedAllocator>,
-}
-
-/// First entry is potential padding, then the actual allocation is the second
-/// entry.
-type FixedAllocation = (Option<Vec<KernelAllocation>>, KernelAllocation);
-
-pub enum FindFixedError {
-    AlreadyAllocated,
-    TooLarge,
-}
-
-impl ObjectAllocator {
-    pub fn new(untyped_pool: Vec<&UntypedObject>) -> ObjectAllocator {
-        let mut untyped: Vec<UntypedAllocator> = untyped_pool
-            .into_iter()
-            .map(|ut| UntypedAllocator::new(*ut, 0, vec![]))
-            .collect();
-        untyped.sort_by(|a, b| a.untyped_object.base().cmp(&b.untyped_object.base()));
-
-        let mut capacity = 0;
-        for ut in &untyped {
-            capacity += ut.end() - (ut.base() + ut.allocation_point);
-        }
-
-        ObjectAllocator {
-            init_capacity: capacity,
-            allocation_idx: 0,
-            untyped,
-        }
-    }
-
-    pub fn capacity(&self) -> u64 {
-        let mut capacity = 0;
-        for ut in &self.untyped {
-            capacity += ut.end() - (ut.base() + ut.allocation_point);
-        }
-
-        capacity
-    }
-
-    pub fn max_alloc_size(&self) -> u64 {
-        let mut largest_capacity = 0;
-        for ut in &self.untyped {
-            let ut_capacity = ut.end() - (ut.base() + ut.allocation_point);
-            if ut_capacity > largest_capacity {
-                largest_capacity = ut_capacity;
-            }
-        }
-
-        largest_capacity
-    }
-
-    pub fn alloc(&mut self, size: u64) -> Option<KernelAllocation> {
-        self.alloc_n(size, 1)
-    }
-
-    pub fn alloc_n(&mut self, size: u64, count: u64) -> Option<KernelAllocation> {
-        assert!(util::is_power_of_two(size));
-        assert!(count > 0);
-        let mem_size = count * size;
-        for ut in &mut self.untyped {
-            // See if this fits
-            let start = util::round_up(ut.base() + ut.allocation_point, size);
-            if start + mem_size <= ut.end() {
-                ut.allocation_point = (start - ut.base()) + mem_size;
-                self.allocation_idx += 1;
-                let allocation = KernelAllocation {
-                    untyped_cap_address: ut.untyped_object.cap,
-                    phys_addr: start,
-                    size: mem_size,
-                };
-                ut.allocations.push(allocation);
-                return Some(allocation);
-            }
-        }
-
-        None
-    }
-
-    pub fn reserve(&mut self, alloc: (&UntypedObject, u64)) {
-        for ut in &mut self.untyped {
-            if *alloc.0 == ut.untyped_object {
-                if ut.base() <= alloc.1 && alloc.1 <= ut.end() {
-                    ut.allocation_point = alloc.1 - ut.base();
-                    return;
-                } else {
-                    panic!(
-                        "Allocation {:?} ({:x}) not in untyped region {:?}",
-                        alloc.0, alloc.1, ut.untyped_object
-                    );
-                }
-            }
-        }
-
-        panic!(
-            "Allocation {:?} ({:x}) not in any device untyped",
-            alloc.0, alloc.1
-        );
-    }
-
-    pub fn find_fixed(
-        &mut self,
-        phys_addr: u64,
-        size: u64,
-    ) -> Result<Option<FixedAllocation>, FindFixedError> {
-        for ut in &mut self.untyped {
-            /* Find the right untyped */
-            if phys_addr >= ut.base() && phys_addr < ut.end() {
-                if phys_addr < ut.base() + ut.allocation_point {
-                    return Err(FindFixedError::AlreadyAllocated);
-                }
-
-                let space_left = ut.end() - (ut.base() + ut.allocation_point);
-                if space_left < size {
-                    return Err(FindFixedError::TooLarge);
-                }
-
-                let mut watermark = ut.base() + ut.allocation_point;
-                let mut allocations: Option<Vec<KernelAllocation>>;
-
-                if phys_addr != watermark {
-                    allocations = Some(Vec::new());
-                    /* If the watermark isn't at the right place, we need to pad */
-                    let mut padding_required = phys_addr - watermark;
-                    // We are restricted in how much we can pad:
-                    // 1: Untyped objects must be power-of-two sized.
-                    // 2: Untyped objects must be aligned to their size.
-                    let mut padding_sizes = Vec::new();
-                    // We have two potential approaches for how we pad.
-                    // 1: Use largest objects possible respecting alignment
-                    // and size restrictions.
-                    // 2: Use a fixed size object multiple times. This will
-                    // create more objects, but as same sized objects can be
-                    // create in a batch, required fewer invocations.
-                    // For now we choose #1
-                    while padding_required > 0 {
-                        let wm_lsb = util::lsb(watermark);
-                        let sz_msb = util::msb(padding_required);
-                        let pad_object_size = 1 << min(wm_lsb, sz_msb);
-                        padding_sizes.push(pad_object_size);
-
-                        allocations.as_mut().unwrap().push(KernelAllocation {
-                            untyped_cap_address: ut.untyped_object.cap,
-                            phys_addr: watermark,
-                            size: pad_object_size,
-                        });
-
-                        watermark += pad_object_size;
-                        padding_required -= pad_object_size;
-                    }
-                } else {
-                    allocations = None;
-                }
-
-                let obj = KernelAllocation {
-                    untyped_cap_address: ut.untyped_object.cap,
-                    phys_addr: watermark,
-                    size,
-                };
-
-                ut.allocation_point = (watermark + size) - ut.base();
-                return Ok(Some((allocations, obj)));
-            }
-        }
-
-        Ok(None)
     }
 }

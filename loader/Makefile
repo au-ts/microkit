@@ -19,55 +19,75 @@ ifeq ($(strip $(LINK_ADDRESS)),)
 $(error LINK_ADDRESS must be specified)
 endif
 
-ifeq ($(strip $(TOOLCHAIN)),)
-$(error TOOLCHAIN must be specified)
+ifeq ($(strip $(TARGET_TRIPLE)),)
+$(error TARGET_TRIPLE must be specified)
 endif
 
-ifeq ($(strip $(PRINTING)),)
-$(error PRINTING must be specified)
+ifeq ($(strip $(LLVM)),True)
+  CC = clang -target $(TARGET_TRIPLE)
+  CPP = clang-cpp -target $(TARGET_TRIPLE)
+  AS = clang -target $(TARGET_TRIPLE)
+  LD = ld.lld
+else
+  CC = $(TARGET_TRIPLE)-gcc
+  CPP = $(TARGET_TRIPLE)-cpp
+  AS = $(TARGET_TRIPLE)-as
+  LD = $(TARGET_TRIPLE)-ld
 endif
 
 ifeq ($(ARCH),aarch64)
-	CFLAGS_AARCH64 := -DPHYSICAL_ADDRESS_BITS=$(PHYSICAL_ADDRESS_BITS) -mcpu=$(GCC_CPU) -mgeneral-regs-only
+	CFLAGS_AARCH64 := -mcpu=$(GCC_CPU) -mgeneral-regs-only -mstrict-align -mno-outline-atomics
 	CFLAGS_ARCH := $(CFLAGS_AARCH64) -DARCH_aarch64
-	ASM_FLAGS_ARCH := -DPHYSICAL_ADDRESS_BITS=$(PHYSICAL_ADDRESS_BITS) -mcpu=$(GCC_CPU)
+	ASM_FLAGS_ARCH := -mcpu=$(GCC_CPU)
 	ARCH_DIR := aarch64
 else ifeq ($(ARCH),riscv64)
 	CFLAGS_RISCV64 := -mcmodel=medany -march=rv64imac_zicsr_zifencei -mabi=lp64
 	CFLAGS_ARCH := $(CFLAGS_RISCV64) -DARCH_riscv64
-	ASM_FLAGS_ARCH := -march=rv64imac_zicsr_zifencei -mabi=lp64 -DFIRST_HART_ID=$(FIRST_HART_ID)
+	ASM_FLAGS_ARCH := -march=rv64imac_zicsr_zifencei -mabi=lp64
 	ARCH_DIR := riscv
 endif
 
-CFLAGS := -std=gnu11 -g -O3 -nostdlib -ffreestanding $(CFLAGS_ARCH) -DBOARD_$(BOARD) -DPRINTING=$(PRINTING) -Wall -Werror -Wno-unused-function
+CFLAGS := -std=gnu11 -g -O3 -nostdlib -ffreestanding \
+					-MP -MD $(CFLAGS_ARCH) -I$(SEL4_SDK)/include \
+					-Wall -Werror -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations \
+					-Wundef -Wno-nonnull -Wnested-externs
 
-ASM_FLAGS := $(ASM_FLAGS_ARCH) -g
+ASM_FLAGS := $(ASM_FLAGS_ARCH) -g -MP -MD -I$(SEL4_SDK)/include
 
 PROGS := loader.elf
-OBJECTS := loader.o crt0.o
+OBJECTS := loader.o crt0.o uart.o cutil.o
 
 ifeq ($(ARCH),aarch64)
-	OBJECTS += util64.o
+	OBJECTS += util64.o el.o exceptions.o init.o mmu.o cpus.o
+else ifeq ($(ARCH),riscv64)
+	OBJECTS += exceptions.o init.o mmu.o cpus.o sbi.o
 endif
 
 LINKSCRIPT_INPUT := $(ARCH).ld
 LINKSCRIPT := $(BUILD_DIR)/link.ld
 
+.SECONDARY:
+
 $(BUILD_DIR)/%.o : src/$(ARCH_DIR)/%.S
-	$(TOOLCHAIN)gcc -DLINK_ADDRESS=$(LINK_ADDRESS) -x assembler-with-cpp -c $(ASM_FLAGS) $< -o $@
+	$(CC) -DLINK_ADDRESS=$(LINK_ADDRESS) -x assembler-with-cpp -c $(ASM_FLAGS) $< -o $@
 
 $(BUILD_DIR)/%.o : src/$(ARCH_DIR)/%.s
-	$(TOOLCHAIN)as $< -o $@
+	$(AS) -c $< -o $@
+
+$(BUILD_DIR)/%.o : src/$(ARCH_DIR)/%.c
+	$(CC) -c $(CFLAGS) $< -o $@
 
 $(BUILD_DIR)/%.o : src/%.c
-	$(TOOLCHAIN)gcc -c $(CFLAGS) $< -o $@
+	$(CC) -c $(CFLAGS) $< -o $@
+
+-include $(BUILD_DIR)/*.d
 
 OBJPROG = $(addprefix $(BUILD_DIR)/, $(PROGS))
 
 all: $(OBJPROG)
 
 $(LINKSCRIPT): $(LINKSCRIPT_INPUT)
-	$(TOOLCHAIN)cpp -DLINK_ADDRESS=$(LINK_ADDRESS) $< | grep -v "^#" > $@
+	$(CPP) -DLINK_ADDRESS=$(LINK_ADDRESS) $< | grep -v "^#" > $@
 
 $(OBJPROG): $(addprefix $(BUILD_DIR)/, $(OBJECTS)) $(LINKSCRIPT)
-	$(TOOLCHAIN)ld -T$(LINKSCRIPT) $(addprefix $(BUILD_DIR)/, $(OBJECTS)) -o $@
+	$(LD) -T$(LINKSCRIPT) $(addprefix $(BUILD_DIR)/, $(OBJECTS)) -o $@

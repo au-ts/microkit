@@ -6,7 +6,7 @@
   description = "A flake for building microkit";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/24.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/25.05";
     utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
     treefmt-nix = {
@@ -37,33 +37,6 @@
           }
         );
 
-        aarch64-toolchain = import nixpkgs {
-          localSystem = "${system}";
-          crossSystem = {
-            config = "aarch64-none-elf";
-          };
-        };
-
-        # pyfdt is not officially supported in Nix so we compile it ourselves
-        pyfdt = with pkgs.python312Packages;
-          buildPythonPackage rec {
-            pname = "pyfdt";
-            version = "0.3";
-            src = pkgs.fetchFromGitHub {
-              owner = "superna9999";
-              repo = pname;
-              rev = "${pname}-${version}";
-              hash = "sha256-lt/Mcw3j1aTBVOVhDBSYtriDyzeJHcSli69EXLfsgDM=";
-            };
-
-            meta = with lib; {
-              description = "Python Flattened Device Tree Library";
-              homepage = "https://github.com/superna9999/pyfdt";
-              license = with licenses; [ asl20 ];
-              maintainers = with maintainers; [ wucke13 ];
-            };
-          };
-
         pythonTool = pkgs.python312.withPackages (ps: [
           ps.mypy
           ps.black
@@ -72,17 +45,26 @@
           ps.jinja2
           ps.pyaml
           ps.lxml
-          pyfdt
+          ps.pyfdt
           ps.setuptools
         ]);
 
-        microkiToolToml = nixpkgs.lib.trivial.importTOML ./tool/microkit/Cargo.toml;
-        microkitToolVersion = microkiToolToml.package.rust-version;
+        microkitToolToml = nixpkgs.lib.trivial.importTOML ./tool/microkit/Cargo.toml;
+        microkitToolVersion = microkitToolToml.package.rust-version;
+
+        # Unfortunately Cargo does not support all targets by default so for cross-compiling
+        # we must explicitly add certain targets.
+        rustAdditionalTargets = {
+          aarch64-darwin = [ "x86_64-apple-darwin" "x86_64-unknown-linux-musl" "aarch64-unknown-linux-musl" ];
+          x86_64-darwin = [ "aarch64-apple-darwin" "x86_64-unknown-linux-musl" "aarch64-unknown-linux-musl" ];
+          x86_64-linux = [];
+          aarch64-linux = [];
+        }.${system} or (throw "Unsupported system: ${system}");
 
         rustTool = pkgs.rust-bin.stable.${microkitToolVersion}.default.override {
-          targets = [ pkgs.pkgsStatic.hostPlatform.rust.rustcTarget ];
+          extensions = [ "rust-src" ];
+          targets = [ pkgs.pkgsStatic.hostPlatform.rust.rustcTarget ] ++ rustAdditionalTargets;
         };
-
       in
       {
         # for `nix fmt`
@@ -94,6 +76,8 @@
           name = "microkit-shell";
 
           nativeBuildInputs = with pkgs; [
+            pkgsCross.x86_64-embedded.stdenv.cc.bintools.bintools
+            pkgsCross.x86_64-embedded.stdenv.cc.cc
             pkgsCross.aarch64-embedded.stdenv.cc.bintools.bintools
             pkgsCross.aarch64-embedded.stdenv.cc.cc
             pkgsCross.riscv64-embedded.stdenv.cc.bintools.bintools
@@ -111,7 +95,12 @@
             cmake
             ninja
             libxml2
+            qemu
+            gnutar
           ];
+
+          # Necessary for Rust bindgen
+          LIBCLANG_PATH = "${pkgs.llvmPackages_18.libclang.lib}/lib";
         };
       });
 }

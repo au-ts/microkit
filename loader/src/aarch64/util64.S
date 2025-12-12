@@ -60,16 +60,14 @@
 #define TCR_PS_16T        (4 << 16)
 #define TCR_PS_256T       (5 << 16)
 
-#ifndef PHYSICAL_ADDRESS_BITS
-#error "Missing PHYSICAL_ADDRESS_BITS"
-#endif
+#include <kernel/gen_config.h>
 
-#if PHYSICAL_ADDRESS_BITS == 40
+#if defined(CONFIG_ARM_PA_SIZE_BITS_40)
 #define TCR_PS TCR_PS_1T
-#elif PHYSICAL_ADDRESS_BITS == 44
+#elif defined(CONFIG_ARM_PA_SIZE_BITS_44)
 #define TCR_PS TCR_PS_16T
 #else
-#error "Unsupported PHYSICAL_ADDRESS_BITS value"
+#error "Unsupported ARM_PA_SIZE_BITS value"
 #endif
 
 #define TCR_EL2_RES1      ((1 << 23) | (1 << 31))
@@ -279,11 +277,11 @@ BEGIN_FUNC(switch_to_el2)
     eret
 END_FUNC(switch_to_el2)
 
-
-BEGIN_FUNC(el1_mmu_enable)
+BEGIN_FUNC(el1_mmu_disable)
     stp     x29, x30, [sp, #-16]!
     mov     x29, sp
 
+    /* Disable caches */
     bl      flush_dcache
 
     /* Ensure I-cache, D-cache and mmu are disabled for EL1/Stage1 */
@@ -294,6 +292,43 @@ BEGIN_FUNC(el1_mmu_enable)
      * speculatively are discarded.
      */
     bl      invalidate_icache
+
+    ldp     x27, x28, [sp], #16
+    ldp     x29, x30, [sp], #16
+    ret
+END_FUNC(el1_mmu_disable)
+
+BEGIN_FUNC(el2_mmu_disable)
+    stp     x29, x30, [sp, #-16]!
+    stp     x27, x28, [sp, #-16]!
+    mov     x29, sp
+
+    /* Disable caches */
+    bl      flush_dcache
+
+    /* Ensure I-cache, D-cache and mmu are disabled for EL2/Stage1 */
+    disable_mmu sctlr_el2, x8
+
+    /*
+     * Invalidate the local I-cache so that any instructions fetched
+     * speculatively are discarded.
+     */
+    bl      invalidate_icache
+
+    ldp     x27, x28, [sp], #16
+    ldp     x29, x30, [sp], #16
+    ret
+END_FUNC(el2_mmu_disable)
+
+BEGIN_FUNC(el1_mmu_enable)
+    stp     x29, x30, [sp, #-16]!
+    stp     x27, x28, [sp, #-16]!
+    mov     x29, sp
+    mov     x27, x0
+    mov     x28, x1
+
+    /* Disable the MMU */
+    bl      el1_mmu_disable
 
     /*
      *   DEVICE_nGnRnE      000     00000000
@@ -328,13 +363,6 @@ BEGIN_FUNC(el1_mmu_enable)
 
     enable_mmu sctlr_el1, x8
 
-    /* set up a vector table so that if the low-level kernel
-     * initialization code fails, we have some chance of finding
-     * out and printing reasonable diagnostics.
-     */
-    adrp    x8, arm_vector_table
-    msr     vbar_el1, x8
-
     ldp     x29, x30, [sp], #16
     ret
 
@@ -344,17 +372,8 @@ BEGIN_FUNC(el2_mmu_enable)
     stp     x29, x30, [sp, #-16]!
     mov     x29, sp
 
-    /* Disable caches */
-    bl      flush_dcache
-
-    /* Ensure I-cache, D-cache and mmu are disabled for EL2/Stage1 */
-    disable_mmu sctlr_el2, x8
-
-    /*
-     * Invalidate the local I-cache so that any instructions fetched
-     * speculatively are discarded.
-     */
-    bl      invalidate_icache
+    /* Disable the MMU */
+    bl      el2_mmu_disable
 
     /*
      *   DEVICE_nGnRnE      000     00000000
@@ -400,6 +419,24 @@ BEGIN_FUNC(el2_mmu_enable)
 
 END_FUNC(el2_mmu_enable)
 
+.extern arm_secondary_cpu_c_entry
+
+/**
+ * The Power State Coordinate Interface (DEN0022F.b) says that we will
+ * initially be given x0, our context_id as a parameter.
+ * We choose to pass the appropriate stack value in x0.
+ * We have these arguments on the stack:
+ *  - the logical core ID
+ **/
+BEGIN_FUNC(arm_secondary_cpu_entry_asm)
+    mov sp, x0
+    /* grab the core ID off the stack */
+    ldr x0, [sp]
+    mrs x1, mpidr_el1
+    /* x0 and x1 are arguments */
+    b arm_secondary_cpu_entry
+END_FUNC(arm_secondary_cpu_entry_asm)
+
 .extern exception_handler
 .extern exception_register_state
 
@@ -426,21 +463,19 @@ END_FUNC(el2_mmu_enable)
     stp     x26, x27, [x0, #16 * 13]
     stp     x28, x29, [x0, #16 * 14]
     mov     x0, \id
-    mrs     x1, ESR_EL1
-    mrs     x2, FAR_EL1
     b       exception_handler
 .endm
 
 .align 12
 BEGIN_FUNC(arm_vector_table)
-    ventry  #0     // Synchronous EL1t
-    ventry  #1     // IRQ EL1t
-    ventry  #2     // FIQ EL1t
-    ventry  #3     // SError EL1t
-    ventry  #4     // Synchronous EL1h
-    ventry  #5     // IRQ EL1h
-    ventry  #6     // FIQ EL1h
-    ventry  #7     // SError EL1h
+    ventry  #0     // Synchronous EL1t/EL2t
+    ventry  #1     // IRQ EL1t/EL2t
+    ventry  #2     // FIQ EL1t/EL2t
+    ventry  #3     // SError EL1t/EL2t
+    ventry  #4     // Synchronous EL1h/EL2h
+    ventry  #5     // IRQ EL1h/EL2h
+    ventry  #6     // FIQ EL1h/EL2h
+    ventry  #7     // SError EL1h/EL2h
     ventry  #8     // Synchronous 64-bit EL0
     ventry  #9     // IRQ 64-bit EL0
     ventry  #10    // FIQ 64-bit EL0
