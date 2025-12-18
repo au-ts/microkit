@@ -384,7 +384,7 @@ fn map_memory_region(
 /// Build a CapDL Spec according to the System Description File.
 pub fn build_capdl_spec(
     kernel_config: &Config,
-    elfs: &mut [ElfFile],
+    elfs: &mut [Vec<ElfFile>],
     system: &SystemDescription,
 ) -> Result<CapDLSpecContainer, String> {
     let mut spec_container = CapDLSpecContainer::new();
@@ -396,8 +396,13 @@ pub fn build_capdl_spec(
     // We expect the PD ELFs to be first and the monitor ELF last in the list of ELFs.
     let mon_elf_id = elfs.len() - 1;
     assert!(elfs.len() == system.protection_domains.len() + 1);
+    let controller_elf_id = system
+        .protection_domains
+        .iter()
+        .position(|pd| pd.controller)
+        .expect("system description must contain a controller protection domain");
     let monitor_tcb_obj_id = {
-        let monitor_elf = elfs.get(mon_elf_id).unwrap();
+        let monitor_elf = elfs.get(mon_elf_id).unwrap().last().unwrap();
         spec_container
             .add_elf_to_spec(
                 kernel_config,
@@ -510,11 +515,42 @@ pub fn build_capdl_spec(
             let paddr = mr
                 .paddr()
                 .map(|base_paddr| Word(base_paddr + (frame_sequence * mr.page_size_bytes())));
+
+            // Default: empty fill entries. For special memory regions that should contain
+            // pre-built data (for example `dynamic_elfs_region`), create FillEntry(s)
+            // that reference the monitor ELF's last segment which we attach earlier in main.rs.
+            let mut frame_fill = Fill {
+                entries: [].to_vec(),
+            };
+            if mr.name == "dynamic_elfs_region" {
+                // The controller PD owns the dynamic blob; reference the controller ELF instead
+                // of the monitor ELF.
+                let controller_elf = elfs.get(controller_elf_id).unwrap().last().unwrap();
+                if !controller_elf.segments.is_empty() {
+                    let seg_idx = controller_elf.segments.len() - 1;
+                    let seg_len = controller_elf.segments[seg_idx].data().len();
+                    let page_bytes = mr.page_size_bytes() as usize;
+                    let start = (frame_sequence as usize) * page_bytes;
+                    if start < seg_len {
+                        let end = std::cmp::min(start + page_bytes, seg_len);
+                        frame_fill.entries.push(FillEntry {
+                            range: Range {
+                                start: 0,
+                                end: end - start,
+                            },
+                            content: FillEntryContent::Data(ElfContent {
+                                elf_id: controller_elf_id,
+                                elf_seg_idx: seg_idx,
+                                elf_seg_data_range: (start..end),
+                            }),
+                        });
+                    }
+                }
+            }
+
             frame_ids.push(capdl_util_make_frame_obj(
                 &mut spec_container,
-                Fill {
-                    entries: [].to_vec(),
-                },
+                frame_fill,
                 &format!("mr_{}_{:09}", mr.name, frame_sequence),
                 paddr,
                 frame_size_bits as u8,
@@ -553,8 +589,6 @@ pub fn build_capdl_spec(
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
 
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
-        let elf_obj = &elfs[pd_global_idx];
-
         let mut caps_to_bind_to_tcb: Vec<CapTableEntry> = Vec::new();
         let mut caps_to_insert_to_pd_cspace: Vec<CapTableEntry> = Vec::new();
 
@@ -597,11 +631,14 @@ pub fn build_capdl_spec(
                 return Err(format!("ERROR: mapping MR '{}' to PD '{}' with vaddr [0x{:x}..0x{:x}) will overlap with the stack at [0x{:x}..0x{:x})", map.mr, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, pd_stack_range.start, pd_stack_range.end));
             }
 
-            for elf_seg in elf_obj.loadable_segments().iter() {
-                let elf_seg_vaddr_range = elf_seg.virt_addr
-                    ..elf_seg.virt_addr + round_up(elf_seg.mem_size(), PageSize::Small as u64);
-                if ranges_overlap(&mr_vaddr_range, &elf_seg_vaddr_range) {
-                    return Err(format!("ERROR: mapping MR '{}' to PD '{}' with vaddr [0x{:x}..0x{:x}) will overlap with an ELF segment at [0x{:x}..0x{:x})", map.mr, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, elf_seg_vaddr_range.start, elf_seg_vaddr_range.end));
+            let elf_objs = &elfs[pd_global_idx];
+            for elf_obj in elf_objs.iter() {
+                for elf_seg in elf_obj.loadable_segments().iter() {
+                    let elf_seg_vaddr_range = elf_seg.virt_addr
+                        ..elf_seg.virt_addr + round_up(elf_seg.mem_size(), PageSize::Small as u64);
+                    if ranges_overlap(&mr_vaddr_range, &elf_seg_vaddr_range) {
+                        return Err(format!("ERROR: mapping MR '{}' to PD '{}' with vaddr [0x{:x}..0x{:x}) will overlap with an ELF segment at [0x{:x}..0x{:x})", map.mr, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, elf_seg_vaddr_range.start, elf_seg_vaddr_range.end));
+                    }
                 }
             }
 

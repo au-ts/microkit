@@ -14,7 +14,7 @@ pub fn pack_spec_into_initial_task(
     sel4_config: &Config,
     build_config: &str,
     spec_container: &CapDLSpecContainer,
-    system_elfs: &[ElfFile],
+    system_elfs: &[Vec<ElfFile>],
     capdl_initialiser: &mut CapDLInitialiser,
 ) {
     let compress_frames = true;

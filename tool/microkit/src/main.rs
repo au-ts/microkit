@@ -7,19 +7,16 @@
 // we want our asserts, even if the compiler figures out they hold true already during compile-time
 #![allow(clippy::assertions_on_constants)]
 
-use elf::ElfFile;
-use loader::Loader;
 use microkit_tool::capdl::allocation::{
     simulate_capdl_object_alloc_algorithm, CapDLAllocEmulationErrorLevel,
 };
 use microkit_tool::capdl::build_capdl_spec;
 use microkit_tool::capdl::initialiser::CapDLInitialiser;
 use microkit_tool::capdl::packaging::pack_spec_into_initial_task;
-use microkit_tool::elf::ElfFile;
+use microkit_tool::elf::{ElfFile, ElfSegmentData};
 use microkit_tool::loader::Loader;
 use microkit_tool::report::write_report;
 use microkit_tool::sdf::{parse, SysMemoryRegion, SysMemoryRegionPaddr};
-use microkit_tool::sdf::{SysSetVar, SysSetVarKind};
 use microkit_tool::sel4::{
     emulate_kernel_boot, emulate_kernel_boot_partial, Arch, Config, PlatformConfig,
     RiscvVirtualMemory,
@@ -28,29 +25,9 @@ use microkit_tool::symbols::patch_symbols;
 use microkit_tool::util::{
     human_size_strict, json_str, json_str_as_bool, json_str_as_u64, round_down, round_up,
 };
-use microkit_tool::{
-    elf, loader, sdf, sel4, util, DisjointMemoryRegion, FindFixedError, MemoryRegion,
-    ObjectAllocator, Region, UntypedObject, MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH,
-    VM_MAX_NAME_LENGTH,
-};
 use microkit_tool::{DisjointMemoryRegion, MemoryRegion};
-use sdf::{
-    parse, Channel, ProtectionDomain, SysMap, SysMapPerms, SysMemoryRegion, SysMemoryRegionKind,
-    SystemDescription, VirtualMachine,
-};
-use sel4::{
-    default_vm_attr, Aarch64Regs, Arch, ArmVmAttributes, BootInfo, Config, Invocation,
-    InvocationArgs, Object, ObjectType, PageSize, PlatformConfig, Rights, Riscv64Regs,
-    RiscvVirtualMemory, RiscvVmAttributes,
-};
-use std::cmp::{max, min};
 use std::collections::HashMap;
-use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::fs::{self, metadata};
-use std::io::{BufWriter, Write};
-use std::iter::zip;
-use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
 const MAX_BUILD_ITERATION: usize = 3;
@@ -630,21 +607,92 @@ fn main() -> Result<(), String> {
     let mut system_elfs = Vec::with_capacity(system.protection_domains.len());
     // Get the elf files for each pd:
     for pd in &system.protection_domains {
-        match get_full_path(&pd.program_image, &search_paths) {
-            Some(path) => {
-                system_elfs.push(ElfFile::from_path(&path)?);
+        let mut per_pd_elfs: Vec<ElfFile> = Vec::new();
+        for img in &pd.program_images {
+            match get_full_path(&img, &search_paths) {
+                Some(path) => {
+                    let elf = ElfFile::from_path(&path);
+                    match elf {
+                        // don't add elf to pd elfs if can't validate ELF
+                        Ok(el) => per_pd_elfs.push(el),
+                        Err(e) => return Err(e),
+                    }
+                }
+                None => return Err(format!("unable to find program image: '{}'", img.display())),
             }
-            None => {
-                return Err(format!(
-                    "unable to find program image: '{}'",
-                    pd.program_image.display()
-                ))
+        }
+        system_elfs.push(per_pd_elfs);
+    }
+
+    // The monitor is just a special PD
+    system_elfs.push(vec![monitor_elf]);
+
+    // search the provided `search_paths` for additional ELF files and
+    // concatenate their loadable segment data into a single blob which we append to the
+    // controller PD's ELF.
+    let mut loaded_paths: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
+    for per_pd in &system_elfs {
+        for ef in per_pd.iter() {
+            loaded_paths.insert(ef.path.clone());
+        }
+    }
+
+    let controller_pd_idx = system
+        .protection_domains
+        .iter()
+        .position(|pd| pd.controller)
+        .expect("system description must contain a controller protection domain");
+
+    // Build a concatenated payload from any extra ELF files found in the search paths
+    // that are not already part of the system
+    let mut dynamic_blob: Vec<u8> = Vec::new();
+    for sp in &search_paths {
+        if let Ok(entries) = fs::read_dir(sp) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("elf") {
+                    // here we are only looking for elfs that haven't been requested by
+                    // the system description
+                    if loaded_paths.contains(&path) {
+                        continue;
+                    }
+
+                    match ElfFile::from_path(&path) {
+                        Ok(ef) => {
+                            for seg in ef.loadable_segments() {
+                                dynamic_blob.extend_from_slice(seg.data());
+                            }
+                        }
+                        Err(_) => {
+                            if let Ok(bytes) = fs::read(&path) {
+                                dynamic_blob.extend_from_slice(&bytes);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
-    // The monitor is just a special PD
-    system_elfs.push(monitor_elf);
+    // append them as a single loadable segment to the controller PD's ELF so the builder can reference
+    // when filling the MR
+    if !dynamic_blob.is_empty() {
+        if controller_pd_idx < system_elfs.len() {
+            if let Some(per_pd_elves) = system_elfs.get_mut(controller_pd_idx) {
+                if let Some(controller_elf) = per_pd_elves.last_mut() {
+                    let vaddr = controller_elf.next_vaddr(microkit_tool::sel4::PageSize::Small);
+                    controller_elf.add_segment(
+                        true,
+                        false,
+                        false,
+                        vaddr,
+                        ElfSegmentData::RealData(dynamic_blob),
+                    );
+                }
+            }
+        }
+    }
 
     let mut capdl_initialiser = CapDLInitialiser::new(capdl_initialiser_elf);
 
@@ -968,166 +1016,6 @@ fn main() -> Result<(), String> {
         // Only reachable when there are setvar region_paddr that we keep selecting the wrong address.
         panic!("ERROR: fatal, failed to build system in {iteration} iterations");
     }
-    let untyped_info_header = MonitorUntypedInfoHeader64 {
-        cap_start: built_system.kernel_boot_info.untyped_objects[0].cap,
-        cap_end: built_system
-            .kernel_boot_info
-            .untyped_objects
-            .last()
-            .unwrap()
-            .cap
-            + 1,
-    };
-    let untyped_info_object_data: Vec<MonitorRegion64> = built_system
-        .kernel_boot_info
-        .untyped_objects
-        .iter()
-        .map(|ut| MonitorRegion64 {
-            paddr: ut.base(),
-            size_bits: ut.size_bits(),
-            is_device: ut.is_device as u64,
-        })
-        .collect();
-    let mut untyped_info_data: Vec<u8> =
-        Vec::from(unsafe { struct_to_bytes(&untyped_info_header) });
-    for o in &untyped_info_object_data {
-        untyped_info_data.extend(unsafe { struct_to_bytes(o) });
-    }
-    monitor_elf.write_symbol(monitor_config.untyped_info_symbol_name, &untyped_info_data)?;
-
-    let mut bootstrap_invocation_data: Vec<u8> = Vec::new();
-    for invocation in &built_system.bootstrap_invocations {
-        invocation.add_raw_invocation(&kernel_config, &mut bootstrap_invocation_data);
-    }
-
-    let (_, bootstrap_invocation_data_size) =
-        monitor_elf.find_symbol(monitor_config.bootstrap_invocation_data_symbol_name)?;
-    if bootstrap_invocation_data.len() as u64 > bootstrap_invocation_data_size {
-        eprintln!(
-            "bootstrap invocation array size   : {}",
-            bootstrap_invocation_data_size
-        );
-        eprintln!(
-            "bootstrap invocation required size: {}",
-            bootstrap_invocation_data.len()
-        );
-        let mut stderr = BufWriter::new(std::io::stderr());
-        for bootstrap_invocation in &built_system.bootstrap_invocations {
-            bootstrap_invocation.report_fmt(&mut stderr, &kernel_config, &built_system.cap_lookup);
-        }
-        stderr.flush().unwrap();
-
-        eprintln!("Internal error: bootstrap invocations too large");
-    }
-
-    monitor_elf.write_symbol(
-        monitor_config.bootstrap_invocation_count_symbol_name,
-        &built_system.bootstrap_invocations.len().to_le_bytes(),
-    )?;
-    monitor_elf.write_symbol(
-        monitor_config.system_invocation_count_symbol_name,
-        &built_system.system_invocations.len().to_le_bytes(),
-    )?;
-    monitor_elf.write_symbol(
-        monitor_config.bootstrap_invocation_data_symbol_name,
-        &bootstrap_invocation_data,
-    )?;
-
-    let pd_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.pd_tcb_caps);
-    let vm_tcb_cap_bytes = monitor_serialise_u64_vec(&built_system.vm_tcb_caps);
-    let sched_cap_bytes = monitor_serialise_u64_vec(&built_system.sched_caps);
-    let ntfn_cap_bytes = monitor_serialise_u64_vec(&built_system.ntfn_caps);
-    let pd_stack_addrs_bytes = monitor_serialise_u64_vec(&built_system.pd_stack_addrs);
-
-    monitor_elf.write_symbol("fault_ep", &built_system.fault_ep_cap_address.to_le_bytes())?;
-    monitor_elf.write_symbol("reply", &built_system.reply_cap_address.to_le_bytes())?;
-    monitor_elf.write_symbol("pd_tcbs", &pd_tcb_cap_bytes)?;
-    monitor_elf.write_symbol("vm_tcbs", &vm_tcb_cap_bytes)?;
-    monitor_elf.write_symbol("scheduling_contexts", &sched_cap_bytes)?;
-    monitor_elf.write_symbol("notification_caps", &ntfn_cap_bytes)?;
-    monitor_elf.write_symbol("pd_stack_addrs", &pd_stack_addrs_bytes)?;
-    let pd_names = system
-        .protection_domains
-        .iter()
-        .map(|pd| &pd.name)
-        .collect();
-    monitor_elf.write_symbol(
-        "pd_names",
-        &monitor_serialise_names(pd_names, MAX_PDS, PD_MAX_NAME_LENGTH),
-    )?;
-    monitor_elf.write_symbol(
-        "pd_names_len",
-        &system.protection_domains.len().to_le_bytes(),
-    )?;
-    let vm_names: Vec<&String> = system
-        .protection_domains
-        .iter()
-        .filter_map(|pd| pd.virtual_machine.as_ref().map(|vm| &vm.name))
-        .collect();
-    monitor_elf.write_symbol("vm_names_len", &vm_names.len().to_le_bytes())?;
-    monitor_elf.write_symbol(
-        "vm_names",
-        &monitor_serialise_names(vm_names, MAX_VMS, VM_MAX_NAME_LENGTH),
-    )?;
-
-    // Write out all the symbols for each PD
-    pd_write_symbols(
-        &system.protection_domains,
-        &system.channels,
-        pd_elf_files.as_mut_slice(),
-        &built_system.pd_setvar_values,
-    )?;
-
-    // Generate the report
-    let report = match std::fs::File::create(args.report) {
-        Ok(file) => file,
-        Err(e) => {
-            return Err(format!(
-                "Could not create report file '{}': {}",
-                args.report, e
-            ))
-        }
-    };
-
-    let mut report_buf = BufWriter::new(report);
-    match write_report(&mut report_buf, &kernel_config, &built_system) {
-        Ok(()) => report_buf.flush().unwrap(),
-        Err(err) => {
-            return Err(format!(
-                "Could not write out report file '{}': {}",
-                args.report, err
-            ))
-        }
-    }
-    report_buf.flush().unwrap();
-
-    let mut loader_regions: Vec<(u64, &[u8])> = vec![(
-        built_system.reserved_region.base,
-        &built_system.invocation_data,
-    )];
-
-    // for every elf FILE
-    // for every REGION in the elf file
-    // push a region with the data of that specific elf file.
-
-    for (i, pds) in built_system.pd_elf_regions.iter().enumerate() {
-        for (e, elf_regions) in pds.iter().enumerate() {
-            for r in elf_regions {
-                loader_regions.push((r.addr, r.data(&pd_elf_files[i][e])));
-            }
-        }
-    }
-
-    let loader = Loader::new(
-        &kernel_config,
-        Path::new(&loader_elf_path),
-        &kernel_elf,
-        &monitor_elf,
-        Some(built_system.initial_task_phys_region.base),
-        built_system.reserved_region,
-        loader_regions,
-    );
-    loader.write_image(Path::new(args.output));
 
     Ok(())
 }

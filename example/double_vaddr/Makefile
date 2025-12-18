@@ -40,7 +40,7 @@ SECONDARY_OBJS := secondary.o
 CONTROLLER_OBJS := controller.o
 
 # compiled but NOT in system description
-DYNAMIC_PD_SOURCES := dynamic_proc.c
+DYNAMIC_PD_SOURCES := dummy.c
 DYNAMIC_PD_OBJS := $(DYNAMIC_PD_SOURCES:.c=.o)
 DYNAMIC_PD_ELFS := $(DYNAMIC_PD_SOURCES:.c=.elf)
 

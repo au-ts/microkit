@@ -162,6 +162,15 @@ seL4_MessageInfo_t protected(microkit_channel ch, microkit_msginfo msginfo)
     return microkit_msginfo_new(0, 0);
 }
 
+seL4_Word vspace_init(int elf_index, )
+{
+
+    // step 1 grab the elf file
+    // step 2 validate elf boundaries
+    // map in pages for new vspace
+    // assign vnode root to new elf file
+}
+
 void notified(microkit_channel ch)
 {
 }

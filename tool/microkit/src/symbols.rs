@@ -18,13 +18,13 @@ use crate::{
 /// the Microkit's requirements
 pub fn patch_symbols(
     kernel_config: &Config,
-    pd_elf_files: &mut [ElfFile],
+    pd_elf_files: &mut [Vec<ElfFile>],
     system: &SystemDescription,
 ) -> Result<(), String> {
     // *********************************
     // Step 1. Write ELF symbols in the monitor.
     // *********************************
-    let monitor_elf = pd_elf_files.last_mut().unwrap();
+    let monitor_elf = pd_elf_files.last_mut().unwrap().last_mut().unwrap();
 
     let pd_names: Vec<String> = system
         .protection_domains
@@ -91,92 +91,90 @@ pub fn patch_symbols(
     }
 
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
-        let elf_obj = &mut pd_elf_files[pd_global_idx];
-
-        let name = pd.name.as_bytes();
-        let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
-        elf_obj
-            .write_symbol("microkit_name", &name[..name_length])
-            .unwrap();
-        elf_obj
-            .write_symbol("microkit_passive", &[pd.passive as u8])
-            .unwrap();
-
-        let mut notification_bits: u64 = 0;
-        let mut pp_bits: u64 = 0;
-        for channel in system.channels.iter() {
-            if channel.end_a.pd == pd_global_idx {
-                if channel.end_a.notify {
-                    notification_bits |= 1 << channel.end_a.id;
-                }
-                if channel.end_a.pp {
-                    pp_bits |= 1 << channel.end_a.id;
-                }
-            }
-            if channel.end_b.pd == pd_global_idx {
-                if channel.end_b.notify {
-                    notification_bits |= 1 << channel.end_b.id;
-                }
-                if channel.end_b.pp {
-                    pp_bits |= 1 << channel.end_b.id;
-                }
-            }
-        }
-        elf_obj
-            .write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())
-            .unwrap();
-        elf_obj
-            .write_symbol("microkit_notifications", &notification_bits.to_le_bytes())
-            .unwrap();
-        elf_obj
-            .write_symbol("microkit_pps", &pp_bits.to_le_bytes())
-            .unwrap();
-        elf_obj
-            .write_symbol("microkit_ioports", &pd.ioport_bits().to_le_bytes())
-            .unwrap();
-
-        let mut symbols_to_write: Vec<(&String, u64)> = Vec::new();
-        for setvar in pd.setvars.iter() {
-            // Check that the symbol exists in the ELF
-            match elf_obj.find_symbol(&setvar.symbol) {
-                Ok(sym_info) => {
-                    // Sanity check that the symbol is of word size so we dont overwrite anything.
-                    let expected_symbol_size = kernel_config.word_size / 8;
-                    if sym_info.1 != expected_symbol_size {
-                        return Err(format!(
-                            "setvar to non-word size symbol '{}' for PD '{}', symbol has size '{}' bytes, expected size '{}' bytes",
-                            setvar.symbol, pd.name, sym_info.1, expected_symbol_size
-                        ));
-                    }
-                    let data = match &setvar.kind {
-                        sdf::SysSetVarKind::Size { mr } => mr_name_to_desc.get(mr).unwrap().size,
-                        sdf::SysSetVarKind::Vaddr { address } => *address,
-                        sdf::SysSetVarKind::Paddr { region } => mr_name_to_desc
-                            .get(region)
-                            .unwrap()
-                            .paddr()
-                            .unwrap_or_default(),
-                        sdf::SysSetVarKind::Id { id } => *id,
-                        sdf::SysSetVarKind::X86IoPortAddr { address } => *address,
-                    };
-                    symbols_to_write.push((&setvar.symbol, data));
-                }
-                Err(err) => {
-                    return Err(format!(
-                        "could not patch symbol '{}' in program image for PD '{}' ({}): {}",
-                        setvar.symbol,
-                        pd.name,
-                        pd.program_image.display(),
-                        err
-                    ))
-                }
-            }
-        }
-        let elf_obj = pd_elf_files.get_mut(pd_global_idx).unwrap();
-        for (sym_name, value) in symbols_to_write.iter() {
+        for (_, elf_obj) in pd_elf_files[pd_global_idx].iter_mut().enumerate() {
+            let name = pd.name.as_bytes();
+            let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
             elf_obj
-                .write_symbol(sym_name, &value.to_le_bytes())
+                .write_symbol("microkit_name", &name[..name_length])
                 .unwrap();
+            elf_obj
+                .write_symbol("microkit_passive", &[pd.passive as u8])
+                .unwrap();
+
+            let mut notification_bits: u64 = 0;
+            let mut pp_bits: u64 = 0;
+            for channel in system.channels.iter() {
+                if channel.end_a.pd == pd_global_idx {
+                    if channel.end_a.notify {
+                        notification_bits |= 1 << channel.end_a.id;
+                    }
+                    if channel.end_a.pp {
+                        pp_bits |= 1 << channel.end_a.id;
+                    }
+                }
+                if channel.end_b.pd == pd_global_idx {
+                    if channel.end_b.notify {
+                        notification_bits |= 1 << channel.end_b.id;
+                    }
+                    if channel.end_b.pp {
+                        pp_bits |= 1 << channel.end_b.id;
+                    }
+                }
+            }
+            elf_obj
+                .write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())
+                .unwrap();
+            elf_obj
+                .write_symbol("microkit_notifications", &notification_bits.to_le_bytes())
+                .unwrap();
+            elf_obj
+                .write_symbol("microkit_pps", &pp_bits.to_le_bytes())
+                .unwrap();
+            elf_obj
+                .write_symbol("microkit_ioports", &pd.ioport_bits().to_le_bytes())
+                .unwrap();
+
+            let mut symbols_to_write: Vec<(&String, u64)> = Vec::new();
+            for setvar in pd.setvars.iter() {
+                // Check that the symbol exists in the ELF
+                match elf_obj.find_symbol(&setvar.symbol) {
+                    Ok(sym_info) => {
+                        // Sanity check that the symbol is of word size so we dont overwrite anything.
+                        let expected_symbol_size = kernel_config.word_size / 8;
+                        if sym_info.1 != expected_symbol_size {
+                            return Err(format!(
+                                "setvar to non-word size symbol '{}' for PD '{}', symbol has size '{}' bytes, expected size '{}' bytes",
+                                setvar.symbol, pd.name, sym_info.1, expected_symbol_size
+                            ));
+                        }
+                        let data = match &setvar.kind {
+                            sdf::SysSetVarKind::Size { mr } => {
+                                mr_name_to_desc.get(mr).unwrap().size
+                            }
+                            sdf::SysSetVarKind::Vaddr { address } => *address,
+                            sdf::SysSetVarKind::Paddr { region } => mr_name_to_desc
+                                .get(region)
+                                .unwrap()
+                                .paddr()
+                                .unwrap_or_default(),
+                            sdf::SysSetVarKind::Id { id } => *id,
+                            sdf::SysSetVarKind::X86IoPortAddr { address } => *address,
+                        };
+                        symbols_to_write.push((&setvar.symbol, data));
+                    }
+                    Err(err) => {
+                        return Err(format!(
+                            "could not patch symbol '{}' in program image for PD '{}' {}",
+                            setvar.symbol, pd.name, err
+                        ))
+                    }
+                }
+            }
+            for (sym_name, value) in symbols_to_write.iter() {
+                elf_obj
+                    .write_symbol(sym_name, &value.to_le_bytes())
+                    .unwrap();
+            }
         }
     }
 
