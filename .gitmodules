@@ -1,0 +1,6 @@
+[submodule "seL4"]
+	path = seL4
+	url = "https://github.com/au-ts/seL4"
+[submodule "rust-sel4"]
+	path = rust-sel4
+	url = "https://github.com/au-ts/rust-sel4"
