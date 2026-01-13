@@ -68,7 +68,7 @@ pub fn mask(n: u64) -> u64 {
     (1 << n) - 1
 }
 
-/// Returns true if two ranges overlap.
+/// Returns true if two inclusive ranges overlap.
 pub fn ranges_overlap<T: PartialOrd>(left: &Range<T>, right: &Range<T>) -> bool {
     left.start <= right.end && right.start <= left.end
 }

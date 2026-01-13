@@ -589,7 +589,7 @@ pub fn build_capdl_spec(
             // sdf.rs sanity checks that the memory regions doesn't overlap with each others, etc.
             // But it doesn't actually check for whether they overlap with a PD's stack or ELF segments.
             // We perform this check here, otherwise the tool will panic with quite cryptic page-table related errors.
-            let mr_vaddr_range = map.vaddr..(map.vaddr + (page_size_bytes * frames.len() as u64));
+            let mr_vaddr_range = map.vaddr..(map.vaddr + (page_size_bytes * frames.len() as u64) - 1);
 
             let pd_stack_range =
                 kernel_config.pd_stack_bottom(pd.stack_size)..kernel_config.pd_stack_top();
