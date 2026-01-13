@@ -185,6 +185,9 @@ impl CapDLSpecContainer {
         elf: &ElfFile,
     ) -> Result<ObjectId, String> {
         // We assumes that ELFs and PDs have a one-to-one relationship. So for each ELF we create a VSpace.
+
+        // note: this can no longer be assumed with the dynamic elf loading implementation but it's fine
+        // to create another vspace on its own anyway
         let vspace_obj_id = create_vspace(self, sel4_config, pd_name);
         let vspace_cap = capdl_util_make_page_table_cap(vspace_obj_id);
 
@@ -399,7 +402,7 @@ pub fn build_capdl_spec(
     let controller_elf_id = system
         .protection_domains
         .iter()
-        .position(|pd| pd.controller)
+        .position(|pd| pd.control)
         .expect("system description must contain a controller protection domain");
     let monitor_tcb_obj_id = {
         let monitor_elf = elfs.get(mon_elf_id).unwrap().last().unwrap();
@@ -503,6 +506,31 @@ pub fn build_capdl_spec(
         unreachable!("internal bug: build_capdl_spec() got a non TCB object ID when trying to set TCB parameters for the monitor.");
     }
 
+    // Step 2.5: give some untyped memory and asid pool space to the controller PD so it is
+    // able to create a new vspace
+
+    // temporary hardcoded paddr, will need to have a function for finding a paddr later
+    let controller_ut_paddr: u64 = 0x1000_0000;
+    let controller_ut_size_bits: u8 = 21;
+
+    // Create a ut in the in the spec so the
+    let controller_untyped_inner = object::Untyped {
+        paddr: Some(Word(controller_ut_paddr)),
+        size_bits: controller_ut_size_bits,
+    };
+    let controller_untyped_obj = NamedObject {
+        name: Some(format!("untyped_controller_0").into()),
+        object: Object::Untyped(controller_untyped_inner),
+    };
+    let controller_untyped_obj_id = spec_container.add_root_object(controller_untyped_obj);
+
+    // allocate an asid pool
+    let controller_asid_pool_obj = NamedObject {
+        name: Some(format!("asid_pool_controller").into()),
+        object: Object::AsidPool(object::AsidPool(Word(0))),
+    };
+    let controller_asid_pool_obj_id = spec_container.add_root_object(controller_asid_pool_obj);
+
     // *********************************
     // Step 2. Create the memory regions' spec. Result is a hashmap keyed on MR name, value is (parsed XML obj, Vec of frame object IDs)
     // *********************************
@@ -516,8 +544,7 @@ pub fn build_capdl_spec(
                 .paddr()
                 .map(|base_paddr| Word(base_paddr + (frame_sequence * mr.page_size_bytes())));
 
-            // Default: empty fill entries. For special memory regions that should contain
-            // pre-built data (for example `dynamic_elfs_region`), create FillEntry(s)
+            // Default: empty fill entries. For dynamic elfs region, create FillEntry(s)
             // that reference the monitor ELF's last segment which we attach earlier in main.rs.
             let mut frame_fill = Fill {
                 entries: [].to_vec(),
@@ -525,18 +552,21 @@ pub fn build_capdl_spec(
             if mr.name == "dynamic_elfs_region" {
                 // The controller PD owns the dynamic blob; reference the controller ELF instead
                 // of the monitor ELF.
+
+                // we unwrap last because we store the extra elf at the end - need to change if we can have
+                // more than one
                 let controller_elf = elfs.get(controller_elf_id).unwrap().last().unwrap();
                 if !controller_elf.segments.is_empty() {
-                    let seg_idx = controller_elf.segments.len() - 1;
-                    let seg_len = controller_elf.segments[seg_idx].data().len();
-                    let page_bytes = mr.page_size_bytes() as usize;
-                    let start = (frame_sequence as usize) * page_bytes;
+                    let seg_idx: usize = controller_elf.segments.len() - 1;
+                    let seg_len: usize = controller_elf.segments[seg_idx].data().len();
+                    let page_bytes: usize = mr.page_size_bytes() as usize;
+                    let start: usize = (frame_sequence as usize) * page_bytes;
                     if start < seg_len {
-                        let end = std::cmp::min(start + page_bytes, seg_len);
+                        let end: usize = std::cmp::min(start + page_bytes, seg_len);
                         frame_fill.entries.push(FillEntry {
                             range: Range {
                                 start: 0,
-                                end: end - start,
+                                end: (end as u64) - (start as u64),
                             },
                             content: FillEntryContent::Data(ElfContent {
                                 elf_id: controller_elf_id,
@@ -593,9 +623,14 @@ pub fn build_capdl_spec(
         let mut caps_to_insert_to_pd_cspace: Vec<CapTableEntry> = Vec::new();
 
         // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
-        let pd_tcb_obj_id = spec_container
-            .add_elf_to_spec(kernel_config, &pd.name, pd.cpu, pd_global_idx, elf_obj)
-            .unwrap();
+        let mut pd_tcb_obj_id: ObjectId = sel4_capdl_initializer_types::ObjectId(0);
+
+        for possible_elf in elfs[pd_global_idx].iter() {
+            pd_tcb_obj_id = spec_container
+                .add_elf_to_spec(kernel_config, &pd.name, pd.cpu, pd_global_idx, possible_elf)
+                .unwrap();
+        }
+
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec_container, pd_tcb_obj_id);
 
         // In the benchmark configuration, we allow PDs to access their own TCB.
@@ -1049,6 +1084,30 @@ pub fn build_capdl_spec(
                 (MON_BASE_NOTIFICATION_CAP as usize + pd_global_idx) as u32,
                 capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0),
             );
+        }
+
+        // extra: attach the new ASID and ut objects to the controller pd
+        if pd.control {
+            // Make caps and insert them into the controller CSpace slots
+            let controller_untyped_cap = Cap::Untyped(cap::Untyped {
+                object: controller_untyped_obj_id,
+            });
+            let controller_asid_pool_cap = Cap::AsidPool(cap::AsidPool {
+                object: controller_asid_pool_obj_id,
+            });
+
+            // Hopefully these indices won't clash with other caps in the controller PD's CSpace
+            const PD_CONTROLLER_UT_CAP_IDX: u32 = 200;
+            const PD_CONTROLLER_ASID_CAP_IDX: u32 = 201;
+
+            caps_to_insert_to_pd_cspace.push(capdl_util_make_cte(
+                PD_CONTROLLER_UT_CAP_IDX,
+                controller_untyped_cap,
+            ));
+            caps_to_insert_to_pd_cspace.push(capdl_util_make_cte(
+                PD_CONTROLLER_ASID_CAP_IDX,
+                controller_asid_pool_cap,
+            ));
         }
     }
 

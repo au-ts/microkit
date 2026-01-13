@@ -736,7 +736,7 @@ def build_lib_component(
     link_script = Path(component_name) / "microkit_secondary.ld"
     dest = lib_dir / "microkit_secondary.ld"
     dest.unlink(missing_ok=True)
-    copy(link_script, dest)
+    dest = copy.copy(link_script)
     # Make output read-only
     dest.chmod(0o744)
 

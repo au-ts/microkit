@@ -20,3 +20,25 @@
   - guessting that the controller will make a PPC to this PD to grab the elf file (though now i am unsure if this second pd is needed.)
   - i guess it's needed for isolation so someone could ideally just replace the info PD with something else
   - make a pd that just holds elf file info and map in that region into the controller anyway LOL
+
+goal for results: will debug and see if this works at all
+
+5/1:
+- spent a while fixing up all of the compile bugs. the build is compiling now! Going to go home later and re write the vspace loading sequencce
+tomorrow:
+- keep writing up the loading sequence, maybe start debugging cause things will take a while. 
+
+- steps for making a vspace with reference from the builder:
+- Create TCB and VSpace with all ELF loadable frames mapped in.
+  - for every elf, add possible elf to the spec
+    - given an elf file,,,,
+    - for every loadable segment in the ELF, map into the given pd's addrespace.
+    - need to find out how to get the segment base and size from just the memory blob
+    - create frame object and cap for frame
+    - map page for all frames
+    - at the end, create and map the ipc buffer
+  - all memory regions are mapped in
+    - this is done with map memory region
+- Create and map in the stack from the bottom up
+  - config the bottom of the stack and create stack frames. 
+  - map in stack frame acap

@@ -26,6 +26,12 @@ uintptr_t pd_2_entry_point;
 
 uintptr_t fault_ep_addr;
 
+#define elf_blob_start 0x10000000
+
+#define PD_CONTROLLER_UT_CAP_SLOT 200
+#define PD_CONTROLLER_ASID_CAP_SLOT 201
+#define PD_CONTROLLER_PAGE_SIZE_BITS 21
+
 void init(void)
 {
     // seL4_TCB_Configure()
@@ -164,11 +170,19 @@ seL4_MessageInfo_t protected(microkit_channel ch, microkit_msginfo msginfo)
 
 seL4_Word vspace_init(int elf_index, )
 {
+    // note: the controller should also have access to the cnode of all the elf files already
+    // 1. Create TCB and VSpace with all ELF loadable frames mapped in.
 
-    // step 1 grab the elf file
-    // step 2 validate elf boundaries
-    // map in pages for new vspace
-    // assign vnode root to new elf file
+    // changed idea: instead of making a new one, just unmap all the frames in the
+    // olf vspace and remap.
+
+    // now, go over and write down all of the elf files
+    // note that in the builder, they use the elf file API which
+    // we don't have
+
+    seL4_ARM_Page_Unmap(
+
+    )
 }
 
 void notified(microkit_channel ch)

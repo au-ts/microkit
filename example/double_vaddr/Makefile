@@ -77,7 +77,7 @@ $(DYNAMIC_ELFS_BIN): $(addprefix $(BUILD_DIR)/, $(DYNAMIC_PD_ELFS))
 	@mkdir -p $(BUILD_DIR)
 	@cat $^ > $@
 
-# Convert binary blob to object file with linker symbols
+# convert binary blob to object file with linker symbols
 $(BUILD_DIR)/dynamic_elfs.o: $(DYNAMIC_ELFS_BIN)
 	$(OBJCOPY) -I binary -O elf64-littleaarch64 \
 		--rename-section .data=.dynamic_elfs \

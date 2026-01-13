@@ -641,7 +641,7 @@ fn main() -> Result<(), String> {
     let controller_pd_idx = system
         .protection_domains
         .iter()
-        .position(|pd| pd.controller)
+        .position(|pd| pd.control)
         .expect("system description must contain a controller protection domain");
 
     // Build a concatenated payload from any extra ELF files found in the search paths
