@@ -289,6 +289,7 @@ pub struct Config {
     /// The two remaining fields are only valid on ARM and RISC-V
     pub device_regions: Option<Vec<PlatformConfigRegion>>,
     pub normal_regions: Option<Vec<PlatformConfigRegion>>,
+    pub domain_scheduler: bool,
 }
 
 impl Config {

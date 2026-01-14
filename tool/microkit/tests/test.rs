@@ -32,6 +32,7 @@ const DEFAULT_AARCH64_KERNEL_CONFIG: sel4::Config = sel4::Config {
     invocations_labels: json!(null),
     device_regions: None,
     normal_regions: None,
+    domain_scheduler: false,
 };
 
 const DEFAULT_X86_64_KERNEL_CONFIG: sel4::Config = sel4::Config {
@@ -56,6 +57,7 @@ const DEFAULT_X86_64_KERNEL_CONFIG: sel4::Config = sel4::Config {
     invocations_labels: json!(null),
     device_regions: None,
     normal_regions: None,
+    domain_scheduler: false,
 };
 
 fn check_error(kernel_config: &sel4::Config, test_name: &str, expected_err: &str) {
