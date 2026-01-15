@@ -120,7 +120,7 @@ class BoardInfo:
     gcc_cpu: Optional[str]
     loader_link_address: Optional[int]
     kernel_options: KERNEL_OPTIONS
-    smp_cores: Optional[int] = None
+    multikernels: Optional[int] = None
 
 
 @dataclass
@@ -137,7 +137,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a35",
         loader_link_address=0x80280000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "tqma8xqp1gb",
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
@@ -147,7 +146,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a53",
         loader_link_address=0x40000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "zynqmp",
             "KernelARMPlatform": "zcu102",
@@ -158,9 +156,21 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a53",
         loader_link_address=0x50000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "maaxboard",
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
+    ),
+    BoardInfo(
+        name="maaxboard_multikernel",
+        arch=KernelArch.AARCH64,
+        gcc_cpu="cortex-a53",
+        loader_link_address=0x50000000,
+        kernel_options={
+            "KernelPlatform": "maaxboard",
+            "KernelEnableMultikernelSupport": True,
+            # TODO: Derive from device tree?
+            # "KernelMultikernelNumCPUs": 4,
+            "KernelMultikernelNumCPUs": 2,
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
@@ -168,7 +178,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a53",
         loader_link_address=0x41000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "imx8mm-evk",
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
@@ -178,7 +187,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a53",
         loader_link_address=0x41000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "imx8mp-evk",
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
@@ -188,7 +196,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a53",
         loader_link_address=0x41000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "imx8mq-evk",
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
@@ -198,7 +205,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a53",
         loader_link_address=0x50000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "imx8mp-evk",
             "KernelCustomDTS": "custom_dts/iot-gate.dts",
@@ -210,7 +216,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a53",
         loader_link_address=0x20000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "odroidc2",
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
@@ -220,9 +225,22 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a55",
         loader_link_address=0x20000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "odroidc4",
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
+    ),
+    BoardInfo(
+        name="odroidc4_multikernel",
+        arch=KernelArch.AARCH64,
+        gcc_cpu="cortex-a55",
+        loader_link_address=0x20000000,
+        kernel_options={
+            "KernelPlatform": "odroidc4",
+            "KernelArmVtimerUpdateVOffset": False,
+            "KernelEnableMultikernelSupport": True,
+            # TODO: Derive from device tree?
+            # "KernelMultikernelNumCPUs": 4,
+            "KernelMultikernelNumCPUs": 2,
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
@@ -230,7 +248,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a53",
         loader_link_address=0x40000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "zynqmp",
             "KernelARMPlatform": "ultra96v2",
@@ -241,7 +258,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a53",
         loader_link_address=0x70000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "qemu-arm-virt",
             "QEMU_MEMORY": "2048",
@@ -251,11 +267,24 @@ SUPPORTED_BOARDS = (
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
+        name="qemu_virt_aarch64_multikernel",
+        arch=KernelArch.AARCH64,
+        gcc_cpu="cortex-a53",
+        loader_link_address=0x70000000,
+        kernel_options={
+            "KernelPlatform": "qemu-arm-virt",
+            "QEMU_MEMORY": "2048",
+            "KernelArmExportPTMRUser": True,
+            "KernelEnableMultikernelSupport": True,
+            # TODO: Derive from device tree?
+            "KernelMultikernelNumCPUs": 2,
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
+    ),
+    BoardInfo(
         name="qemu_virt_riscv64",
         arch=KernelArch.RISCV64,
         gcc_cpu=None,
         loader_link_address=0x90000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "qemu-riscv-virt",
             "QEMU_MEMORY": "2048",
@@ -266,7 +295,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a72",
         loader_link_address=0x10000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "bcm2711",
             "RPI4_MEMORY": 1024,
@@ -277,7 +305,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a72",
         loader_link_address=0x10000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "bcm2711",
             "RPI4_MEMORY": 2048,
@@ -288,7 +315,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a72",
         loader_link_address=0x10000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "bcm2711",
             "RPI4_MEMORY": 4096,
@@ -299,7 +325,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a72",
         loader_link_address=0x10000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "bcm2711",
             "RPI4_MEMORY": 8192,
@@ -312,7 +337,6 @@ SUPPORTED_BOARDS = (
         loader_link_address=0x30000000,
         # ROCKPRO64 has 4 Cortex-A53 cores and 2 Cortex-A72 cores,
         # we always run on the Cortex-A53s.
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "rockpro64",
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
@@ -322,7 +346,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.RISCV64,
         gcc_cpu=None,
         loader_link_address=0x90000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "hifive-p550",
         } | DEFAULT_KERNEL_OPTIONS_RISCV64,
@@ -332,7 +355,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.RISCV64,
         gcc_cpu=None,
         loader_link_address=0x60000000,
-        smp_cores=4,
         kernel_options={
             "KernelPlatform": "star64",
         } | DEFAULT_KERNEL_OPTIONS_RISCV64,
@@ -369,7 +391,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.X86_64,
         gcc_cpu="generic",
         loader_link_address=None,
-        smp_cores=DEFAULT_X86_NUM_CPUS,
         kernel_options={
             "KernelSupportPCID": False,
             "KernelVTX": False,
@@ -380,7 +401,6 @@ SUPPORTED_BOARDS = (
         arch=KernelArch.X86_64,
         gcc_cpu="generic",
         loader_link_address=None,
-        smp_cores=DEFAULT_X86_NUM_CPUS,
         kernel_options={
             "KernelSupportPCID": False,
             "KernelVTX": True,
@@ -441,14 +461,14 @@ EXAMPLES = {
 def elaborate_all_board_configs(board: BoardInfo) -> list[ConfigInfo]:
     elaborated_configs = list(SUPPORTED_CONFIGS)
 
-    if board.smp_cores is not None:
-        for config in SUPPORTED_CONFIGS:
-            config = copy.deepcopy(config)
-            config.name = f"smp-{config.name}"
-            config.kernel_options |= {
-                "KernelMaxNumNodes": str(board.smp_cores),
-            }
-            elaborated_configs.append(config)
+    # if board.smp_cores is not None:
+    #     for config in SUPPORTED_CONFIGS:
+    #         config = copy.deepcopy(config)
+    #         config.name = f"smp-{config.name}"
+    #         config.kernel_options |= {
+    #             "KernelMaxNumNodes": str(board.smp_cores),
+    #         }
+    #         elaborated_configs.append(config)
 
     return elaborated_configs
 
@@ -526,9 +546,11 @@ def build_sel4(
     board: BoardInfo,
     config: ConfigInfo,
     llvm: bool
-):
+) -> Dict[str, Any]:
     """Build seL4"""
     build_dir = build_dir / board.name / config.name / "sel4"
+    # clear to remove the cmake cache
+    shutil.rmtree(build_dir, ignore_errors=True)
     build_dir.mkdir(exist_ok=True, parents=True)
 
     sel4_install_dir = build_dir / "install"
@@ -640,6 +662,10 @@ def build_sel4(
         shutil.copy(platform_gen, dest)
         dest.chmod(0o744)
 
+    gen_config_path = sel4_install_dir / "libsel4/include/kernel/gen_config.json"
+    with open(gen_config_path, "r") as f:
+        gen_config = json.load(f)
+        return gen_config
 
 def build_elf_component(
     component_name: str,
@@ -906,7 +932,7 @@ def main() -> None:
 
     if not args.skip_tool:
         tool_target = root_dir / "bin" / "microkit"
-        test_tool()
+        # test_tool()
         build_tool(tool_target, args.tool_target_triple)
 
     if not args.skip_docs:
@@ -917,9 +943,13 @@ def main() -> None:
         for (board, configs) in build_goals:
             for config in configs:
                 if not args.skip_sel4:
-                    build_sel4(sel4_dir, root_dir, build_dir, board, config, args.llvm)
+                    sel4_gen_config = build_sel4(sel4_dir, root_dir, build_dir, board, config, args.llvm)
                 loader_printing = 1 if config.name == "debug" else 0
                 loader_defines = []
+
+                if (num_multikernels := sel4_gen_config.get("MULTIKERNEL_NUM_CPUS")) is not None:
+                    loader_defines.append(("NUM_MULTIKERNELS", num_multikernels))
+
                 if not board.arch.is_x86():
                     loader_defines.append(("LINK_ADDRESS", hex(board.loader_link_address)))
                     build_elf_component("loader", root_dir, build_dir, board, config, args.llvm, loader_defines)
