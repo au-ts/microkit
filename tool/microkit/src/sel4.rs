@@ -17,6 +17,7 @@ pub struct KernelPartialBootInfo {
 
 #[derive(Clone, Debug)]
 pub struct BootInfo {
+    pub p_v_offset: u64,
     pub fixed_cap_count: u64,
     pub sched_control_cap: u64,
     pub paging_cap_count: u64,
@@ -301,8 +302,17 @@ pub struct PlatformConfigRegion {
 }
 
 #[derive(Deserialize)]
+pub struct PlatformKernelDeviceRegion {
+    pub start: u64,
+    pub end: u64,
+    #[serde(rename = "userAvailable")]
+    pub user_available: bool,
+}
+
+#[derive(Deserialize)]
 pub struct PlatformConfig {
     pub devices: Vec<PlatformConfigRegion>,
+    pub kernel_devices: Vec<PlatformKernelDeviceRegion>,
     pub memory: Vec<PlatformConfigRegion>,
 }
 
@@ -320,19 +330,22 @@ pub struct Config {
     pub benchmark: bool,
     pub num_cores: u8,
     pub fpu: bool,
+    pub num_multikernels: u8,
     /// ARM-specific, number of physical address bits
     pub arm_pa_size_bits: Option<usize>,
     /// ARM-specific, where or not SMC forwarding is allowed
     /// False if the kernel config option has not been enabled.
     /// None on any non-ARM architecture.
     pub arm_smc: Option<bool>,
+    /// ARM-specific, the GIC version
+    pub arm_gic_version: Option<ArmGicVersion>,
     /// RISC-V specific, what kind of virtual memory system (e.g Sv39)
     pub riscv_pt_levels: Option<RiscvVirtualMemory>,
     /// x86 specific, user context size
     pub x86_xsave_size: Option<usize>,
     pub invocations_labels: serde_json::Value,
     /// The two remaining fields are only valid on ARM and RISC-V
-    pub device_regions: Option<Vec<PlatformConfigRegion>>,
+    pub kernel_devices: Vec<PlatformKernelDeviceRegion>,
     pub normal_regions: Option<Vec<PlatformConfigRegion>>,
     pub domain_scheduler: bool,
 }
@@ -423,11 +436,17 @@ impl Config {
     }
 }
 
-#[derive(PartialEq, Clone, Copy, Eq)]
+#[derive(PartialEq, Clone, Copy, Eq, PartialEq)]
 pub enum Arch {
     Aarch64,
     Riscv64,
     X86_64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArmGicVersion {
+    GICv2,
+    GICv3,
 }
 
 impl Display for Arch {
