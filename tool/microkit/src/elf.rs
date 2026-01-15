@@ -6,7 +6,7 @@
 
 use crate::sel4::PageSize;
 use crate::util::{bytes_to_struct, round_down, struct_to_bytes};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs::{self, metadata, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -202,7 +202,7 @@ pub struct ElfFile {
     pub entry: u64,
     pub machine: u16,
     pub segments: Vec<ElfSegment>,
-    symbols: HashMap<String, (ElfSymbol64, bool)>,
+    symbols: BTreeMap<String, (ElfSymbol64, bool)>,
 }
 
 impl ElfFile {
@@ -350,7 +350,7 @@ impl ElfFile {
         let symtab_str = &bytes[symtab_str_start..symtab_str_end];
 
         // Read all the symbols
-        let mut symbols: HashMap<String, (ElfSymbol64, bool)> = HashMap::new();
+        let mut symbols: BTreeMap<String, (ElfSymbol64, bool)> = BTreeMap::new();
         let mut offset = 0;
         let symbol_size = std::mem::size_of::<ElfSymbol64>();
         while offset < symtab.len() {
@@ -491,7 +491,9 @@ impl ElfFile {
     }
 
     pub fn loadable_segments(&self) -> Vec<&ElfSegment> {
-        self.segments.iter().filter(|s| s.loadable).collect()
+        let mut segments: Vec<_> = self.segments.iter().filter(|seg| seg.loadable).collect();
+        segments.sort_by_key(|seg| seg.virt_addr);
+        segments
     }
 
     /// Re-create a minimal ELF file with all the segments.
