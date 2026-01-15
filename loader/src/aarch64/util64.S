@@ -60,14 +60,16 @@
 #define TCR_PS_16T        (4 << 16)
 #define TCR_PS_256T       (5 << 16)
 
-#include <kernel/gen_config.h>
+#ifndef PHYSICAL_ADDRESS_BITS
+#error "Missing PHYSICAL_ADDRESS_BITS"
+#endif
 
-#if defined(CONFIG_ARM_PA_SIZE_BITS_40)
+#if PHYSICAL_ADDRESS_BITS == 40
 #define TCR_PS TCR_PS_1T
-#elif defined(CONFIG_ARM_PA_SIZE_BITS_44)
+#elif PHYSICAL_ADDRESS_BITS == 44
 #define TCR_PS TCR_PS_16T
 #else
-#error "Unsupported ARM_PA_SIZE_BITS value"
+#error "Unsupported PHYSICAL_ADDRESS_BITS value"
 #endif
 
 #define TCR_EL2_RES1      ((1 << 23) | (1 << 31))
@@ -165,6 +167,14 @@ finished_\op:
     orr     \tmp, \tmp, #(1 << 0)
     orr     \tmp, \tmp, #(1 << 2)
     orr     \tmp, \tmp, #(1 << 12)
+    msr     \sctlr, \tmp
+    isb
+.endm
+
+.macro disable_id_cache sctlr tmp
+    mrs     \tmp, \sctlr
+    bic     \tmp, \tmp, #(1 << 2)
+    bic     \tmp, \tmp, #(1 << 12)
     msr     \sctlr, \tmp
     isb
 .endm
@@ -279,6 +289,7 @@ END_FUNC(switch_to_el2)
 
 BEGIN_FUNC(el1_mmu_disable)
     stp     x29, x30, [sp, #-16]!
+    stp     x27, x28, [sp, #-16]!
     mov     x29, sp
 
     /* Disable caches */
@@ -350,10 +361,8 @@ BEGIN_FUNC(el1_mmu_enable)
     msr     tcr_el1, x10
 
     /* Setup page tables */
-    adrp    x8, boot_lvl0_lower
-    msr     ttbr0_el1, x8
-    adrp    x8, boot_lvl0_upper
-    msr     ttbr1_el1, x8
+    msr     ttbr0_el1, x27
+    msr     ttbr1_el1, x28
     isb
 
     /* invalidate all TLB entries for EL1 */
@@ -363,6 +372,14 @@ BEGIN_FUNC(el1_mmu_enable)
 
     enable_mmu sctlr_el1, x8
 
+    /* set up a vector table so that if the low-level kernel
+     * initialization code fails, we have some chance of finding
+     * out and printing reasonable diagnostics.
+     */
+    adrp    x8, arm_vector_table
+    msr     vbar_el1, x8
+
+    ldp     x27, x28, [sp], #16
     ldp     x29, x30, [sp], #16
     ret
 
@@ -370,7 +387,9 @@ END_FUNC(el1_mmu_enable)
 
 BEGIN_FUNC(el2_mmu_enable)
     stp     x29, x30, [sp, #-16]!
+    stp     x27, x28, [sp, #-16]!
     mov     x29, sp
+    mov     x27, x0
 
     /* Disable the MMU */
     bl      el2_mmu_disable
@@ -394,8 +413,7 @@ BEGIN_FUNC(el2_mmu_enable)
     isb
 
     /* Setup page tables */
-    adrp    x8, boot_lvl0_lower
-    msr     ttbr0_el2, x8
+    msr     ttbr0_el2, x27
     isb
 
     /* invalidate all TLB entries for EL2 */
@@ -414,28 +432,33 @@ BEGIN_FUNC(el2_mmu_enable)
     dsb     ish
     isb
 
+    ldp     x27, x28, [sp], #16
     ldp     x29, x30, [sp], #16
     ret
 
 END_FUNC(el2_mmu_enable)
 
-.extern arm_secondary_cpu_c_entry
+BEGIN_FUNC(start_secondary_cpu)
+    ldr     x9, =curr_cpu_stack
+    ldr     x9, [x9]
+    mov     sp, x9
 
-/**
- * The Power State Coordinate Interface (DEN0022F.b) says that we will
- * initially be given x0, our context_id as a parameter.
- * We choose to pass the appropriate stack value in x0.
- * We have these arguments on the stack:
- *  - the logical core ID
- **/
-BEGIN_FUNC(arm_secondary_cpu_entry_asm)
-    mov sp, x0
-    /* grab the core ID off the stack */
-    ldr x0, [sp]
-    mrs x1, mpidr_el1
-    /* x0 and x1 are arguments */
-    b arm_secondary_cpu_entry
-END_FUNC(arm_secondary_cpu_entry_asm)
+    b secondary_cpu_entry
+END_FUNC(start_secondary_cpu)
+
+BEGIN_FUNC(psci_func)
+    smc #0
+    ret
+END_FUNC(psci_func)
+
+BEGIN_FUNC(disable_caches_el2)
+    stp     x29, x30, [sp, #-16]!
+    mov     x29, sp
+    bl      flush_dcache
+    disable_id_cache sctlr_el2, x9
+    ldp     x29, x30, [sp], #16
+    ret
+END_FUNC(disable_caches_el2)
 
 .extern exception_handler
 .extern exception_register_state
@@ -485,4 +508,3 @@ BEGIN_FUNC(arm_vector_table)
     ventry  #14    // FIQ 32-bit EL0
     ventry  #15    // SError 32-bit EL0
 END_FUNC(arm_vector_table)
-
