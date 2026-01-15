@@ -23,6 +23,8 @@ use crate::util::{ranges_overlap, str_to_bool};
 use crate::MAX_PDS;
 use std::collections::HashSet;
 use std::collections::HashMap;
+use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
 
@@ -88,7 +90,7 @@ pub enum SysMapPerms {
     Execute = 4,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SysMap {
     pub mr: String,
     pub vaddr: u64,
@@ -128,6 +130,19 @@ pub struct SysMemoryRegion {
     /// due to the user's SDF or created by the tool for setting up the
     /// stack, ELF, etc.
     pub kind: SysMemoryRegionKind,
+    pub used_cores: Vec<CpuCore>,
+}
+
+impl Ord for SysMemoryRegion {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.name.cmp(&other.name)
+    }
+}
+
+impl PartialOrd for SysMemoryRegion {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl SysMemoryRegion {
@@ -157,7 +172,7 @@ impl SysMemoryRegion {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum SysIrqKind {
     Conventional {
         irq: u64,
@@ -181,7 +196,7 @@ pub enum SysIrqKind {
     },
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SysIrq {
     pub id: u64,
     pub kind: SysIrqKind,
@@ -197,7 +212,7 @@ impl SysIrq {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct IOPort {
     pub id: u64,
     pub addr: u64,
@@ -205,7 +220,7 @@ pub struct IOPort {
     pub text_pos: roxmltree::TextPos,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum SysSetVarKind {
     // For size we do not store the size since when we parse mappings
     // we do not have access to the memory region yet. The size is resolved
@@ -217,15 +232,15 @@ pub enum SysSetVarKind {
     X86IoPortAddr { address: u64 },
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct SysSetVar {
     pub symbol: String,
     pub kind: SysSetVarKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct ChannelEnd {
-    pub pd: usize,
+    pub pd: String,
     pub id: u64,
     pub notify: bool,
     pub pp: bool,
@@ -247,7 +262,7 @@ impl Display for CpuCore {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ProtectionDomain {
     /// Only populated for child protection domains
     pub id: Option<u64>,
@@ -271,7 +286,7 @@ pub struct ProtectionDomain {
     pub has_children: bool,
     /// Index into the total list of protection domains if a parent
     /// protection domain exists
-    pub parent: Option<usize>,
+    pub parent: Option<String>,
     /// Value of the setvar_id attribute, if a parent protection domain exists
     pub setvar_id: Option<String>,
     /// Location in the parsed SDF file
@@ -280,7 +295,19 @@ pub struct ProtectionDomain {
     pub domain_id: Option<u64>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+impl Ord for ProtectionDomain {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.name.cmp(&other.name)
+    }
+}
+
+impl PartialOrd for ProtectionDomain {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VirtualMachine {
     pub vcpus: Vec<VirtualCpu>,
     pub name: String,
@@ -290,7 +317,19 @@ pub struct VirtualMachine {
     pub period: u64,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+impl Ord for VirtualMachine {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.name.cmp(&other.name)
+    }
+}
+
+impl PartialOrd for VirtualMachine {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct VirtualCpu {
     pub id: u64,
     pub setvar_id: Option<String>,
@@ -429,12 +468,12 @@ impl SysMap {
 }
 
 impl ProtectionDomain {
-    pub fn needs_ep(&self, self_id: usize, channels: &[Channel]) -> bool {
+    pub fn needs_ep(&self, channels: &[&Channel]) -> bool {
         self.has_children
             || self.virtual_machine.is_some()
-            || channels.iter().any(|channel| {
-                (channel.end_a.pp && channel.end_b.pd == self_id)
-                    || (channel.end_b.pp && channel.end_a.pd == self_id)
+            || channels.iter().any(|&channel| {
+                (channel.end_a.pp && channel.end_b.pd == self.name)
+                    || (channel.end_b.pp && channel.end_a.pd == self.name)
             })
     }
 
@@ -1056,6 +1095,12 @@ impl ProtectionDomain {
                         checked_add_setvar(&mut setvars, setvar, xml_sdf, &child)?;
                     }
 
+                    if child_pd.cpu != cpu {
+                        return Err(format!(
+                            "Error: children of a parent are not allowed to exist on a different system on multikernel; \
+                                found child {} ({}) underneath parent {} ({})", child_pd.name, child_pd.cpu, name, cpu));
+                    }
+
                     child_pds.push(child_pd);
                 }
                 "virtual_machine" => {
@@ -1325,6 +1370,7 @@ impl SysMemoryRegion {
             phys_addr,
             text_pos: Some(xml_sdf.doc.text_pos_at(node.range().start)),
             kind: SysMemoryRegionKind::User,
+            used_cores: vec![],
         })
     }
 }
@@ -1381,10 +1427,10 @@ impl ChannelEnd {
                 value_error(xml_sdf, node, "pp must be 'true' or 'false'".to_string())
             })?;
 
-        if let Some(pd_idx) = pds.iter().position(|pd| pd.name == end_pd) {
+        if let Some(_) = pds.iter().position(|pd| pd.name == end_pd) {
             let setvar_id = node.attribute("setvar_id").map(ToOwned::to_owned);
             Ok(ChannelEnd {
-                pd: pd_idx,
+                pd: end_pd.to_string(),
                 id: end_id.try_into().unwrap(),
                 notify,
                 pp,
@@ -1515,7 +1561,7 @@ struct XmlSystemDescription<'a> {
 #[derive(Debug)]
 pub struct SystemDescription {
     pub domain_schedule: Option<DomainSchedule>,
-    pub protection_domains: Vec<ProtectionDomain>,
+    pub protection_domains: BTreeMap<String, ProtectionDomain>,
     pub memory_regions: Vec<SysMemoryRegion>,
     pub channels: Vec<Channel>,
 }
@@ -1663,7 +1709,6 @@ fn check_no_text(xml_sdf: &XmlSystemDescription, node: &roxmltree::Node) -> Resu
 fn pd_tree_to_list(
     xml_sdf: &XmlSystemDescription,
     mut pd: ProtectionDomain,
-    idx: usize,
 ) -> Result<Vec<ProtectionDomain>, String> {
     let mut child_ids = vec![];
     for child_pd in &pd.child_pds {
@@ -1693,16 +1738,11 @@ fn pd_tree_to_list(
     for mut child_pd in child_pds {
         // The parent PD's index is set for each child. We then pass the index relative to the *total*
         // list to any nested children so their parent index can be set to the position of this child.
-        child_pd.parent = Some(idx);
+        child_pd.parent = Some(pd.name.clone());
         new_child_pds.extend(pd_tree_to_list(
             xml_sdf,
             child_pd,
-            // We need to pass the position of this current child PD in the global list.
-            // `idx` is this child's parent index in the global list, so we need to add
-            // the position of this child to `idx` which will be the number of extra child
-            // PDs we've just processed, plus one for the actual entry of this child.
-            idx + new_child_pds.len() + 1,
-        )?);
+        ));
     }
 
     let mut all = vec![pd];
@@ -1726,7 +1766,7 @@ fn pd_flatten(
         // These are all root PDs, so should not have parents.
         assert!(pd.parent.is_none());
         // We provide the index of the PD in the entire PD list
-        all_pds.extend(pd_tree_to_list(xml_sdf, pd, all_pds.len())?);
+        all_pds.extend(pd_tree_to_list(xml_sdf, pd)?);
     }
 
     Ok(all_pds)
@@ -1817,21 +1857,22 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
     for node in channel_nodes {
         let ch = Channel::from_xml(&xml_sdf, &node, &pds)?;
 
-        if let Some(setvar_id) = &ch.end_a.setvar_id {
-            let setvar = SysSetVar {
-                symbol: setvar_id.to_string(),
-                kind: SysSetVarKind::Id { id: ch.end_a.id },
-            };
-            checked_add_setvar(&mut pds[ch.end_a.pd].setvars, setvar, &xml_sdf, &node)?;
-        }
+        // @kwinter: Add these checks back in!
+        // if let Some(setvar_id) = &ch.end_a.setvar_id {
+        //     let setvar = SysSetVar {
+        //         symbol: setvar_id.to_string(),
+        //         kind: SysSetVarKind::Id { id: ch.end_a.id },
+        //     };
+        //     checked_add_setvar(&mut pds[ch.end_a.pd].setvars, setvar, &xml_sdf, &node)?;
+        // }
 
-        if let Some(setvar_id) = &ch.end_b.setvar_id {
-            let setvar = SysSetVar {
-                symbol: setvar_id.to_string(),
-                kind: SysSetVarKind::Id { id: ch.end_b.id },
-            };
-            checked_add_setvar(&mut pds[ch.end_b.pd].setvars, setvar, &xml_sdf, &node)?;
-        }
+        // if let Some(setvar_id) = &ch.end_b.setvar_id {
+        //     let setvar = SysSetVar {
+        //         symbol: setvar_id.to_string(),
+        //         kind: SysSetVarKind::Id { id: ch.end_b.id },
+        //     };
+        //     checked_add_setvar(&mut pds[ch.end_b.pd].setvars, setvar, &xml_sdf, &node)?;
+        // }
 
         channels.push(ch);
     }
@@ -1851,19 +1892,24 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         ));
     }
 
-    for pd in &pds {
-        if pds.iter().filter(|x| pd.name == x.name).count() > 1 {
-            return Err(format!(
-                "Error: duplicate protection domain name '{}'.",
-                pd.name
-            ));
+    let pds_map = {
+        let mut pds_by_name: BTreeMap<String, ProtectionDomain> = BTreeMap::new();
+
+        for pd in pds.into_iter() {
+            if pds_by_name.contains_key(&pd.name) {
+                return Err(format!(
+                    "Error: duplicate protection domain name '{}'.",
+                    pd.name
+                ));
+            }
+
+            pds_by_name.insert(pd.name.clone(), pd);
         }
-        if pd.name == MONITOR_PD_NAME {
-            return Err(
-                "Error: the PD name 'monitor' is reserved for the Microkit Monitor.".to_string(),
-            );
-        }
-    }
+
+        pds_by_name
+    };
+
+    let pds = pds_map;
 
     for mr in &mrs {
         if mrs.iter().filter(|x| mr.name == x.name).count() > 1 {
@@ -1875,7 +1921,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
     }
 
     let mut vms: Vec<&String> = vec![];
-    for pd in &pds {
+    for pd in pds.values() {
         if let Some(vm) = &pd.virtual_machine {
             if vms.contains(&&vm.name) {
                 return Err(format!(
@@ -1889,7 +1935,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
 
     // Ensure no duplicate IRQs
     let mut all_irqs = Vec::new();
-    for pd in &pds {
+    for pd in pds.values() {
         for sysirq in &pd.irqs {
             if all_irqs.contains(&sysirq.irq_num()) {
                 return Err(format!(
@@ -1907,10 +1953,10 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
 
     // Ensure no duplicate channel identifiers.
     // This means checking that no interrupt IDs clash with any channel IDs
-    let mut ch_ids = vec![vec![]; pds.len()];
-    for (pd_idx, pd) in pds.iter().enumerate() {
+    let mut ch_ids: BTreeMap<String, Vec<_>> = BTreeMap::new();
+    for pd in pds.values() {
         for sysirq in &pd.irqs {
-            if ch_ids[pd_idx].contains(&sysirq.id) {
+            if ch_ids[&pd.name].contains(&sysirq.id) {
                 return Err(format!(
                     "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
                     sysirq.id,
@@ -1920,13 +1966,16 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
                     pd.text_pos.unwrap().col
                 ));
             }
-            ch_ids[pd_idx].push(sysirq.id);
+
+            if let Some(val) = ch_ids.get_mut(&pd.name) {
+                val.push(sysirq.id);
+            };
         }
     }
 
     for ch in &channels {
-        if ch_ids[ch.end_a.pd].contains(&ch.end_a.id) {
-            let pd = &pds[ch.end_a.pd];
+        if ch_ids[&ch.end_a.pd].contains(&ch.end_a.id) {
+            let pd = &pds[&ch.end_a.pd];
             return Err(format!(
                 "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
                 ch.end_a.id,
@@ -1937,8 +1986,8 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             ));
         }
 
-        if ch_ids[ch.end_b.pd].contains(&ch.end_b.id) {
-            let pd = &pds[ch.end_b.pd];
+        if ch_ids[&ch.end_b.pd].contains(&ch.end_b.id) {
+            let pd = &pds[&ch.end_b.pd];
             return Err(format!(
                 "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
                 ch.end_b.id,
@@ -1949,8 +1998,8 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             ));
         }
 
-        let pd_a = &pds[ch.end_a.pd];
-        let pd_b = &pds[ch.end_b.pd];
+        let pd_a = &pds[&ch.end_a.pd];
+        let pd_b = &pds[&ch.end_b.pd];
         if ch.end_a.pp && pd_a.priority >= pd_b.priority {
             return Err(format!(
                 "Error: PPCs must be to protection domains of strictly higher priorities; \
@@ -1963,14 +2012,30 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
                         channel with PPC exists from pd {} (priority: {}) to pd {} (priority: {})",
                 pd_b.name, pd_b.priority, pd_a.name, pd_a.priority
             ));
+        } else if ch.end_a.pp && pd_a.cpu != pd_b.cpu {
+            return Err(format!(
+                "Error: PPCs are not allowed across cores on multikernels; \
+                        channel with PPC exists from pd {} ({}) to pd {} ({})",
+                pd_a.name, pd_a.cpu, pd_b.name, pd_b.cpu,
+            ));
+        } else if ch.end_b.pp && pd_a.cpu != pd_b.cpu {
+            return Err(format!(
+                "Error: PPCs are not allowed across cores on multikernels; \
+                        channel with PPC exists from pd {} ({}) to pd {} ({})",
+                pd_b.name, pd_b.cpu, pd_a.name, pd_a.cpu,
+            ));
         }
 
-        ch_ids[ch.end_a.pd].push(ch.end_a.id);
-        ch_ids[ch.end_b.pd].push(ch.end_b.id);
+        if let Some(val) = ch_ids.get_mut(&ch.end_a.pd) {
+            val.push(ch.end_a.id);
+        };
+        if let Some(val) = ch_ids.get_mut(&ch.end_b.pd) {
+            val.push(ch.end_b.id);
+        };
     }
 
     // Ensure no duplicate I/O Ports
-    for pd in &pds {
+    for pd in pds.values() {
         let mut seen_ioport_ids: Vec<u64> = Vec::new();
         for ioport in &pd.ioports {
             if seen_ioport_ids.contains(&ioport.id) {
@@ -1990,7 +2055,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
 
     // Ensure I/O Ports' size are valid and they don't overlap.
     let mut seen_ioports: Vec<(&str, &IOPort)> = Vec::new();
-    for pd in &pds {
+    for pd in pds.values() {
         for this_ioport in &pd.ioports {
             for (seen_pd_name, seen_ioport) in &seen_ioports {
                 let left_range = this_ioport.addr..this_ioport.addr + this_ioport.size - 1;
@@ -2020,7 +2085,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
     }
 
     // Ensure that all maps are correct
-    for pd in &pds {
+    for pd in pds.values() {
         check_maps(&xml_sdf, &mrs, pd, &pd.maps)?;
         if let Some(vm) = &pd.virtual_machine {
             check_maps(&xml_sdf, &mrs, vm, &vm.maps)?;
@@ -2057,24 +2122,39 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
     }
 
     // Check that all MRs are used
+    let mut cores_using_mr = BTreeMap::<&str, BTreeSet<CpuCore>>::new();
+    for pd in pds.values() {
+        // TODO: don't duplicate.
+        for map in pd.maps.iter() {
+            cores_using_mr.entry(&map.mr).or_default().insert(pd.cpu);
+        }
+
+        if let Some(vm) = &pd.virtual_machine {
+            for map in vm.maps.iter() {
+                cores_using_mr.entry(&map.mr).or_default().insert(pd.cpu);
+            }
+        }
+    }
+
+    for mr in mrs.iter_mut() {
+        match cores_using_mr.get(&mr.name.as_str()) {
+            Some(cores_using) => {
+                mr.used_cores.extend(cores_using.iter());
+            }
+            None => {
+                println!("WARNING: unused memory region '{}'", mr.name);
+            }
+        }
+    }
+
+    println!("CORES USING: {:?}", cores_using_mr);
+
+    // TODO: make into a map
     let mut all_maps = vec![];
-    for pd in &pds {
+    for pd in pds.values() {
         all_maps.extend(&pd.maps);
         if let Some(vm) = &pd.virtual_machine {
             all_maps.extend(&vm.maps);
-        }
-    }
-    for mr in &mrs {
-        let mut found = false;
-        for map in &all_maps {
-            if map.mr == mr.name {
-                found = true;
-                break;
-            }
-        }
-
-        if !found {
-            println!("WARNING: unused memory region '{}'", mr.name);
         }
     }
 
@@ -2132,7 +2212,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
 
     // If any MRs are subject of a setvar region_paddr, update its phys_addr field to indicate tool allocated.
     let mut mr_names_with_setvar_paddr = HashSet::new();
-    for pd in pds.iter() {
+    for pd in pds.values() {
         for setvar in pd.setvars.iter() {
             if let SysSetVarKind::Paddr { region } = &setvar.kind {
                 mr_names_with_setvar_paddr.insert(region);
