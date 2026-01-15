@@ -22,6 +22,8 @@ pub mod symbols;
 pub mod uimage;
 pub mod util;
 
+use crate::sel4::Config;
+
 // Note that these values are used in the monitor so should also be changed there
 // if any of these were to change.
 pub const MAX_PDS: usize = 63;
@@ -203,6 +205,13 @@ impl DisjointMemoryRegion {
         let mut last_end: Option<u64> = None;
         for region in &self.regions {
             if last_end.is_some() {
+                if region.base < last_end.unwrap() {
+                    eprintln!("DisjointMemoryRegion check() failure");
+                    for r in &self.regions {
+                        eprintln!("[{:x}..{:x})", r.base, r.end);
+                    }
+                }
+
                 assert!(region.base >= last_end.unwrap());
             }
             last_end = Some(region.end)
@@ -238,6 +247,12 @@ impl DisjointMemoryRegion {
                 .insert(insert_idx, MemoryRegion::new(base, end));
         }
         self.check();
+    }
+
+    pub fn extend(&mut self, other: &Self) {
+        for r in other.regions.iter() {
+            self.insert_region(r.base, r.end);
+        }
     }
 
     pub fn remove_region(&mut self, base: u64, end: u64) {
@@ -334,4 +349,58 @@ impl DisjointMemoryRegion {
             None => None,
         }
     }
+
+    pub fn allocate_aligned(&mut self, size: u64, align: u64) -> MemoryRegion {
+        let mut region_to_remove: Option<MemoryRegion> = None;
+        for region in &self.regions {
+            if size <= region.size() {
+                if region.base % align == 0 {
+                    // maybe partially remove this region.
+                    region_to_remove = Some(MemoryRegion::new(region.base, region.base + size));
+                    break;
+                }
+
+                let new_base = util::round_up(region.base, align);
+                let new_end = new_base + size;
+                if new_base < region.end && new_end <= region.end {
+                    region_to_remove = Some(MemoryRegion::new(new_base, new_end));
+                    break;
+                }
+            }
+        }
+
+        match region_to_remove {
+            Some(region) => {
+                self.remove_region(region.base, region.end);
+                region
+            }
+            None => panic!("Unable to allocate {size} bytes"),
+        }
+    }
+
+    pub fn allocate_non_contiguous(&mut self, size: u64) -> Result<Self, String> {
+        let mut new = Self::default();
+
+        let mut allocated_amount = 0;
+        while allocated_amount < size {
+            let Some(first_region) = self.regions.first() else {
+                // No memory left.
+                return Err(format!(
+                    "allocated {allocated_amount:x} of {size:x} before running out of memory"
+                ));
+            };
+
+            let amount_left_needed = size - allocated_amount;
+            let to_allocate = std::cmp::min(first_region.size(), amount_left_needed);
+
+            let base = self.allocate(to_allocate);
+            allocated_amount += to_allocate;
+            new.insert_region(base, base + to_allocate);
+        }
+
+        new.check();
+
+        Ok(new)
+    }
+
 }
