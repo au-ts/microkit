@@ -18,8 +18,9 @@ use crate::{
 /// the Microkit's requirements
 pub fn patch_symbols(
     kernel_config: &Config,
-    pd_elf_files: &mut [ElfFile],
+    pd_elf_files: &mut BTreeMap<String, ElfFile>,
     system: &SystemDescription,
+    cross_core_receiver_channels: &[(ChannelEnd, ChannelEnd)],
 ) -> Result<(), String> {
     // *********************************
     // Step 1. Write ELF symbols in the monitor.
@@ -28,9 +29,10 @@ pub fn patch_symbols(
 
     let pd_names: Vec<String> = system
         .protection_domains
-        .iter()
+        .values()
         .map(|pd| pd.name.clone())
         .collect();
+
     monitor_elf
         .write_symbol(
             "pd_names_len",
@@ -46,7 +48,7 @@ pub fn patch_symbols(
 
     let vm_names: Vec<String> = system
         .protection_domains
-        .iter()
+        .values()
         .filter(|pd| pd.virtual_machine.is_some())
         .flat_map(|pd_with_vm| {
             let vm = pd_with_vm.virtual_machine.as_ref().unwrap();
@@ -71,7 +73,7 @@ pub fn patch_symbols(
         .unwrap();
 
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
-    for pd in system.protection_domains.iter() {
+    for pd in system.protection_domains.values() {
         let cur_stack_vaddr = kernel_config.pd_stack_bottom(pd.stack_size);
         pd_stack_bottoms.push(cur_stack_vaddr);
     }
@@ -90,8 +92,8 @@ pub fn patch_symbols(
         mr_name_to_desc.insert(&mr.name, mr);
     }
 
-    for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
-        let elf_obj = &mut pd_elf_files[pd_global_idx];
+    for pd in system.protection_domains.values() {
+        let elf_obj = &mut pd_elf_files.get(&pd.name).unwrap();
 
         let name = pd.name.as_bytes();
         let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
@@ -105,7 +107,7 @@ pub fn patch_symbols(
         let mut notification_bits: u64 = 0;
         let mut pp_bits: u64 = 0;
         for channel in system.channels.iter() {
-            if channel.end_a.pd == pd_global_idx {
+            if channel.end_a.pd == pd.name {
                 if channel.end_a.notify {
                     notification_bits |= 1 << channel.end_a.id;
                 }
@@ -113,7 +115,7 @@ pub fn patch_symbols(
                     pp_bits |= 1 << channel.end_a.id;
                 }
             }
-            if channel.end_b.pd == pd_global_idx {
+            if channel.end_b.pd == pd.name {
                 if channel.end_b.notify {
                     notification_bits |= 1 << channel.end_b.id;
                 }
@@ -122,6 +124,14 @@ pub fn patch_symbols(
                 }
             }
         }
+
+        let mut sgi_bits = 0;
+        for (_, recv) in cross_core_receiver_channels.iter() {
+            if recv.pd == pd.name {
+                sgi_bits |= 1 << recv.id;
+            }
+        }
+
         elf_obj
             .write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())
             .unwrap();
@@ -133,6 +143,9 @@ pub fn patch_symbols(
             .unwrap();
         elf_obj
             .write_symbol("microkit_ioports", &pd.ioport_bits().to_le_bytes())
+            .unwrap();
+        elf_obj
+            .write_symbol("microkit_sgi_notifications", &sgi_bits.to_le_bytes())
             .unwrap();
 
         let mut symbols_to_write: Vec<(&String, u64)> = Vec::new();
@@ -172,7 +185,7 @@ pub fn patch_symbols(
                 }
             }
         }
-        let elf_obj = pd_elf_files.get_mut(pd_global_idx).unwrap();
+        let elf_obj = pd_elf_files.get(&pd.name).unwrap();
         for (sym_name, value) in symbols_to_write.iter() {
             elf_obj
                 .write_symbol(sym_name, &value.to_le_bytes())
