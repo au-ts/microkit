@@ -22,7 +22,7 @@ use crate::{
         spec::{capdl_obj_physical_size_bits, ElfContent},
         util::*,
     },
-    elf::ElfFile,
+    elf::{ElfFile, ElfSegmentData},
     sdf::{
         CpuCore, SysMap, SysMapPerms, SystemDescription, BUDGET_DEFAULT, MONITOR_PD_NAME,
         MONITOR_PRIORITY,
@@ -104,6 +104,61 @@ const PD_SCHEDCONTEXT_EXTRA_SIZE_BITS: u64 = PD_SCHEDCONTEXT_EXTRA_SIZE.ilog2() 
 pub const SLOT_BITS: u64 = 5;
 pub const SLOT_SIZE: u64 = 1 << SLOT_BITS;
 
+// SETUP FOR CONTROLLER PD -------------------------------
+// keep track of all child frame caps for unmapping later
+pub const MAX_FRAMES_PER_CHILD: usize = 512;
+pub const MAX_PDS: usize = 64;
+
+#[derive(Clone, Debug)]
+pub struct ChildPDFrameCapSlots {
+    pub pd_id: u64,
+    pub frame_cap_slots: Vec<u64>,
+    pub frame_cap_count: u64,
+    pub child_vaddr_base: u64,
+}
+
+impl Default for ChildPDFrameCapSlots {
+    fn default() -> Self {
+        Self {
+            pd_id: u64::MAX,
+            frame_cap_slots: Vec::with_capacity(MAX_FRAMES_PER_CHILD),
+            frame_cap_count: 0,
+            child_vaddr_base: 0,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AllChildFrameCapSlots {
+    pub children: [ChildPDFrameCapSlots; MAX_PDS],
+    pub controller_next_frame_slot: u64,
+}
+
+impl Default for AllChildFrameCapSlots {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AllChildFrameCapSlots {
+    pub fn new() -> Self {
+        Self {
+            children: std::array::from_fn(|_| ChildPDFrameCapSlots::default()),
+            controller_next_frame_slot: CONTROLLER_CHILD_FRAME_CAP_BASE,
+        }
+    }
+
+    pub fn add_frame_cap(&mut self, pd_idx: usize, controller_slot: u64) {
+        if pd_idx < MAX_PDS && self.children[pd_idx].frame_cap_count < MAX_FRAMES_PER_CHILD as u64 {
+            self.children[pd_idx].frame_cap_slots.push(controller_slot);
+            self.children[pd_idx].frame_cap_count += 1;
+        }
+    }
+}
+
+// base slot space for frame caps
+const CONTROLLER_CHILD_FRAME_CAP_BASE: u64 = 1000;
+
 pub type FrameFill = Fill<ElfContent>;
 pub type CapDLNamedObject = NamedObject<FrameFill>;
 
@@ -116,6 +171,10 @@ pub struct CapDLSpecContainer {
     pub spec: Spec<FrameFill>,
     /// Track allocations as we build the system for later use by the report.
     pub expected_allocations: HashMap<ObjectId, ExpectedAllocation>,
+    /// Track frame caps for each child PD so controller can unmap them
+    pub child_frame_caps: AllChildFrameCapSlots,
+    /// ID of the controller PD TCB (cached for easy access)
+    pub controller_tcb_obj_id: Option<ObjectId>,
 }
 
 impl Default for CapDLSpecContainer {
@@ -140,6 +199,8 @@ impl CapDLSpecContainer {
                 log_level: None,
             },
             expected_allocations: HashMap::new(),
+            child_frame_caps: AllChildFrameCapSlots::new(),
+            controller_tcb_obj_id: None,
         }
     }
 
@@ -352,6 +413,10 @@ impl CapDLSpecContainer {
 
 /// Given a SysMap, page size, VSpace object ID, and a Vec of frame object ids,
 /// map all frames into the given VSpace at the requested vaddr.
+///
+/// Additionally, if this PD needs to be managed by the controller (not controller, not monitor, not VM),
+/// also mint copies of the frame caps into the controller's CSpace and track their slots
+/// for runtime unmapping.
 fn map_memory_region(
     spec_container: &mut CapDLSpecContainer,
     sel4_config: &Config,
@@ -360,26 +425,55 @@ fn map_memory_region(
     page_sz: u64,
     target_vspace: ObjectId,
     frames: &[ObjectId],
+    pd_global_idx: usize,
+    is_managed_by_controller: bool,
 ) {
     let mut cur_vaddr = map.vaddr;
     let read = map.perms & SysMapPerms::Read as u8 != 0;
     let write = map.perms & SysMapPerms::Write as u8 != 0;
     let execute = map.perms & SysMapPerms::Execute as u8 != 0;
     let cached = map.cached;
+
     for frame_obj_id in frames.iter() {
         // Make a cap for this frame.
         let frame_cap = capdl_util_make_frame_cap(*frame_obj_id, read, write, execute, cached);
+
         // Map it into this PD address space.
         map_page(
             spec_container,
             sel4_config,
             pd_name,
             target_vspace,
-            frame_cap,
+            frame_cap.clone(),
             page_sz,
             cur_vaddr,
         )
         .unwrap();
+
+        // Also mint the frame cap into controller's CSpace
+        if is_managed_by_controller {
+            let controller_slot = spec_container.child_frame_caps.controller_next_frame_slot;
+            spec_container.child_frame_caps.controller_next_frame_slot += 1;
+
+            if let Some(controller_tcb_id) = spec_container.controller_tcb_obj_id {
+                let controller_cnode_id =
+                    capdl_util_get_cnode_id_from_tcb_id(spec_container, controller_tcb_id);
+
+                // Mint the frame cap into the controller's CSpace
+                capdl_util_insert_cap_into_cspace(
+                    spec_container,
+                    controller_cnode_id,
+                    controller_slot as u32,
+                    frame_cap.clone(),
+                );
+
+                // Track this frame cap slot for the child PD
+                spec_container
+                    .child_frame_caps
+                    .add_frame_cap(pd_global_idx, controller_slot);
+            }
+        }
+
         cur_vaddr += page_sz;
     }
 }
@@ -550,30 +644,78 @@ pub fn build_capdl_spec(
                 entries: [].to_vec(),
             };
             if mr.name == "dynamic_elfs_region" {
-                // The controller PD owns the dynamic blob; reference the controller ELF instead
-                // of the monitor ELF.
-
-                // we unwrap last because we store the extra elf at the end - need to change if we can have
-                // more than one
-                let controller_elf = elfs.get(controller_elf_id).unwrap().last().unwrap();
+                // Get a mutable reference to the controller ELF (stored at the end of its list)
+                let controller_elf = elfs.get_mut(controller_elf_id).unwrap().last_mut().unwrap();
                 if !controller_elf.segments.is_empty() {
-                    let seg_idx: usize = controller_elf.segments.len() - 1;
-                    let seg_len: usize = controller_elf.segments[seg_idx].data().len();
+                    let blob_seg_idx: usize = controller_elf.segments.len() - 1;
+                    let blob_len: usize = controller_elf.segments[blob_seg_idx].data().len();
                     let page_bytes: usize = mr.page_size_bytes() as usize;
-                    let start: usize = (frame_sequence as usize) * page_bytes;
-                    if start < seg_len {
-                        let end: usize = std::cmp::min(start + page_bytes, seg_len);
+
+                    // we make one tiny segment to hold the size - this is placed right before the elf (8 bytes)
+                    let size_header_bytes: [u8; 8] = (blob_len as u64).to_le_bytes();
+                    if controller_elf
+                        .segments
+                        .last()
+                        .map(|s| matches!(s.data.clone(), ElfSegmentData::RealData(bytes) if bytes.len() == 8 && bytes == size_header_bytes.to_vec()))
+                        != Some(true)
+                    {
+                        controller_elf.add_segment(
+                            true,  
+                            false, 
+                            false, 
+                            controller_elf.next_vaddr(PageSize::Small),
+                            ElfSegmentData::RealData(size_header_bytes.to_vec()),
+                        );
+                    }
+
+                    let size_seg_idx: usize = controller_elf.segments.len() - 1;
+                    let frame_start_global: isize =
+                        (frame_sequence as isize * page_bytes as isize) - 8; // after header
+
+                    if frame_sequence == 0 {
+                        // 8 bytes blob
                         frame_fill.entries.push(FillEntry {
-                            range: Range {
-                                start: 0,
-                                end: (end as u64) - (start as u64),
-                            },
+                            range: Range { start: 0, end: 8 },
                             content: FillEntryContent::Data(ElfContent {
                                 elf_id: controller_elf_id,
-                                elf_seg_idx: seg_idx,
-                                elf_seg_data_range: (start..end),
+                                elf_seg_idx: size_seg_idx,
+                                elf_seg_data_range: (0..8),
                             }),
                         });
+
+                        // rest of ELF
+                        let end = std::cmp::min(page_bytes - 8, blob_len);
+                        if end > 0 {
+                            frame_fill.entries.push(FillEntry {
+                                range: Range {
+                                    start: 8,
+                                    end: 8 + end as u64,
+                                },
+                                content: FillEntryContent::Data(ElfContent {
+                                    elf_id: controller_elf_id,
+                                    elf_seg_idx: blob_seg_idx,
+                                    elf_seg_data_range: (0..end),
+                                }),
+                            });
+                        }
+                    } else {
+                        if frame_start_global < blob_len as isize {
+                            let start = frame_start_global.max(0) as usize;
+                            let end = std::cmp::min(start + page_bytes, blob_len);
+                            if end > start {
+                                frame_fill.entries.push(FillEntry {
+                                    range: Range {
+                                        start: 0,
+                                        end: (end - start) as u64,
+                                    },
+                                    content: FillEntryContent::Data(ElfContent {
+                                        elf_id: controller_elf_id,
+                                        elf_seg_idx: blob_seg_idx,
+                                        elf_seg_data_range: (start..end),
+                                    }),
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -642,11 +784,24 @@ pub fn build_capdl_spec(
             ));
         }
 
+        if (pd.control) {
+            // Cache the controller PD's TCB object ID for later use when mapping child frame caps.
+            spec_container.controller_tcb_obj_id = Some(pd_tcb_obj_id);
+        }
+
         // Allow PD to access their own VSpace for ops such as cache cleaning on ARM.
         caps_to_insert_to_pd_cspace.push(capdl_util_make_cte(
             PD_VSPACE_CAP_IDX as u32,
             capdl_util_make_page_table_cap(pd_vspace_obj_id),
         ));
+
+        // check if this pd should be managed by the controller pd
+        let is_managed_by_controller =
+            !pd.control && pd.name != MONITOR_PD_NAME && !pd.is_virtual_machine;
+
+        if is_managed_by_controller {
+            spec_container.child_frame_caps.children[pd_global_idx].pd_id = pd_global_idx as u64;
+        }
 
         // Step 3-2: Map in all Memory Regions
         for map in pd.maps.iter() {
@@ -685,6 +840,8 @@ pub fn build_capdl_spec(
                 page_size_bytes,
                 pd_vspace_obj_id,
                 frames,
+                pd_global_idx,
+                is_managed_by_controller,
             );
         }
 
@@ -866,6 +1023,8 @@ pub fn build_capdl_spec(
                     page_size_bytes,
                     vm_vspace_obj_id,
                     frames,
+                    pd_global_idx, // Use the parent PD's index
+                    false,         // VMs are not managed by controller like regular PDs
                 );
             }
 

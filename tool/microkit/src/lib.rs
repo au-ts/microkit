@@ -39,6 +39,46 @@ pub struct UntypedObject {
     pub is_device: bool,
 }
 
+use serde::{Deserialize, Serialize};
+
+pub const MAX_FRAMES_PER_CHILD: usize = 512;
+
+// Data for single PD worth of frame caps
+#[repr(C)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChildPDFrameCapSlots {
+    pub pd_id: u64,
+    pub frame_cap_slots: [u64; MAX_FRAMES_PER_CHILD],
+    pub frame_cap_count: u64,
+    pub child_vaddr_base: u64,
+}
+
+impl Default for ChildPDFrameCapSlots {
+    fn default() -> Self {
+        Self {
+            pd_id: u64::MAX,
+            frame_cap_slots: [u64::MAX; MAX_FRAMES_PER_CHILD],
+            frame_cap_count: 0,
+            child_vaddr_base: 0,
+        }
+    }
+}
+
+// Metadata about all child PDs' frame caps
+#[repr(C)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AllChildFrameCapSlots {
+    pub children: [ChildPDFrameCapSlots; MAX_PDS],
+}
+
+impl Default for AllChildFrameCapSlots {
+    fn default() -> Self {
+        Self {
+            children: core::array::from_fn(|_| ChildPDFrameCapSlots::default()),
+        }
+    }
+}
+
 pub const UNTYPED_DESC_PADDING: usize = size_of::<u64>() - (2 * size_of::<u8>());
 #[repr(C)]
 struct SeL4UntypedDesc {
