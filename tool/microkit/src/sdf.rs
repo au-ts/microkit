@@ -38,6 +38,10 @@ use std::path::{Path, PathBuf};
 const PD_MAX_ID: u64 = 61;
 const VCPU_MAX_ID: u64 = PD_MAX_ID;
 
+/// This is the maximum slot allowed for cap maps. This can change if you wish,
+/// but also update the MICROKIT_MAX_USER_CAPS define in `microkit.h`.
+const CAP_MAP_MAX_SLOT: u64 = 128;
+
 pub const MONITOR_PRIORITY: u8 = 255;
 const PD_MAX_PRIORITY: u8 = 254;
 /// In microseconds
@@ -282,13 +286,15 @@ pub struct ProtectionDomain {
     text_pos: Option<roxmltree::TextPos>,
 }
 
+/// Update CAP_MAP_TYPES whenever making changes to the CapMapType enum
+pub const CAP_MAP_TYPES: usize = 4;
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum CapMapType {
     Tcb = 0,
     Sc,
     Vspace,
     Cnode,
-    __Len,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1271,29 +1277,24 @@ impl CapMap {
     fn from_xml(xml_sdf: &XmlSystemDescription, node: &roxmltree::Node) -> Result<CapMap, String> {
         check_attributes(xml_sdf, node, &["type", "pd", "dest_cspace_slot"])?;
 
-        let cap_type = match checked_lookup(xml_sdf, node, "type")? {
+        let xml_cap_type = checked_lookup(xml_sdf, node, "type")?;
+        let cap_type = match xml_cap_type {
             "tcb" => CapMapType::Tcb,
             "sc" => CapMapType::Sc,
             "vspace" => CapMapType::Vspace,
             "cnode" => CapMapType::Cnode,
-            _ => {
-                return Err(value_error(
-                    xml_sdf,
-                    node,
-                    "type must be 'tcb' or 'sc' ".to_string(),
-                ))
-            }
+            _ => return Err(format!("Cap type: '{xml_cap_type}' is not supported.")),
         };
 
         let pd_name = checked_lookup(xml_sdf, node, "pd")?.to_string();
         let dest_cspace_slot =
             sdf_parse_number(checked_lookup(xml_sdf, node, "dest_cspace_slot")?, node)?;
 
-        if dest_cspace_slot >= 128 {
+        if dest_cspace_slot >= CAP_MAP_MAX_SLOT {
             return Err(value_error(
                 xml_sdf,
                 node,
-                "There are only 128 destination cspace slots available. Max slot allowed is 63"
+                format!("There are only {CAP_MAP_MAX_SLOT} destination cspace slots available.")
                     .to_string(),
             ));
         }
@@ -2085,7 +2086,7 @@ pub fn parse(
         let mut user_cap_slots = Vec::new();
         let mut seen_pd_cap_maps: Vec<(CapMapType, String)> = Vec::new();
 
-        for cap_map in pd.cap_maps.iter() {
+        for cap_map in &pd.cap_maps {
             if user_cap_slots.contains(&cap_map.dest_cspace_slot) {
                 return Err(format!(
                     "Error: Overlapping cap slot: {} in protection domain: '{}'",
@@ -2097,11 +2098,11 @@ pub fn parse(
 
             if seen_pd_cap_maps.contains(&(cap_map.cap_type, cap_map.pd_name.clone())) {
                 return Err(format!(
-                        "Error: Duplicate cap mapping of type '{:?}'. Src PD: '{}', dest PD: '{}'.",
-                        cap_map.cap_type, cap_map.pd_name, pd.name
-                    ));
+                    "Error: Duplicate cap mapping of type '{:?}'. Src PD: '{}', dest PD: '{}'.",
+                    cap_map.cap_type, cap_map.pd_name, pd.name
+                ));
             } else {
-                seen_pd_cap_maps.push((cap_map.cap_type.clone(), cap_map.pd_name.clone()))
+                seen_pd_cap_maps.push((cap_map.cap_type, cap_map.pd_name.clone()))
             }
         }
     }
