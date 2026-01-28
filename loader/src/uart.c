@@ -144,18 +144,25 @@ void putc(uint8_t ch)
 
 #elif defined(CONFIG_PLAT_BCM2711)
 /* rpi4b */
-#define UART_BASE 0xfe215040
-#define MU_IO 0x00
-#define MU_LSR 0x14
-#define MU_LSR_TXIDLE (1 << 6)
+#define UART_BASE 0xfe201000
 
-void uart_init(void) {}
+#define UARTDR                    0x000
+#define UARTFR                    0x018
 
-void putc(uint8_t ch)
+#define PL011_UARTFR_TXFF         (1 << 5)
+#define PL011_UARTFR_RXFE         (1 << 4)
+
+void uart_init(void)
 {
-    while (!(*UART_REG(MU_LSR) & MU_LSR_TXIDLE));
-    *UART_REG(MU_IO) = (ch & 0xff);
 }
+
+void putc(unsigned char c)
+{
+    while ((*UART_REG(UARTFR) & PL011_UARTFR_TXFF) != 0);
+
+    *UART_REG(UARTDR) = c;
+}
+
 #elif defined(CONFIG_PLAT_ROCKPRO64)
 #define UART_BASE   0xff1a0000
 #define UTHR        0x0
