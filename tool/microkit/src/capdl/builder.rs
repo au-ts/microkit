@@ -1067,7 +1067,7 @@ pub fn build_capdl_spec(
     }
 
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
-        if pd.child_pts {
+        if pd.child_pts.is_some() {
             let mut table_metadata = TableMetadata {
                 base_addr: 0,
                 pgd: [0; 64],
@@ -1258,7 +1258,7 @@ pub fn build_capdl_spec(
             // Finally, patch the table_metadata into the elf
             #[allow(unused_mut)]
             let mut elf_obj = &mut elfs[pd_global_idx];
-            elf_obj.write_symbol("table_metadata", table_metadata.as_bytes())?;
+            elf_obj.write_symbol(pd.child_pts.as_ref().unwrap(), table_metadata.as_bytes())?;
         }
     }
 
