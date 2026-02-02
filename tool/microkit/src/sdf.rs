@@ -125,6 +125,7 @@ pub struct SysMemoryRegion {
     /// due to the user's SDF or created by the tool for setting up the
     /// stack, ELF, etc.
     pub kind: SysMemoryRegionKind,
+    pub backed: bool,
 }
 
 impl SysMemoryRegion {
@@ -1268,6 +1269,18 @@ impl SysMemoryRegion {
         }
 
         let page_count = size / page_size;
+        
+        let backed = node
+            .attribute("backed")
+            .map(str_to_bool)
+            .unwrap_or(Some(true))
+            .ok_or_else(|| {
+                value_error(
+                    xml_sdf,
+                    node,
+                    "backed must be 'true' or 'false'".to_string(),
+                )
+            })?;
 
         Ok(SysMemoryRegion {
             name: name.to_string(),
@@ -1278,6 +1291,7 @@ impl SysMemoryRegion {
             phys_addr,
             text_pos: Some(xml_sdf.doc.text_pos_at(node.range().start)),
             kind: SysMemoryRegionKind::User,
+            backed : backed,
         })
     }
 }
