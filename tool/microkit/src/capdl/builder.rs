@@ -18,14 +18,13 @@ use sel4_capdl_initializer_types::{
 use crate::{
     capdl::{
         irq::create_irq_handler_cap,
-        memory::{create_vspace, create_vspace_ept, map_page},
-        spec::{capdl_obj_physical_size_bits, ElfContent},
+        memory::{create_page_structure_recursive, create_vspace, create_vspace_ept, map_page},
+        spec::{ElfContent, capdl_obj_physical_size_bits},
         util::*,
     },
     elf::ElfFile,
     sdf::{
-        CpuCore, SysMap, SysMapPerms, SystemDescription, BUDGET_DEFAULT, MONITOR_PD_NAME,
-        MONITOR_PRIORITY,
+        BUDGET_DEFAULT, CpuCore, MONITOR_PD_NAME, MONITOR_PRIORITY, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription
     },
     sel4::{Arch, Config, PageSize},
     util::{ranges_overlap, round_down, round_up},
@@ -263,7 +262,6 @@ impl CapDLSpecContainer {
                     frame_cap,
                     page_size_bytes,
                     cur_vaddr,
-                    &true
                 ) {
                     Ok(_) => {
                         frame_sequence += 1;
@@ -305,7 +303,6 @@ impl CapDLSpecContainer {
             ipcbuf_frame_cap,
             PageSize::Small as u64,
             ipcbuf_vaddr,
-            &true,
         ) {
             Ok(_) => {}
             Err(map_err_reason) => {
@@ -359,7 +356,6 @@ fn map_memory_region(
     page_sz: u64,
     target_vspace: ObjectId,
     frames: &[ObjectId],
-    backed: &bool,
 ) {
     let mut cur_vaddr = map.vaddr;
     let read = map.perms & SysMapPerms::Read as u8 != 0;
@@ -368,8 +364,6 @@ fn map_memory_region(
     let cached = map.cached;
     for frame_obj_id in frames.iter() {
         // Make a cap for this frame.
-        // JOSHUA TODO: I probably don't want to make a frame cap here since i want the pager to have the frame caps i think.
-        // maybe i can make the frame cap optional.
         let frame_cap = capdl_util_make_frame_cap(*frame_obj_id, read, write, execute, cached);
         // Map it into this PD address space.
         map_page(
@@ -380,7 +374,6 @@ fn map_memory_region(
             frame_cap,
             page_sz,
             cur_vaddr,
-            backed,
         )
         .unwrap();
         cur_vaddr += page_sz;
@@ -471,7 +464,6 @@ pub fn build_capdl_spec(
         mon_stack_frame_cap,
         PageSize::Small as u64,
         kernel_config.pd_stack_bottom(MON_STACK_SIZE),
-        &true,
     )
     .unwrap();
 
@@ -508,12 +500,12 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 2. Create the memory regions' spec. Result is a hashmap keyed on MR name, value is (parsed XML obj, Vec of frame object IDs)
     // *********************************
-    // JOSHUA TODO: check whether or not I actually want to make the frames here, probably not i think.
-    // don't create frames here, instead i need to store the page size and stuff like that.
-    // maybe it would be good to have a map from names to actual objects instead.
     let mut mr_name_to_frames: HashMap<&String, Vec<ObjectId>> = HashMap::new();
-    let mut mr_name_to_backed: HashMap<&String, bool> = HashMap::new();
+    let mut unbacked_mrs: Vec<&SysMemoryRegion> = Vec::new();
     for mr in system.memory_regions.iter() {
+        if (!mr.backed) {
+            unbacked_mrs.push(&mr);
+        }
         let mut frame_ids = Vec::new();
         let frame_size_bits = mr.page_size.fixed_size_bits(kernel_config);
 
@@ -531,7 +523,6 @@ pub fn build_capdl_spec(
                 frame_size_bits as u8,
             ));
         }
-        mr_name_to_backed.insert(&mr.name, mr.backed);
         mr_name_to_frames.insert(&mr.name, frame_ids);
     }
 
@@ -615,8 +606,6 @@ pub fn build_capdl_spec(
                     return Err(format!("ERROR: mapping MR '{}' to PD '{}' with vaddr [0x{:x}..0x{:x}) will overlap with an ELF segment at [0x{:x}..0x{:x})", map.mr, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, elf_seg_vaddr_range.start, elf_seg_vaddr_range.end));
                 }
             }
-            // JOSHUA TODO: I should change the frames to be an optional variable, and not have the backed arg .
-            // 
             map_memory_region(
                 &mut spec_container,
                 kernel_config,
@@ -625,8 +614,13 @@ pub fn build_capdl_spec(
                 page_size_bytes,
                 pd_vspace_obj_id,
                 frames,
-                mr_name_to_backed.get(&map.mr).unwrap(),
             );
+        }
+
+        // Create paging structures for all unbacked memory regions.
+        for mr in unbacked_mrs.into_iter() {
+
+            create_page_structure_recursive(cur_level, sel4_config, vaddr, page_size_bytes)
         }
 
         // Step 3-3: Create and map in the stack (bottom up)
@@ -653,7 +647,6 @@ pub fn build_capdl_spec(
                 stack_frame_cap,
                 PageSize::Small as u64,
                 cur_stack_vaddr,
-                &true,
             )
             .unwrap();
             cur_stack_vaddr += PageSize::Small as u64;
@@ -808,7 +801,6 @@ pub fn build_capdl_spec(
                     page_size_bytes,
                     vm_vspace_obj_id,
                     frames,
-                    &true,
                 );
             }
 
