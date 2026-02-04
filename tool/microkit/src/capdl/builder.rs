@@ -7,7 +7,7 @@ use core::ops::Range;
 
 use std::{
     cmp::{Ordering, min},
-    collections::HashMap, hash::Hash,
+    collections::{HashMap, HashSet}, hash::Hash,
 };
 
 use sel4_capdl_initializer_types::{
@@ -501,10 +501,12 @@ pub fn build_capdl_spec(
     // Step 2. Create the memory regions' spec. Result is a hashmap keyed on MR name, value is (parsed XML obj, Vec of frame object IDs)
     // *********************************
     let mut mr_name_to_frames: HashMap<&String, Vec<ObjectId>> = HashMap::new();
-    let mut unbacked_mrs: Vec<&SysMemoryRegion> = Vec::new();
+    let mut mr_name_to_mr: HashMap<&String, &SysMemoryRegion> = HashMap::new();
+    let mut unbacked_mrs: HashSet<&String> = HashSet::new();
     for mr in system.memory_regions.iter() {
+        mr_name_to_mr.insert(&mr.name, &mr);
         if (!mr.backed) {
-            unbacked_mrs.push(&mr);
+            unbacked_mrs.insert(&mr.name);
         }
         let mut frame_ids = Vec::new();
         let frame_size_bits = mr.page_size.fixed_size_bits(kernel_config);
@@ -583,6 +585,16 @@ pub fn build_capdl_spec(
 
         // Step 3-2: Map in all Memory Regions
         for map in pd.maps.iter() {
+            if unbacked_mrs.contains(&map.mr) {
+                // Only create the paging structures, no frames or frame caps.
+                create_page_structure_recursive(
+                    top_pt_level_number(kernel_config), 
+                    kernel_config, 
+                    map.vaddr,
+                    mr_name_to_mr.get(&map.mr).unwrap().page_size_bytes(),
+                );
+                continue;
+            }
             let frames = mr_name_to_frames.get(&map.mr).unwrap();
             // MRs have frames of equal size so just use the first frame's page size.
             let page_size_bytes =
@@ -615,12 +627,6 @@ pub fn build_capdl_spec(
                 pd_vspace_obj_id,
                 frames,
             );
-        }
-
-        // Create paging structures for all unbacked memory regions.
-        for mr in unbacked_mrs.into_iter() {
-
-            create_page_structure_recursive(cur_level, sel4_config, vaddr, page_size_bytes)
         }
 
         // Step 3-3: Create and map in the stack (bottom up)
