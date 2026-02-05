@@ -271,6 +271,9 @@ pub struct ProtectionDomain {
     pub parent: Option<usize>,
     /// Value of the setvar_id attribute, if a parent protection domain exists
     pub setvar_id: Option<String>,
+    /// If true, CapDL initialiser will hand off all remaining untyped
+    /// capabilities to this PD. (Can only be set by one PD)
+    pub receive_all_untypeds: bool,
     /// Location in the parsed SDF file
     text_pos: Option<roxmltree::TextPos>,
 }
@@ -456,6 +459,7 @@ impl ProtectionDomain {
             // but we do the error-checking further down.
             "smc",
             "cpu",
+            "receive_all_untypeds",
         ];
         if is_child {
             attrs.push("id");
@@ -543,6 +547,21 @@ impl ProtectionDomain {
                 }
             }
         }
+
+        let receive_all_untypeds = if let Some(xml_receive_all_untypeds)  = node.attribute("receive_all_untypeds") {
+            match str_to_bool(xml_receive_all_untypeds) {
+                Some(val) => val,
+                None => {
+                    return Err(value_error(
+                        xml_sdf,
+                        node,
+                        "receive_all_untypeds must be 'true' or 'false'".to_string(),
+                    ))
+                }
+            }
+        } else {
+            false
+        };
 
         let cpu = CpuCore(
             sdf_parse_number(node.attribute("cpu").unwrap_or("0"), node)?
@@ -1083,6 +1102,7 @@ impl ProtectionDomain {
             has_children,
             parent: None,
             setvar_id,
+            receive_all_untypeds,
             text_pos: Some(xml_sdf.doc.text_pos_at(node.range().start)),
         })
     }
@@ -1713,7 +1733,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             MAX_PDS
         ));
     }
-
+    let mut pd_has_receive_all_untypeds = false;
     for pd in &pds {
         if pds.iter().filter(|x| pd.name == x.name).count() > 1 {
             return Err(format!(
@@ -1725,6 +1745,15 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
             return Err(
                 "Error: the PD name 'monitor' is reserved for the Microkit Monitor.".to_string(),
             );
+        }
+        if pd.receive_all_untypeds {
+            if pd_has_receive_all_untypeds {
+                return Err(
+                    "Error: only one PD can receive the remaining untypeds (receive_all_untypeds attribute set to true)".to_string()
+                );
+            } else {
+                pd_has_receive_all_untypeds = true;
+            }
         }
     }
 
