@@ -4,6 +4,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
+use rkyv::api::low::from_bytes;
+
 use crate::sel4::PageSize;
 use crate::util::{bytes_to_struct, round_down, struct_to_bytes};
 use std::collections::HashMap;
@@ -662,4 +664,21 @@ impl ElfFile {
 
         Ok(metadata(out).unwrap().len())
     }
+
+    // for the pager implementation... maybe this is unecessary...
+    // returns vector of frame cap, Frame id, name of PD which owns the frame.
+    // fn get_unbacked_frames(&self) -> Result<Vec<(Cap, ObjectId, String)>> {
+    //     if let Some((sym, duplicate)) = self.symbols.get("unmapped_frames") {
+    //         if *duplicate {
+    //             Err(format!("no unmapped frames in elf"))
+    //         } else {
+    //             // i need to convert this bytearray to the required vec Ok((sym.value, sym.size))
+    //             let ret: Vec<(Cap, ObjectId, String)> = from
+    //             todo!("read above.")
+                
+    //         }
+    //     } else {
+    //         Err(format!("no unmapped frames in elf"))
+    //     }
+    // }
 }

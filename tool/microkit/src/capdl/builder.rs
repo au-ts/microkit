@@ -7,7 +7,7 @@ use core::ops::Range;
 
 use std::{
     cmp::{Ordering, min},
-    collections::{HashMap, HashSet}, hash::Hash,
+    collections::{HashMap, HashSet}, hash::Hash, iter::Enumerate,
 };
 
 use sel4_capdl_initializer_types::{
@@ -557,6 +557,8 @@ pub fn build_capdl_spec(
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
 
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
+        let unmapped_frames: Vec<(Cap, ObjectId, String)> = Vec::new(); // vector of tuple of frame cap, frame id and name of pd which owns frame.
+
         let elf_obj = &elfs[pd_global_idx];
 
         let mut caps_to_bind_to_tcb: Vec<CapTableEntry> = Vec::new();
@@ -593,6 +595,28 @@ pub fn build_capdl_spec(
                     map.vaddr,
                     mr_name_to_mr.get(&map.mr).unwrap().page_size_bytes(),
                 );
+                // JOSHUA TODO: maybe i want to do the frame and frame cap creation here idk.
+                // frame obj already created.
+                let frames = mr_name_to_frames.get(&map.mr).unwrap();
+                for frame in frames {
+                    let mut cur_vaddr = map.vaddr;
+                    let read = map.perms & SysMapPerms::Read as u8 != 0;
+                    let write = map.perms & SysMapPerms::Write as u8 != 0;
+                    let execute = map.perms & SysMapPerms::Execute as u8 != 0;
+                    let cached = map.cached;
+                    unmapped_frames.push((
+                        capdl_util_make_frame_cap(frame.clone(), read, write, execute, cached),
+                        frame.clone(),
+                        pd.name, // name of the child pd.
+                    ));
+
+                }
+
+                // make the frame cap here
+                // write to the parent's elf file.
+
+                // if there are unbacked memory regions, there also needs to be a pager.
+                // i need to do this. 
                 continue;
             }
             let frames = mr_name_to_frames.get(&map.mr).unwrap();
@@ -627,6 +651,12 @@ pub fn build_capdl_spec(
                 pd_vspace_obj_id,
                 frames,
             );
+        }
+
+        // add the unmapped frames to the pager's elf
+        if let Some((pager_idx, _)) = system.protection_domains.iter().enumerate().find(pd.name.eq("pager")) {
+            // JOSHUA TODO: i need to find a way to convert the vec into bytes.
+            elfs[pager_idx].write_symbol("unmapped_frames", serde_json::to_string(&unmapped_frames).unwrap().as_bytes());
         }
 
         // Step 3-3: Create and map in the stack (bottom up)
