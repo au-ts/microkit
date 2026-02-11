@@ -135,6 +135,56 @@ impl Default for CapDLSpecContainer {
     }
 }
 
+fn find_memory_for_symbol(mr_name_to_frames: &HashMap<&String, Vec<ObjectId>>, ) -> u64 {
+    // Work downwards now, and find a contiguous memory range that does not overlap
+            // with any elf loadable segment or user defined MR
+
+    let mut found_valid_region = false;
+    let elf_obj = &elfs[pd_global_idx];
+    let mut cur_vaddr = round_down(
+                kernel_config.pd_stack_bottom(pd.stack_size) as u64 - PageSize::Small as u64,
+                PageSize::Small as u64);
+
+
+    while cur_vaddr > 0 && !found_valid_region {
+        // Pick a range and make sure it doesn't overlap with any MR vaddr's
+        // and make it page aligned
+        let table_range = (cur_vaddr - (num_frames * PageSize::Small as u64) as u64)..cur_vaddr;
+
+        for map in pd.maps.iter() {
+            let frames = mr_name_to_frames.get(&map.mr).unwrap();
+            // MRs have frames of equal size so just use the first frame's page size.
+            let page_size_bytes =
+                1 << capdl_util_get_frame_size_bits(&spec_container, *frames.first().unwrap());
+            let mr_vaddr_range = map.vaddr..(map.vaddr + (page_size_bytes * frames.len() as u64));
+            if ranges_overlap(&mr_vaddr_range, &table_range) {
+                found_valid_region = false;
+                cur_vaddr = round_down(map.vaddr, PageSize::Small as u64);
+                break;
+            } else {
+                found_valid_region = true
+            }
+        }
+
+        if !found_valid_region {
+            continue;
+        }
+
+        for elf_seg in elf_obj.loadable_segments().iter() {
+            let elf_seg_vaddr_range = elf_seg.virt_addr
+                ..elf_seg.virt_addr + round_up(elf_seg.mem_size(), PageSize::Small as u64);
+
+            if ranges_overlap(&table_range, &elf_seg_vaddr_range) {
+                found_valid_region = false;
+                cur_vaddr = round_down(elf_seg.virt_addr, PageSize::Small as u64);
+            } else {
+                found_valid_region = true;
+            }
+        }
+    }
+    return cur_vaddr;
+}
+
 impl CapDLSpecContainer {
     pub fn new() -> Self {
         Self {
