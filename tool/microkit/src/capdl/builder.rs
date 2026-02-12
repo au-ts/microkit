@@ -115,6 +115,7 @@ pub struct CapDLSpecContainer {
     pub expected_allocations: HashMap<ObjectId, ExpectedAllocation>,
 }
 
+// TODO: ask why it goes down instead of going up, surely easier to go up.
 fn find_free_contiguous_memory(
     mr_name_to_frames: &HashMap<&String, Vec<ObjectId>>, 
     pd: &ProtectionDomain, 
@@ -725,17 +726,28 @@ pub fn build_capdl_spec(
             
             let frame_base = round_down(base_addr, PageSize::Small as u64);
             let num_frames = (top_addr - frame_base + PageSize::Small - 1) / PageSize::Small;
-
+            let pd_vspace_obj_id = *pd_id_to_vspace_id.get(&pager_idx).unwrap();
+            let mut dest_offset = 0;
             for i in 0..num_frames {
                 let mut frame_fill = Fill {
                     entries: [].to_vec(),
                 };
                 
+                // fill the frames. 
+                // The below code might do a buffer overflow so
+                // TODO: prevent buffer overflow. 
+                frame_fill.entries.push(FillEntry { 
+                    range: Range { start: 0, end: PageSize::Small as u64 }, 
+                    content: FillEntryContent::Data(FrameData::Bytes( ByteData {
+                        data: unmapped_frames_data[dest_offset..(PageSize::Small + dest_offset)]
+                    }))
+                });
+                dest_offset += PageSize::Small;
 
                 let frame_obj_id = capdl_util_make_frame_obj(
                     &mut spec_container,
                     frame_fill,
-                    &format!("elf_{}_child_pts_{}", pd.name, i),
+                    &format!("elf_frames_"),
                     None,
                     PageSize::Small.fixed_size_bits(kernel_config) as u8,
                 );
@@ -753,16 +765,15 @@ pub fn build_capdl_spec(
                     pd_vspace_obj_id,
                     frame_cap,
                     PageSize::Small as u64,
-                    table_base_addr,
+                    frame_base,
                 ) {
                     Ok(_) => {
-                        table_base_addr += len_to_cpy as u64;
-                        dest_offset += len_to_cpy;
+                        frame_base += i * PageSize::Small;
                     }
                     Err(map_err_reason) => {
                         return Err(format!(
                             "Failed to map frame for page table data range at vaddr: {:x} because: {:?}",
-                            cur_vaddr, map_err_reason
+                            frame_base, map_err_reason
                         ))
                     }
                 };
