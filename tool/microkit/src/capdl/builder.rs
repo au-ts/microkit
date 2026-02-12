@@ -16,20 +16,14 @@ use sel4_capdl_initializer_types::{
 };
 
 use crate::{
-    capdl::{
+    PGD, PUD, TableMetadata, TopLevelPageTable, capdl::{
         irq::create_irq_handler_cap,
         memory::{create_vspace, create_vspace_ept, map_page},
-        spec::{capdl_obj_physical_size_bits, ElfContent, ByteData, FrameData},
+        spec::{ByteData, ElfContent, FrameData, capdl_obj_physical_size_bits},
         util::*,
-    },
-    elf::ElfFile,
-    sdf::{
-        CpuCore, SysMap, SysMapPerms, SystemDescription, BUDGET_DEFAULT, MONITOR_PD_NAME,
-        MONITOR_PRIORITY,
-    },
-    sel4::{Arch, Config, PageSize},
-    util::{ranges_overlap, round_down, round_up},
-    {PGD, PUD, TopLevelPageTable, TableMetadata},
+    }, elf::ElfFile, sdf::{
+        BUDGET_DEFAULT, CpuCore, MONITOR_PD_NAME, MONITOR_PRIORITY, ProtectionDomain, SysMap, SysMapPerms, SystemDescription
+    }, sel4::{Arch, Config, PageSize}, util::{ranges_overlap, round_down, round_up}
 };
 
 use zerocopy::IntoBytes;
@@ -135,7 +129,20 @@ impl Default for CapDLSpecContainer {
     }
 }
 
-fn find_memory_for_symbol(mr_name_to_frames: &HashMap<&String, Vec<ObjectId>>, ) -> u64 {
+/*
+This function looks alright to me, 
+one thing which might be concerning is the fact that the start of the cur_vaddr range can be negative.
+*/
+fn find_memory_for_symbol(
+    mr_name_to_frames: &HashMap<&String, Vec<ObjectId>>, 
+    pd: &ProtectionDomain, 
+    elfs: &mut [ElfFile], 
+    pd_global_idx: usize, 
+    kernel_config: &Config,
+    num_frames: u64,
+    spec_container: &mut CapDLSpecContainer,
+
+    ) -> u64 {
     // Work downwards now, and find a contiguous memory range that does not overlap
             // with any elf loadable segment or user defined MR
 
