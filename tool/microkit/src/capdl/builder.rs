@@ -1134,6 +1134,8 @@ pub fn build_capdl_spec(
             }
             // Now create a filled frame with this this PD's child's page tables
 
+            println!("WE FINISHED CREATING THE PAGE TABLES, TRYING TO PATCH!");
+
             let num_frames = page_table_size as u64 / PageSize::Small as u64;
             let mut dest_offset: usize = 0;
 
@@ -1150,30 +1152,35 @@ pub fn build_capdl_spec(
             let elf_obj = &elfs[pd_global_idx];
 
 
-            while cur_vaddr > 0 && !found_valid_region {
+            while (cur_vaddr - (num_frames * PageSize::Small as u64) as u64) > 0 && !found_valid_region {
                 // Pick a range and make sure it doesn't overlap with any MR vaddr's
                 // and make it page aligned
                 let table_range = (cur_vaddr - (num_frames * PageSize::Small as u64) as u64)..cur_vaddr;
 
-                for map in pd.maps.iter() {
-                    let frames = mr_name_to_frames.get(&map.mr).unwrap();
-                    // MRs have frames of equal size so just use the first frame's page size.
-                    let page_size_bytes =
-                        1 << capdl_util_get_frame_size_bits(&spec_container, *frames.first().unwrap());
-                    let mr_vaddr_range = map.vaddr..(map.vaddr + (page_size_bytes * frames.len() as u64));
-                    if ranges_overlap(&mr_vaddr_range, &table_range) {
-                        found_valid_region = false;
-                        cur_vaddr = round_down(map.vaddr, PageSize::Small as u64);
-                        break;
-                    } else {
-                        found_valid_region = true
+                // Don't assume that we have any maps
+                if pd.maps.len() > 0 {
+                    for map in pd.maps.iter() {
+                        let frames = mr_name_to_frames.get(&map.mr).unwrap();
+                        // MRs have frames of equal size so just use the first frame's page size.
+                        let page_size_bytes =
+                            1 << capdl_util_get_frame_size_bits(&spec_container, *frames.first().unwrap());
+                        let mr_vaddr_range = map.vaddr..(map.vaddr + (page_size_bytes * frames.len() as u64));
+                        if ranges_overlap(&mr_vaddr_range, &table_range) {
+                            found_valid_region = false;
+                            cur_vaddr = round_down(map.vaddr, PageSize::Small as u64);
+                            break;
+                        } else {
+                            found_valid_region = true
+                        }
+                    }
+
+                    if !found_valid_region {
+                        continue;
                     }
                 }
 
-                if !found_valid_region {
-                    continue;
-                }
-
+                // We can assume that our PD will have at least one loadable segment
+                assert!(elf_obj.loadable_segments().len() > 0);
                 for elf_seg in elf_obj.loadable_segments().iter() {
                     let elf_seg_vaddr_range = elf_seg.virt_addr
                         ..elf_seg.virt_addr + round_up(elf_seg.mem_size(), PageSize::Small as u64);
@@ -1185,6 +1192,8 @@ pub fn build_capdl_spec(
                         found_valid_region = true;
                     }
                 }
+
+
             }
 
             if !found_valid_region {
@@ -1196,6 +1205,8 @@ pub fn build_capdl_spec(
             table_metadata.base_addr = table_base_addr;
 
             let pd_vspace_obj_id = *pd_id_to_vspace_id.get(&pd_global_idx).unwrap();
+
+            println!("FOUND VALID REGION TO PATCH DATA!");
 
             for i in 0..num_frames {
                 let mut frame_fill = Fill {
