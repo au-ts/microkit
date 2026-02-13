@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <microkit.h>
 
+uintptr_t remaining_untypeds_vaddr;
 void init(void)
 {
     microkit_dbg_puts("hello, world\n");

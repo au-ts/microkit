@@ -5,7 +5,12 @@
  SPDX-License-Identifier: BSD-2-Clause
 -->
 <system>
+    <memory_region name="remaining_untypeds" size="0x1000" />
     <protection_domain name="hello">
+        <program_image path="hello.elf" />
+        <map mr="remaining_untypeds" vaddr="0x20_000_000" setvar_vaddr="remaining_untypeds_vaddr" />
+    </protection_domain>
+    <protection_domain name="hello2">
         <program_image path="hello.elf" />
     </protection_domain>
 </system>
