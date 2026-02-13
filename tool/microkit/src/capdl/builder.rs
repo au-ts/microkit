@@ -1067,6 +1067,9 @@ pub fn build_capdl_spec(
     }
 
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
+        let frame_cap_idx = BASE_FRAME_CAP;
+        let mut frame_cap_counter = 0;
+
         if pd.child_pts.is_some() {
             let mut table_metadata = TableMetadata {
                 base_addr: 0,
@@ -1075,7 +1078,6 @@ pub fn build_capdl_spec(
             let mut table_data = Vec::<u8>::new();
             let mut offset = 0;
             let mut page_table_size = 0;
-            let frame_cap_idx = BASE_FRAME_CAP;
             let pd_cspace_id = *pd_id_to_cspace_id.get(&pd_global_idx).unwrap();
             for (maybe_child_idx, maybe_child_pd) in system.protection_domains.iter().enumerate() {
                 if maybe_child_pd.parent.is_some_and(|x| x == pd_global_idx) {
@@ -1087,7 +1089,6 @@ pub fn build_capdl_spec(
                     };
 
                     let pd_frame_metadata = pd_id_to_frame_metadata.get(&maybe_child_idx).unwrap();
-                    let mut frame_cap_counter = 0;
                     for frame_metadata in pd_frame_metadata {
                         capdl_util_insert_cap_into_cspace(
                             &mut spec_container,
