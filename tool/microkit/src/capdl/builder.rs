@@ -1135,8 +1135,6 @@ pub fn build_capdl_spec(
             }
             // Now create a filled frame with this this PD's child's page tables
 
-            println!("WE FINISHED CREATING THE PAGE TABLES, TRYING TO PATCH!");
-
             let num_frames = page_table_size as u64 / PageSize::Small as u64;
             let mut dest_offset: usize = 0;
 
@@ -1206,8 +1204,6 @@ pub fn build_capdl_spec(
             table_metadata.base_addr = table_base_addr;
 
             let pd_vspace_obj_id = *pd_id_to_vspace_id.get(&pd_global_idx).unwrap();
-
-            println!("FOUND VALID REGION TO PATCH DATA!");
 
             for i in 0..num_frames {
                 let mut frame_fill = Fill {
