@@ -781,6 +781,7 @@ pub fn build_capdl_spec(
 
             // let cur_vaddr = find_memory_for_symbol(&mr_name_to_frames, pd, elfs, pager_idx, kernel_config, , &mut spec_container);
             // JOSHUA TODO: i need to find a way to convert the vec into bytes.
+            // TODO: this symbol should become an unsigned long long
             elfs[pager_idx].write_symbol("unmapped_frames_addr", serde_json::to_string(&base_addr).unwrap().as_bytes());
         }
 
