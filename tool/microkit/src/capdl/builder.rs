@@ -439,6 +439,7 @@ pub fn build_capdl_spec(
             capdl_util_make_cte(MON_REPLY_CAP_IDX as u32, mon_reply_cap),
         ]
         .to_vec(),
+        false,
     );
     let mon_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS as u64;
     let mon_cnode_cap = capdl_util_make_cnode_cap(mon_cnode_obj_id, 0, mon_guard_size as u8);
@@ -839,6 +840,7 @@ pub fn build_capdl_spec(
                         &format!("{}_{}", virtual_machine.name, vcpu.id),
                         PD_CAP_BITS,
                         [].to_vec(),
+                        false,
                     );
                     let vm_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS as u64;
                     let vm_cnode_cap =
@@ -955,11 +957,13 @@ pub fn build_capdl_spec(
         }
 
         // Step 3-13 Create CSpace and add all caps that the PD code and libmicrokit need to access.
+
         let pd_cnode_obj_id = capdl_util_make_cnode_obj(
             &mut spec_container,
             &pd.name,
             PD_CAP_BITS,
             caps_to_insert_to_pd_cspace,
+            pd.receive_all_untypeds,
         );
         let pd_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS as u64;
         let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, pd_guard_size as u8);
