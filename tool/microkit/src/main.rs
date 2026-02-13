@@ -523,6 +523,7 @@ fn main() -> Result<(), String> {
         )?,
         hypervisor,
         benchmark: args.config == "benchmark",
+        hardware_debug: json_str_as_bool(&kernel_config_json, "HARDWARE_DEBUG_API")?,
         num_cores: if json_str_as_bool(&kernel_config_json, "ENABLE_SMP_SUPPORT")? {
             json_str_as_u64(&kernel_config_json, "MAX_NUM_NODES")?
                 .try_into()

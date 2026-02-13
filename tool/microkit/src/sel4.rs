@@ -273,6 +273,8 @@ pub struct Config {
     pub max_num_bootinfo_untypeds: u64,
     pub hypervisor: bool,
     pub benchmark: bool,
+    /// Based on HARDWARE_DEBUG_API
+    pub hardware_debug: bool,
     pub num_cores: u8,
     pub fpu: bool,
     /// ARM-specific, number of physical address bits
@@ -435,7 +437,7 @@ impl ObjectType {
         match self {
             ObjectType::Tcb => match config.arch {
                 Arch::Aarch64 => {
-                    if config.hypervisor && config.benchmark && config.num_cores > 0 {
+                    if config.hardware_debug || (config.hypervisor && config.benchmark && config.num_cores > 0) {
                         Some(12)
                     } else {
                         Some(11)
