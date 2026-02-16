@@ -3,8 +3,8 @@
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
-#include <stdint.h>
 #include <microkit.h>
+#include <stdint.h>
 #include <string.h>
 #include "elf_loader.h"
 
@@ -16,24 +16,28 @@
     4. run pd secondary using thread switch.
 */
 
-uintptr_t pd_1_cnode_addr;
-uintptr_t pd_1_vnode_addr;
-uintptr_t pd_1_tcb_cap;
-uintptr_t pd_1_entry_point;
+// uintptr_t pd_1_cnode_addr;
+// uintptr_t pd_1_vnode_addr;
+// uintptr_t pd_1_tcb_cap;
+// uintptr_t pd_1_entry_point;
 
-uintptr_t pd_2_cnode_addr;
-uintptr_t pd_2_vnode_addr;
-uintptr_t pd_2_tcb_cap;
-uintptr_t pd_2_entry_point;
+// uintptr_t pd_2_cnode_addr;
+// uintptr_t pd_2_vnode_addr;
+// uintptr_t pd_2_tcb_cap;
+// uintptr_t pd_2_entry_point;
 
 uintptr_t fault_ep_addr;
 
-// memory region to map ELF into
+#define BASE_USER_CAPS 522
+#define pd_1_vnode_slot BASE_USER_CAPS + 100
+#define pd_1_cnode_slot BASE_USER_CAPS + 101
+#define pd_1_tcb_slot BASE_USER_CAPS + 102
+#define controller_vnode_slot BASE_USER_CAPS + 103
+
+// memory region holding ELF blob
 #define ELF_BLOB_ADDR 0x10000000
 
 #define PD_CONTROLLER_UT_CAP_SLOT 200
-#define PD_CONTROLLER_ASID_CAP_SLOT 201
-#define PD_CONTROLLER_PAGE_SIZE_BITS 21
 
 #define MAX_FRAMES_PER_CHILD 512
 #define MAX_PDS 63
@@ -59,11 +63,15 @@ __attribute__((section(".data")))
 __attribute__((used))
 AllChildFrameCapSlots __child_frame_cap_slots = {0};
 
+seL4_Error unmap_child_pd_frames(int child_pd_id);
+seL4_Error vspace_init(int child_pd_id, seL4_Word *entry_point);
+
 void init(void)
 {
     // seL4_TCB_Configure()
 }
 
+// old function for switching between two existing vspaces.
 void do_switch()
 {
     // access tcb of double elf
@@ -75,34 +83,33 @@ void do_switch()
     // activated either by setting the resume_target parameter in the seL4_TCB_WriteRegisters() invocation to true or by separately calling the seL4_TCB_Resume() method. Both of these methods
     // place the thread in a runnable state
 
-    // setvar adds a symbol with the name of the vaddr into the elf file -> make a region with vaddr of caps (?)
-    seL4_Error err;
-    seL4_UserContext con = {0};
-    con.pc = pd_2_entry_point;
+    // seL4_Error err;
+    // seL4_UserContext con = {0};
+    // // con.pc = pd_2_entry_point;
 
-    microkit_dbg_puts("CONTROLLER: attempting setspace. Types are below:\n");
+    // microkit_dbg_puts("CONTROLLER: attempting setspace. Types are below:\n");
 
-    for (int i = 0; i < 255; i++)
-    {
-        int index = seL4_DebugCapIdentify(i);
-        microkit_dbg_put32(i);
-        microkit_dbg_puts(": ");
-        microkit_dbg_put32(index);
-        microkit_dbg_puts("\n");
-    }
+    // for (int i = 0; i < 255; i++)
+    // {
+    //     int index = seL4_DebugCapIdentify(i);
+    //     microkit_dbg_put32(i);
+    //     microkit_dbg_puts(": ");
+    //     microkit_dbg_put32(index);
+    //     microkit_dbg_puts("\n");
+    // }
 
-    int type = seL4_DebugCapIdentify(pd_1_tcb_cap);
-    microkit_dbg_put32(type);
-    microkit_dbg_puts("\n");
+    // int type = seL4_DebugCapIdentify(pd_1_tcb_cap);
+    // microkit_dbg_put32(type);
+    // microkit_dbg_puts("\n");
 
-    type = seL4_DebugCapIdentify(pd_2_cnode_addr);
-    microkit_dbg_put32(type);
-    microkit_dbg_puts("\n");
+    // type = seL4_DebugCapIdentify(pd_2_cnode_addr);
+    // microkit_dbg_put32(type);
+    // microkit_dbg_puts("\n");
 
-    type = seL4_DebugCapIdentify(pd_2_vnode_addr);
+    // type = seL4_DebugCapIdentify(pd_2_vnode_addr);
 
-    microkit_dbg_put32(type);
-    microkit_dbg_puts("\n");
+    // microkit_dbg_put32(type);
+    // microkit_dbg_puts("\n");
 
     // err = seL4_TCB_SetSpace(
     //     pd_1_tcb_cap,
@@ -112,31 +119,74 @@ void do_switch()
     //     pd_2_vnode_addr,
     //     0);
 
-    err = seL4_TCB_SetSpace(
-        203,
-        212,
-        207,
-        0,
-        210,
-        0);
+    // err = seL4_TCB_SetSpace(
+    //     203,
+    //     212,
+    //     207,
+    //     0,
+    //     210,
+    //     0);
 
-    if (err != seL4_NoError)
-    {
-        microkit_dbg_puts("microkit_pd_restart: error writing TCB caps\n");
-        microkit_internal_crash(err);
-    }
+    // if (err != seL4_NoError)
+    // {
+    //     microkit_dbg_puts("microkit_pd_restart: error writing TCB caps\n");
+    //     microkit_internal_crash(err);
+    // }
 
-    microkit_dbg_puts("CONTROLLER: attempting register edit\n");
+    // microkit_dbg_puts("CONTROLLER: attempting register edit\n");
+
+    // // err = seL4_TCB_WriteRegisters(
+    // //     pd_2_tcb_cap,
+    // //     seL4_True,
+    // //     0,
+    // //     1, // writing only one register
+    // //     &con);
 
     // err = seL4_TCB_WriteRegisters(
-    //     pd_2_tcb_cap,
+    //     203,
     //     seL4_True,
     //     0,
     //     1, // writing only one register
     //     &con);
 
+    // if (err != seL4_NoError)
+    // {
+    //     microkit_dbg_puts("microkit_pd_restart: error writing TCB registers\n");
+    //     microkit_internal_crash(err);
+    // }
+
+    // microkit_dbg_puts("sched dump controller\n");
+    // seL4_DebugDumpScheduler();
+}
+
+// swap out the vspace of the faulting pd to another vspace.
+seL4_Error reinit_vspace(int child_pd_id)
+{
+    seL4_Error err;
+    seL4_UserContext con = {0};
+
+    // step 1: we unmap all the frames for that pd.
+    err = unmap_child_pd_frames(child_pd_id);
+
+    if (err != seL4_NoError)
+    {
+        microkit_dbg_puts("CONTROLLER: failed to unmap child pd frames\n");
+        return err;
+    }
+
+    // step 2: we map in the elf file segments into that pd's vspace
+    // note that this only supports the one elf file blob at the moment.
+    err = vspace_init(child_pd_id, &con.pc);
+
+    if (err != seL4_NoError)
+    {
+        microkit_dbg_puts("CONTROLLER: failed to initialize vspace\n");
+        return err;
+    }
+
+    // step 3: resume control of the other pd, which now has a new vspace
     err = seL4_TCB_WriteRegisters(
-        203,
+        pd_1_tcb_slot,
         seL4_True,
         0,
         1, // writing only one register
@@ -144,12 +194,11 @@ void do_switch()
 
     if (err != seL4_NoError)
     {
-        microkit_dbg_puts("microkit_pd_restart: error writing TCB registers\n");
-        microkit_internal_crash(err);
+        microkit_dbg_puts("CONTROLLER: error writing TCB registers\n");
+        return err;
     }
 
-    microkit_dbg_puts("sched dump controller\n");
-    seL4_DebugDumpScheduler();
+    return seL4_NoError;
 }
 
 seL4_MessageInfo_t protected(microkit_channel ch, microkit_msginfo msginfo)
@@ -159,35 +208,12 @@ seL4_MessageInfo_t protected(microkit_channel ch, microkit_msginfo msginfo)
     case 1:
         // recieve notification from main pd
         // respond by switching the context of that pd
+        // note that this has been done through a ppcall so the other PD is paused.
         microkit_dbg_puts("CONTROLLER: RECEIVED SIGNAL FROM INITIAL PD: tcb, cnode, vnode, entry\n");
-
-        microkit_dbg_put32(pd_1_tcb_cap);
-        microkit_dbg_puts("\n");
-
-        microkit_dbg_put32(pd_1_cnode_addr);
-        microkit_dbg_puts("\n");
-
-        microkit_dbg_put32(pd_1_vnode_addr);
-        microkit_dbg_puts("\n");
-
-        microkit_dbg_put32(pd_1_entry_point);
-        microkit_dbg_puts("\n");
 
         microkit_dbg_puts("CONTROLLER: SWITCHING TO: tcb, cnode, vnode, entry\n");
 
-        microkit_dbg_put32(pd_2_tcb_cap);
-        microkit_dbg_puts("\n");
-
-        microkit_dbg_put32(pd_2_cnode_addr);
-        microkit_dbg_puts("\n");
-
-        microkit_dbg_put32(pd_2_vnode_addr);
-        microkit_dbg_puts("\n");
-
-        microkit_dbg_put32(pd_2_entry_point);
-        microkit_dbg_puts("\n");
-
-        do_switch();
+        reinit_vspace(1);
         break;
     default:
         microkit_dbg_puts("ERROR: received an unexpected message\n");
@@ -197,12 +223,12 @@ seL4_MessageInfo_t protected(microkit_channel ch, microkit_msginfo msginfo)
 
 // Unmap all frames for a pd's vspace, so that they can be
 // rewritten with new elf file contents
-void unmap_child_pd_frames(int child_pd_id)
+seL4_Error unmap_child_pd_frames(int child_pd_id)
 {
     if (child_pd_id < 0 || child_pd_id >= MAX_PDS)
     {
         microkit_dbg_puts("unmap_child_pd_frames: invalid PD ID\n");
-        return;
+        return seL4_InvalidArgument;
     }
 
     ChildPDFrameCapSlots *child = &__child_frame_cap_slots.children[child_pd_id];
@@ -210,7 +236,7 @@ void unmap_child_pd_frames(int child_pd_id)
     if (child->frame_cap_count == 0)
     {
         microkit_dbg_puts("unmap_child_pd_frames: no frames to unmap\n");
-        return;
+        return seL4_FailedLookup;
     }
 
     microkit_dbg_puts("Unmapping ");
@@ -233,15 +259,19 @@ void unmap_child_pd_frames(int child_pd_id)
         seL4_CPtr frame_cap = child->frame_cap_slots[i];
         int ret = seL4_ARM_Page_Unmap(frame_cap);
 
+        // TODO find some graceful way to recover from this
         if (ret != seL4_NoError)
         {
-            microkit_dbg_puts("WARNING: failed to unmap frame cap ");
+            microkit_dbg_puts("WARNING: failed to unmap frame cap, skipping... ");
             microkit_dbg_puts("\n");
         }
     }
+
+    return seL4_NoError;
 }
 
-seL4_Word vspace_init(int elf_index)
+// Copy ELF blob into old vspace and return the entry point.
+seL4_Error vspace_init(int child_pd_id, seL4_Word *entry_point)
 {
     // step 0: verify that the elf is valid
     // step 1: read the first elf header
@@ -250,23 +280,25 @@ seL4_Word vspace_init(int elf_index)
 
     elfHeader64 elf_header;
 
-    if (elf_validate(ELF_START_OFFSET) != 0)
+    if (elf_validate((const void *)ELF_START_OFFSET) != 0)
     {
         // bad elf file
-        return 0;
+        return seL4_InvalidArgument;
     }
 
     // copy in the header
-    memcpy(&elf_header, ELF_START_OFFSET, sizeof(elfHeader64));
+    memcpy(&elf_header, (const void *)ELF_START_OFFSET, sizeof(elfHeader64));
+    ChildPDFrameCapSlots *child = &__child_frame_cap_slots.children[child_pd_id];
 
     int segment_count = elf_header.phnum;
+    *entry_point = elf_header.entry;
     size_t offset = 0;
     int frame_cap_count = 0;
 
     for (int i = 0; i < segment_count; i++)
     {
         elfProgramHeader64 cur_pheader;
-        offset += elf_load_program_header(ELF_START_OFFSET, i, elf_header, &cur_pheader);
+        offset += elf_load_program_header((const void *)ELF_START_OFFSET, i, elf_header, &cur_pheader);
 
         // skip non-loadable segments
         if (cur_pheader.type_ != 1)
@@ -274,15 +306,20 @@ seL4_Word vspace_init(int elf_index)
             continue;
         }
 
+        // by the time this function is called we should have already unmapped all the frame caps
+        // from the previous vspace - so we just start remapping the caps we had before.
         map_segment_pages_with_frames(
-            PD_CONTROLLER_UT_CAP_SLOT + frame_cap_count,
-            pd_1_vnode_addr,
-            // controller vnode address,
-            ELF_START_OFFSET + cur_pheader.offset,
+            child->frame_cap_slots[frame_cap_count],
+            pd_1_vnode_slot,
+            controller_vnode_slot,
+            PD_CONTROLLER_UT_CAP_SLOT,
+            ((const void *)ELF_START_OFFSET + cur_pheader.offset),
             cur_pheader.filesz,
             cur_pheader.vaddr,
             cur_pheader.flags);
     }
+
+    return seL4_NoError;
 }
 
 void notified(microkit_channel ch)

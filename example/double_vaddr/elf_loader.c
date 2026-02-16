@@ -8,7 +8,7 @@ int elf_validate(const void *elf_blob)
 
     const elfHeader64 *hdr = (const elfHeader64 *)elf_blob;
 
-    if (memcmp(hdr, ELF_MAGIC, 3) != 0)
+    if (memcmp(hdr, (const void *)ELF_MAGIC, 3) != 0)
     {
         return -1;
     }
@@ -49,10 +49,10 @@ size_t elf_load_program_header(const void *elf_blob, size_t index, elfHeader64 h
  *   flags: ELF segment flags (PF_R, PF_W, PF_X)
  */
 int map_segment_pages_with_frames(
-    seL4_CPtr untyped_cap,
+    seL4_CPtr frame_cap,
     seL4_CPtr vspace_cap,
     seL4_CPtr controller_vspace_cap,
-    seL4_CPtr page_table_cap,
+    seL4_CPtr controller_ut_slot,
     const void *segment_data,
     size_t segment_size,
     uint64_t vaddr,
@@ -69,31 +69,28 @@ int map_segment_pages_with_frames(
 
     int readable = (elf_flags & PF_R) ? 1 : 0;
     int writable = (elf_flags & PF_W) ? 1 : 0;
-    int executable = (elf_flags & PF_X) ? 1 : 0;
+    // int executable = (elf_flags & PF_X) ? 1 : 0;
 
     while (bytes_remaining > 0)
     {
         size_t bytes_to_copy = (bytes_remaining < PAGE_SIZE) ? bytes_remaining : PAGE_SIZE;
-
-        seL4_CPtr frame_cap = seL4_Untyped_Retype(
-            untyped_cap,
-            11,
-            12,
-            seL4_CapInitThreadCNode,
-            seL4_NilData,
-            0, 0, 1);
-
-        // TODO find a real address
-        uint64_t controller_vspace_addr = ;
+        uint64_t controller_vspace_addr = 0x5000000UL;
 
         // we first map into the controller vspace so we can write elf data to it
         seL4_CapRights_t controller_rights = seL4_CapRights_new(0, 0, 1, 1);
         seL4_ARM_Page_Map(frame_cap, controller_vspace_cap, controller_vspace_addr, controller_rights, 0);
 
+        // wipe all the old data off
+        memset((void *)controller_vspace_addr, 0, PAGE_SIZE);
+
+        // copy in new data from ELF file
         memcpy((void *)controller_vspace_addr, (uint8_t *)segment_data + data_offset, bytes_to_copy);
 
         seL4_CapRights_t rights = seL4_CapRights_new(0, 0, readable, writable);
         seL4_ARM_Page_Map(frame_cap, vspace_cap, cur_vaddr, rights, 0);
+
+        // unmap from the controller PD
+        seL4_ARM_Page_Unmap(frame_cap);
 
         // Move to next page
         cur_vaddr += PAGE_SIZE;

@@ -48,6 +48,7 @@ pub const MAX_FRAMES_PER_CHILD: usize = 512;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChildPDFrameCapSlots {
     pub pd_id: u64,
+    #[serde(with = "serde_big_array::BigArray")]
     pub frame_cap_slots: [u64; MAX_FRAMES_PER_CHILD],
     pub frame_cap_count: u64,
     pub child_vaddr_base: u64,
@@ -68,6 +69,7 @@ impl Default for ChildPDFrameCapSlots {
 #[repr(C)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AllChildFrameCapSlots {
+    #[serde(with = "serde_big_array::BigArray")]
     pub children: [ChildPDFrameCapSlots; MAX_PDS],
 }
 

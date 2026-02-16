@@ -11,7 +11,7 @@ use std::{
 };
 
 use sel4_capdl_initializer_types::{
-    object, Cap, CapTableEntry, Fill, FillEntry, FillEntryContent, NamedObject, Object, ObjectId,
+    cap, object, Cap, CapTableEntry, Fill, FillEntry, FillEntryContent, NamedObject, Object, ObjectId,
     Spec, Word,
 };
 
@@ -625,13 +625,6 @@ pub fn build_capdl_spec(
     };
     let controller_untyped_obj_id = spec_container.add_root_object(controller_untyped_obj);
 
-    // allocate an asid pool
-    let controller_asid_pool_obj = NamedObject {
-        name: Some(format!("asid_pool_controller").into()),
-        object: Object::AsidPool(object::AsidPool(Word(0))),
-    };
-    let controller_asid_pool_obj_id = spec_container.add_root_object(controller_asid_pool_obj);
-
     // *********************************
     // Step 2. Create the memory regions' spec. Result is a hashmap keyed on MR name, value is (parsed XML obj, Vec of frame object IDs)
     // *********************************
@@ -756,7 +749,7 @@ pub fn build_capdl_spec(
     };
 
     // Mapping between pd name and id for faster lookups
-    let mut pd_name_to_id: HashMap<String, usize> = HashMap::new();
+    let pd_name_to_id: HashMap<String, usize> = HashMap::new();
 
     // Keep tabs on each PD's CSpace, Notification and Endpoint objects so we can create channels between them at a later step.
     let mut pd_id_to_cspace_id: HashMap<usize, ObjectId> = HashMap::new();
@@ -805,7 +798,7 @@ pub fn build_capdl_spec(
                 .push(capdl_util_make_cte(PD_TCB_CAP_IDX as u32, pd_tcb_obj));
         }
 
-        if (pd.control) {
+        if pd.control {
             // Cache the controller PD's TCB object ID for later use when mapping child frame caps.
             spec_container.controller_tcb_obj_id = Some(pd_tcb_obj_id);
         }
@@ -818,7 +811,7 @@ pub fn build_capdl_spec(
 
         // check if this pd should be managed by the controller pd
         let is_managed_by_controller =
-            !pd.control && pd.name != MONITOR_PD_NAME && !pd.is_virtual_machine;
+            !pd.control && pd.name != MONITOR_PD_NAME;
 
         if is_managed_by_controller {
             spec_container.child_frame_caps.children[pd_global_idx].pd_id = pd_global_idx as u64;
@@ -1218,6 +1211,21 @@ pub fn build_capdl_spec(
             ));
         }
 
+        // extra: attach new ut objects to the controller pd
+        if pd.control {
+            // Make caps and insert them into the controller CSpace slots
+            let controller_untyped_cap = Cap::Untyped(cap::Untyped {
+                object: controller_untyped_obj_id,
+            });
+
+            const PD_CONTROLLER_UT_CAP_IDX: u32 = 200;
+
+            caps_to_insert_to_pd_cspace.push(capdl_util_make_cte(
+                PD_CONTROLLER_UT_CAP_IDX,
+                controller_untyped_cap,
+            ));
+        }
+
         // Step 3-13 Create CSpace and add all caps that the PD code and libmicrokit need to access.
         let pd_cnode_obj_id = capdl_util_make_cnode_obj(
             &mut spec_container,
@@ -1280,29 +1288,6 @@ pub fn build_capdl_spec(
             );
         }
 
-        // extra: attach the new ASID and ut objects to the controller pd
-        if pd.control {
-            // Make caps and insert them into the controller CSpace slots
-            let controller_untyped_cap = Cap::Untyped(cap::Untyped {
-                object: controller_untyped_obj_id,
-            });
-            let controller_asid_pool_cap = Cap::AsidPool(cap::AsidPool {
-                object: controller_asid_pool_obj_id,
-            });
-
-            // Hopefully these indices won't clash with other caps in the controller PD's CSpace
-            const PD_CONTROLLER_UT_CAP_IDX: u32 = 200;
-            const PD_CONTROLLER_ASID_CAP_IDX: u32 = 201;
-
-            caps_to_insert_to_pd_cspace.push(capdl_util_make_cte(
-                PD_CONTROLLER_UT_CAP_IDX,
-                controller_untyped_cap,
-            ));
-            caps_to_insert_to_pd_cspace.push(capdl_util_make_cte(
-                PD_CONTROLLER_ASID_CAP_IDX,
-                controller_asid_pool_cap,
-            ));
-        }
     }
 
     // *********************************

@@ -3,8 +3,8 @@
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
-#include <stdint.h>
 #include <microkit.h>
+#include <stdint.h>
 #include <unistd.h>
 
 #define CONTROLLER_CH 0

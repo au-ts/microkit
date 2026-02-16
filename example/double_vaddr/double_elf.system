@@ -10,6 +10,10 @@
     <protection_domain name="controller" priority="254" controller="true">
         <program_image path="controller.elf" />
         <map mr="dynamic_elfs_region" vaddr="0x10000000" perms="r" />
+        <cap type="vnode" pd="double_elf" dest_cspace_slot="100" />
+        <cap type="cnode" pd="double_elf" dest_cspace_slot="101" />
+        <cap type="tcb" pd="double_elf" dest_cspace_slot="102" />
+        <cap type="vnode" pd="controller" dest_cspace_slot="103" />
         <protection_domain name="double_elf" priority="253" id="1">
             <program_image path="double_elf.elf" />
         </protection_domain>

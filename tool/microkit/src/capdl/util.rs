@@ -101,6 +101,33 @@ pub fn capdl_util_get_vspace_id_from_tcb_id(
     vspace_cap.unwrap().cap.obj()
 }
 
+// Given a TCB object ID, return that TCB's Cspace object ID.
+pub fn capdl_util_get_cnode_id_from_tcb_id(
+    spec_container: &CapDLSpecContainer,
+    tcb_obj_id: ObjectId,
+) -> ObjectId {
+    let tcb = match spec_container.get_root_object(tcb_obj_id) {
+        Some(named_object) => {
+            if let Object::Tcb(tcb) = &named_object.object {
+                Some(tcb)
+            } else {
+                unreachable!("get_cnode_id_from_tcb_id(): internal bug: got a non TCB object id {} with name '{}'", usize::from(tcb_obj_id), named_object.name.as_ref().unwrap());
+            }
+        }
+        None => {
+            unreachable!(
+                "get_cnode_id_from_tcb_id(): internal bug: couldn't find tcb with given obj id."
+            );
+        }
+    };
+    let cnode_cap = tcb
+        .unwrap()
+        .slots
+        .iter()
+        .find(|&cte| matches!(&cte.cap, Cap::CNode(_)));
+    cnode_cap.unwrap().cap.obj()
+}
+
 pub fn capdl_util_get_frame_size_bits(
     spec_container: &CapDLSpecContainer,
     frame_obj_id: ObjectId,

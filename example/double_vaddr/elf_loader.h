@@ -1,8 +1,8 @@
 #pragma once
 
+#include <microkit.h>
 #include <stdint.h>
 #include <stddef.h>
-#include <sel4/sel4.h>
 
 /**
  * ELF parsing and dynamic loading utilities in C for the controller (stolen from AOS code hahahah)

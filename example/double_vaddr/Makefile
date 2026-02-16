@@ -35,9 +35,9 @@ AS := $(TOOLCHAIN)-as
 OBJCOPY := $(TOOLCHAIN)-objcopy
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
-DOUBLE_ELF_OBJS := double_elf.o
-SECONDARY_OBJS := secondary.o
-CONTROLLER_OBJS := controller.o
+DOUBLE_ELF_OBJS := double_elf.o string_utils.o
+SECONDARY_OBJS := secondary.o string_utils.o
+CONTROLLER_OBJS := controller.o elf_loader.o string_utils.o
 
 # compiled but NOT in system description
 DYNAMIC_PD_SOURCES := dummy.c
@@ -45,7 +45,7 @@ DYNAMIC_PD_OBJS := $(DYNAMIC_PD_SOURCES:.c=.o)
 DYNAMIC_PD_ELFS := $(DYNAMIC_PD_SOURCES:.c=.elf)
 
 IMAGES := double_elf.elf secondary.elf controller.elf
-CFLAGS := -mstrict-align -nostdlib -ffreestanding -g -O3 -Wall  -Wno-unused-function -Werror -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
+CFLAGS := -mstrict-align -nostdlib -ffreestanding -D__thread= -g -O3 -Wall  -Wno-unused-function -Werror -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
 LDFLAGS := -L$(BOARD_DIR)/lib
 LIBS := -lmicrokit 
 
