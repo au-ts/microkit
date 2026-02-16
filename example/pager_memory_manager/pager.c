@@ -1,6 +1,16 @@
 #include <microkit.h>
 #include <stdint.h>
+
+/**
+ * I have made a couple assumptions:
+ * - there is a fixed maximum of PD's
+ * - 
+ */
+
 // i need to create the following things:
+
+#define MAX_PDS 128
+#define NUM_PT_ENTRIES 512
 
 /**
  * frame table
@@ -12,7 +22,6 @@
 static uint64_t unmapped_frames_addr;
 static uint64_t num_frames;
 
-static *FrameInfo frame_table;
 
 typedef struct FrameInfo {
     Cap cap;
@@ -55,12 +64,45 @@ typedef struct microkit_data {
 
 frame_pd_id *frames = (frame_pd_id *) unmapped_frames_addr;
 
+
+
+typedef struct page_entry {
+    uint32_t frame_id;
+    Cap frame_cap;
+} pe; // might need more stuff here.
+
+typedef struct page_table {
+    pe *pe[NUM_PT_ENTRIES];
+} pt;
+
+typedef struct page_middle_directory {
+    pt *pt[NUM_PT_ENTRIES];
+} pmd;
+
+typedef struct page_upper_directory {
+    pmd *pmd[NUM_PT_ENTRIES];
+} pud;
+
+
+
+// stuff required for the vm fault handling
+pud pgd[MAX_PDS][NUM_PT_ENTRIES]; // page tables for the children.
+frame_pd_id *frame_table[MAX_PDS];
+// TODO: have process vspace ptrs here as well.
+unsigned long vspaces[MAX_PDS];
+
 void init(void)
 {
     // TODO:
     // each child has a frame table associated to it. this ft should also keep track of the wsclock algo
     // each child has a shadow page table for the heap.
     // need to initialise these
+
+    for (int i = 0; i < num_frames; ++i) {
+        // fill in the frame table
+        frame_table[frames[i].pd_idx] = &frames[i];
+        // TODO: fill process vspaces.
+    }
 
 }
 
@@ -77,6 +119,9 @@ seL4_MessageInfo_t protected(microkit_channel ch, microkit_msginfo msginfo)
 seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
 {
     // TODO: this is when the child has a vm fault...
+    uint64_t fault_addr = microkit_mr_get(1); // I am not sure if this is the right mr number so will need to check later.
+    // i return nothing here.
+    
 }
 
 

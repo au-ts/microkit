@@ -507,3 +507,8 @@ static inline void microkit_deferred_irq_ack(microkit_channel ch)
     microkit_signal_msg = seL4_MessageInfo_new(IRQAckIRQ, 0, 0, 0);
     microkit_signal_cap = (BASE_IRQ_CAP + ch);
 }
+
+// stuff for the userland pager below
+static inline int microkit_arm_page_map(unsigned long frame_cap, unsigned long vspace, unsigned long vaddr) {
+    return seL4_ARM_Page_Map(frame_cap, vspace, vaddr, seL4_CapRights_new(1, 1, 1, 1), 0x03); // all rights, 0x03 is default attributes.
+}
