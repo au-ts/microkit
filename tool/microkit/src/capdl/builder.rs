@@ -617,7 +617,7 @@ pub fn build_capdl_spec(
 
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
-
+    let mut vspace_ids: [ObjectId; 128] = [ObjectId(0); 128];
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
         let unmapped_frames: Vec<(Cap, ObjectId, usize)> = Vec::new(); // vector of tuple of frame cap, frame id and index of pd which owns frame.
 
@@ -631,7 +631,7 @@ pub fn build_capdl_spec(
             .add_elf_to_spec(kernel_config, &pd.name, pd.cpu, pd_global_idx, elf_obj)
             .unwrap();
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec_container, pd_tcb_obj_id);
-
+        vspace_ids[pd_global_idx] = pd_vspace_obj_id;
         // In the benchmark configuration, we allow PDs to access their own TCB.
         // This is necessary for accessing kernel's benchmark API.
         if kernel_config.benchmark {
@@ -785,6 +785,8 @@ pub fn build_capdl_spec(
             elfs[pager_idx].write_symbol("unmapped_frames_addr", serde_json::to_string(&base_addr).unwrap().as_bytes());
             // TODO: this symbol should become u64
             elfs[pager_idx].write_symbol("num_frames", serde_json::to_string(&unmapped_frames.len()).unwrap().as_bytes());
+            // TODO: I also need to send vspace cap id's over, this should just be an array of size 128...
+            elfs[pager_idx].write_symbol("vspaces", serde_json::to_string(&vspace_ids).unwrap().as_bytes());
         }
 
         // Step 3-3: Create and map in the stack (bottom up)
