@@ -11,6 +11,10 @@
 
 #define MAX_PDS 128
 #define NUM_PT_ENTRIES 512
+#define BRK_START 0x8000000000
+#define MMAP_START 0x9000000000
+
+#define INTO_PT(x) // make this macro such that it indexes into the struct page tables.
 
 /**
  * frame table
@@ -33,13 +37,6 @@ typedef struct FrameInfo {
     uint32_t prev;
 } FrameInfo;
 
-// pub struct Rights {
-//     pub read: bool,
-//     pub write: bool,
-//     pub grant: bool,
-//     pub grant_reply: bool,
-// }
-
 typedef struct Rights {
     bool read;
     bool write;
@@ -47,12 +44,6 @@ typedef struct Rights {
     bool grant_reply;
 } Rights;
 
-// pub struct Frame {
-//     pub object: ObjectId, u32
-//     pub rights: Rights,
-//     pub cached: bool,
-//     pub executable: bool,
-// }
 typedef struct Cap {
     uint32_t object;
     Rights rights;
@@ -77,21 +68,10 @@ typedef struct page_entry {
     Cap frame_cap;
 } pe; // might need more stuff here.
 
-typedef struct page_table {
-    pe *pe[NUM_PT_ENTRIES];
-} pt;
-
-typedef struct page_middle_directory {
-    pt *pt[NUM_PT_ENTRIES];
-} pmd;
-
-typedef struct page_upper_directory {
-    pmd *pmd[NUM_PT_ENTRIES];
-} pud;
-
 
 // stuff required for the vm fault handling
-pud pgd[MAX_PDS][NUM_PT_ENTRIES]; // page tables for the children.
+// I cannot have actual page tables due to missing malloc.
+pe [MAX_PDS][NUM_PT_ENTRIES]; // page tables for the children. // each pd has 512 total max pages in heap.
 
 
 FrameInfo frame_table[MAX_PDS]; // this functions as a doubly ll.
