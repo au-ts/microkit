@@ -101,7 +101,6 @@ void init(void)
     for (int i = 0; i < num_frames; ++i) {
         // fill in the frame table
         frame_table[frames[i].pd_idx] = &frames[i];
-        // TODO: fill process vspaces.
     }
 
 }
@@ -120,7 +119,10 @@ seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo
 {
     // TODO: this is when the child has a vm fault...
     uint64_t fault_addr = microkit_mr_get(1); // I am not sure if this is the right mr number so will need to check later.
+    // check if there are enough frames, if so do normal proc else page out and in.
+
     // i return nothing here.
+
     
 }
 
