@@ -98,7 +98,7 @@ void init(void)
     // need to initialise these
 
     for (int i = 0; i < num_frames; ++i) {
-        int next = i + 1, prev = i - 1;
+        uint32_t next = i + 1, prev = i - 1;
         if (i == 0) prev = num_frames - 1;
         if (i == num_frames - 1) next = 0;
         frame_table[frames[i].pd_idx] = {frames[i].frame_cap, frames[i].frame_id, 0, false, next, prev};

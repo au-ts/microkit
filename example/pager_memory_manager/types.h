@@ -1,6 +1,4 @@
 
-typedef __builtin_va_list va_list;
-
 #define MAX_PDS 64
 #define NUM_PT_ENTRIES 128
 #define BRK_START 0x8000000000
