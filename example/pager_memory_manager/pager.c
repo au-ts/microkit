@@ -1,6 +1,6 @@
 #include <microkit.h>
 #include <stdint.h>
-
+#include "types.h"
 /**
  * I have made a couple assumptions:
  * - there is a fixed maximum of PD's
@@ -9,10 +9,7 @@
 
 // i need to create the following things:
 
-#define MAX_PDS 128
-#define NUM_PT_ENTRIES 512
-#define BRK_START 0x8000000000
-#define MMAP_START 0x9000000000
+
 
 #define INTO_PT(x) // make this macro such that it indexes into the struct page tables.
 
