@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <stdint.h>
 #include "cutil.h"
 
 void *memcpy(void *dst, const void *src, size_t sz)
@@ -43,4 +44,12 @@ void *memmove(void *restrict dest, const void *restrict src, size_t n)
     }
 
     return dest;
+}
+
+void memzero(void *s, size_t sz)
+{
+    uint8_t *p = s;
+    while (sz-- > 0) {
+        *p++ = 0x0;
+    }
 }

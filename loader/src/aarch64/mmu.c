@@ -12,9 +12,19 @@
 #include "../cutil.h"
 #include "../uart.h"
 
-void el1_mmu_enable(void);
-void el2_mmu_enable(void);
+void el1_mmu_enable(uint64_t *pgd_down, uint64_t *pgd_up);
+void el2_mmu_enable(uint64_t *pgd_down);
 
+#if defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
+/* Paging structures for kernel mapping */
+uint64_t boot_lvl0_upper[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
+uint64_t boot_lvl1_upper[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
+uint64_t boot_lvl2_upper[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
+
+/* Paging structures for identity mapping */
+uint64_t boot_lvl0_lower[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
+uint64_t boot_lvl1_lower[NUM_MULTIKERNELS][1 << 9] ALIGN(1 << 12);
+#else
 /* Paging structures for kernel mapping */
 uint64_t boot_lvl0_upper[1 << 9] ALIGN(1 << 12);
 uint64_t boot_lvl1_upper[1 << 9] ALIGN(1 << 12);
@@ -23,6 +33,7 @@ uint64_t boot_lvl2_upper[1 << 9] ALIGN(1 << 12);
 /* Paging structures for identity mapping */
 uint64_t boot_lvl0_lower[1 << 9] ALIGN(1 << 12);
 uint64_t boot_lvl1_lower[1 << 9] ALIGN(1 << 12);
+#endif
 
 int arch_mmu_enable(int logical_cpu)
 {
@@ -36,9 +47,17 @@ int arch_mmu_enable(int logical_cpu)
     LDR_PRINT("INFO", logical_cpu, "enabling MMU\n");
     el = current_el();
     if (el == EL1) {
-        el1_mmu_enable();
+        #if defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
+        el1_mmu_enable(boot_lvl0_lower[logical_cpu], boot_lvl0_upper[logical_cpu]);
+        #else
+        el1_mmu_enable(boot_lvl0_lower, boot_lvl0_upper);
+        #endif
     } else if (el == EL2) {
-        el2_mmu_enable();
+        #if defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
+        el2_mmu_enable(boot_lvl0_lower[logical_cpu]);
+        #else
+        el2_mmu_enable(boot_lvl0_lower);
+        #endif
     } else {
         LDR_PRINT("ERROR", logical_cpu, "unknown EL for MMU enable\n");
     }

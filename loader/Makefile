@@ -50,8 +50,7 @@ endif
 CFLAGS := -std=gnu11 -g -O3 -nostdlib -ffreestanding \
 					-MP -MD $(CFLAGS_ARCH) -I$(SEL4_SDK)/include \
 					-Wall -Werror -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations \
-					-Wundef -Wno-nonnull -Wnested-externs \
-					-DNUM_MULTIKERNELS=$(NUM_MULTIKERNELS)
+					-Wundef -Wno-nonnull -Wnested-externs -DNUM_MULTIKERNELS=$(NUM_MULTIKERNELS)
 
 ASM_FLAGS := $(ASM_FLAGS_ARCH) -g -MP -MD -I$(SEL4_SDK)/include
 

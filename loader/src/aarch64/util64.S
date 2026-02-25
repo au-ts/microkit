@@ -60,9 +60,9 @@
 #define TCR_PS_16T        (4 << 16)
 #define TCR_PS_256T       (5 << 16)
 
-#ifndef PHYSICAL_ADDRESS_BITS
-#error "Missing PHYSICAL_ADDRESS_BITS"
-#endif
+
+#define PHYSICAL_ADDRESS_BITS 40
+
 
 #if PHYSICAL_ADDRESS_BITS == 40
 #define TCR_PS TCR_PS_1T
@@ -438,13 +438,21 @@ BEGIN_FUNC(el2_mmu_enable)
 
 END_FUNC(el2_mmu_enable)
 
-BEGIN_FUNC(start_secondary_cpu)
-    ldr     x9, =curr_cpu_stack
-    ldr     x9, [x9]
-    mov     sp, x9
-
-    b secondary_cpu_entry
-END_FUNC(start_secondary_cpu)
+/**
+ * The Power State Coordinate Interface (DEN0022F.b) says that we will
+ * initially be given x0, our context_id as a parameter.
+ * We choose to pass the appropriate stack value in x0.
+ * We have these arguments on the stack:
+ *  - the logical core ID
+ **/
+BEGIN_FUNC(arm_secondary_cpu_entry_asm)
+    mov sp, x0
+    /* grab the core ID off the stack */
+    ldr x0, [sp]
+    mrs x1, mpidr_el1
+    /* x0 and x1 are arguments */
+    b arm_secondary_cpu_entry
+END_FUNC(arm_secondary_cpu_entry_asm)
 
 BEGIN_FUNC(psci_func)
     smc #0

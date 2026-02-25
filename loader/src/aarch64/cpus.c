@@ -8,19 +8,31 @@
 #include <stdint.h>
 
 #include "smc.h"
+#include "el.h"
 #include "../cpus.h"
 #include "../cutil.h"
 #include "../loader.h"
 #include "../uart.h"
 
 void arm_secondary_cpu_entry(int logical_cpu, uint64_t mpidr_el1);
+#define MSR(reg, v)                                \
+    do {                                           \
+        uint64_t _v = v;                             \
+        asm volatile("msr " reg ",%0" :: "r" (_v));\
+    } while(0)
 
 /**
  * For the moment this code assumes that CPUs are booted using the ARM PSCI
  * standard. We reference Version 1.3 issue F.b.
  **/
-
+#if defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
+extern uint64_t curr_cpu_id;
+extern uintptr_t curr_cpu_stack;
+extern int core_up[NUM_MULTIKERNELS];
+extern volatile uint64_t cpu_mpidrs[NUM_MULTIKERNELS];
+#else
 size_t cpu_mpidrs[NUM_ACTIVE_CPUS];
+#endif
 
 void plat_save_hw_id(int logical_cpu, size_t hw_id)
 {
@@ -79,27 +91,42 @@ extern void arm_secondary_cpu_entry_asm(void *sp);
 
 void arm_secondary_cpu_entry(int logical_cpu, uint64_t mpidr_el1)
 {
-    LDR_PRINT("INFO", logical_cpu, "secondary CPU entry with MPIDR_EL1 ");
-    puthex64(mpidr_el1);
-    puts("\n");
+    uint64_t cpu = logical_cpu;
 
-    if (logical_cpu == 0) {
-        LDR_PRINT("ERROR", logical_cpu, "secondary CPU should not have logical id 0!!!\n");
-        goto fail;
-    } else if (logical_cpu >= NUM_ACTIVE_CPUS) {
-        LDR_PRINT("ERROR", logical_cpu, "secondary CPU should not be >NUM_ACTIVE_CPUS\n");
-        goto fail;
-    } else if (logical_cpu < 0) {
-        LDR_PRINT("ERROR", logical_cpu, "secondary CPU should not have negative logical id\n");
+    int r;
+    r = ensure_correct_el(logical_cpu);
+    if (r != 0) {
         goto fail;
     }
 
-    plat_save_hw_id(logical_cpu, mpidr_el1);
+    /* Get this CPU's ID and save it to TPIDR_EL1 for seL4. */
+    /* Whether or not seL4 is booting in EL2 does not matter, as it always looks at tpidr_el1 */
+    MSR("tpidr_el1", cpu);
 
-    start_kernel(logical_cpu);
+    // uint64_t mpidr_el1;
+    // asm volatile("mrs %x0, mpidr_el1" : "=r"(mpidr_el1) :: "cc");
+    puts("LDR|INFO: secondary (CPU ");
+    puthex32(cpu);
+    puts(") has MPIDR_EL1: ");
+    puthex64(mpidr_el1);
+    puts("\n");
+    #if defined(NUM_MULTIKERNELS) && NUM_MULTIKERNELS > 1
+    cpu_mpidrs[cpu] = mpidr_el1;
+    #endif
+
+    start_kernel(cpu);
+
+    puts("LDR|ERROR: seL4 Loader: Error - KERNEL RETURNED (CPU ");
+    puthex32(cpu);
+    puts(")\n");
 
 fail:
-    for (;;) {}
+    /* Note: can't usefully return to U-Boot once we are here. */
+    /* IMPROVEMENT: use SMC SVC call to try and power-off / reboot system.
+     * or at least go to a WFI loop
+     */
+    for (;;) {
+    }
 }
 
 int plat_start_cpu(int logical_cpu)
@@ -107,11 +134,6 @@ int plat_start_cpu(int logical_cpu)
     LDR_PRINT("INFO", 0, "starting CPU ");
     putdecimal(logical_cpu);
     puts("\n");
-
-    if (logical_cpu >= NUM_ACTIVE_CPUS) {
-        LDR_PRINT("ERROR", 0, "starting a CPU with number above the active CPU count\n");
-        return 1;
-    }
 
     /**
      * In correspondence with what arm_secondary_cpu_entry does, we push
