@@ -4,11 +4,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
-use std::{cmp::min, collections::HashMap};
+use std::{cmp::min, collections::HashMap, collections::BTreeMap};
 
 use crate::{
     elf::ElfFile,
-    sdf::{self, SysMemoryRegion, SystemDescription},
+    sdf::{self, SysMemoryRegion, SystemDescription, CpuCore, ChannelEnd, ProtectionDomain},
     sel4::{Arch, Config},
     util::{monitor_serialise_names, monitor_serialise_u64_vec},
     MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH, VM_MAX_NAME_LENGTH,
@@ -20,12 +20,15 @@ pub fn patch_symbols(
     kernel_config: &Config,
     pd_elf_files: &mut BTreeMap<String, ElfFile>,
     system: &SystemDescription,
+    core_protection_domains: &BTreeMap<String, ProtectionDomain>,
     cross_core_receiver_channels: &[(ChannelEnd, ChannelEnd)],
 ) -> Result<(), String> {
     // *********************************
     // Step 1. Write ELF symbols in the monitor.
     // *********************************
-    let monitor_elf = pd_elf_files.last_mut().unwrap();
+    // @kwinter: Fix this hack
+    // let monitor_elf = pd_elf_files.last_mut().unwrap();
+    let monitor_elf = pd_elf_files.get_mut("monitor").unwrap();
 
     let pd_names: Vec<String> = system
         .protection_domains
@@ -36,7 +39,7 @@ pub fn patch_symbols(
     monitor_elf
         .write_symbol(
             "pd_names_len",
-            &system.protection_domains.len().to_le_bytes(),
+            &core_protection_domains.len().to_le_bytes(),
         )
         .unwrap();
     monitor_elf
@@ -73,7 +76,7 @@ pub fn patch_symbols(
         .unwrap();
 
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
-    for pd in system.protection_domains.values() {
+    for pd in core_protection_domains.values() {
         let cur_stack_vaddr = kernel_config.pd_stack_bottom(pd.stack_size);
         pd_stack_bottoms.push(cur_stack_vaddr);
     }
@@ -92,8 +95,9 @@ pub fn patch_symbols(
         mr_name_to_desc.insert(&mr.name, mr);
     }
 
-    for pd in system.protection_domains.values() {
-        let elf_obj = &mut pd_elf_files.get(&pd.name).unwrap();
+    for pd in core_protection_domains.values() {
+        println!("These are the PD elf files: {:?} and this is PD name: {}", pd_elf_files.keys(), pd.name);
+        let elf_obj = pd_elf_files.get_mut(&pd.name).unwrap();
 
         let name = pd.name.as_bytes();
         let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
@@ -125,15 +129,17 @@ pub fn patch_symbols(
             }
         }
 
-        let mut sgi_bits = 0;
+        let mut sgi_bits: u64 = 0;
         for (_, recv) in cross_core_receiver_channels.iter() {
             if recv.pd == pd.name {
                 sgi_bits |= 1 << recv.id;
             }
         }
 
+        let pd_irq_bits = sgi_bits | pd.irq_bits();
+
         elf_obj
-            .write_symbol("microkit_irqs", &pd.irq_bits().to_le_bytes())
+            .write_symbol("microkit_irqs", &pd_irq_bits.to_le_bytes())
             .unwrap();
         elf_obj
             .write_symbol("microkit_notifications", &notification_bits.to_le_bytes())
@@ -185,7 +191,7 @@ pub fn patch_symbols(
                 }
             }
         }
-        let elf_obj = pd_elf_files.get(&pd.name).unwrap();
+        let elf_obj = pd_elf_files.get_mut(&pd.name).unwrap();
         for (sym_name, value) in symbols_to_write.iter() {
             elf_obj
                 .write_symbol(sym_name, &value.to_le_bytes())

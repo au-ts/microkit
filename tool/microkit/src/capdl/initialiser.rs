@@ -16,6 +16,7 @@ use crate::{serialise_ut, UntypedObject};
 // Page size used for allocating the spec and embedded frames segments.
 pub const INITIALISER_GRANULE_SIZE: PageSize = PageSize::Small;
 
+#[derive(Clone)]
 pub struct CapDLInitialiserSpecMetadata {
     pub spec_size: u64,
 }
@@ -30,6 +31,7 @@ pub enum LogLevel {
     Trace = 5,
 }
 
+#[derive(Clone)]
 pub struct CapDLInitialiser {
     pub elf: ElfFile,
     pub phys_base: Option<u64>,

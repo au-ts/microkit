@@ -43,6 +43,27 @@ pub fn create_irq_handler_cap(
     make_irq_handler_cap(sel4_config, irq_obj_id, &irq_desc.kind)
 }
 
+pub fn create_irq_handler_cap_no_ntfn(
+    spec_container: &mut CapDLSpecContainer,
+    sel4_config: &Config,
+    pd_name: &str,
+    pd_cpu: CpuCore,
+    irq_desc: &SysIrq,
+) -> Cap {
+    // Create the IRQ object and add it to the special `irqs` vec in the spec.
+    // This is a pseudo object so we can bind a cap to the IRQ
+    let irq_obj_id = create_irq_obj(spec_container, sel4_config, pd_name, pd_cpu, irq_desc);
+
+    // Create the real IRQ in the separate IRQ vector.
+    spec_container.spec.irqs.push(IrqEntry {
+        irq: Word(irq_desc.irq_num()),
+        handler: irq_obj_id,
+    });
+
+    // Create a IRQ handler cap
+    make_irq_handler_cap(sel4_config, irq_obj_id, &irq_desc.kind)
+}
+
 fn create_irq_obj(
     spec_container: &mut CapDLSpecContainer,
     sel4_config: &Config,
@@ -153,4 +174,27 @@ fn make_irq_handler_cap(sel4_config: &Config, irq_obj_id: ObjectId, irq_kind: &S
         }
         SysIrqKind::MSI { .. } => Cap::IrqMsiHandler(cap::IrqMsiHandler { object: irq_obj_id }),
     }
+}
+
+pub fn capdl_util_make_sgi_signal_obj(
+    spec_container: &mut CapDLSpecContainer,
+    irq: u64,
+    target: u64,
+) -> ObjectId {
+    let sgi_signal_inner_obj = Object::SGISignal(object::SGISignal {
+        irq: Word(irq),
+        target: Word(target),
+    });
+    let sgi_signal_obj = CapDLNamedObject {
+        name: format!("sgi_signal_irq_{}_to_target_{}", irq, target).into(),
+        object: sgi_signal_inner_obj,
+    };
+    spec_container.add_root_object(sgi_signal_obj)
+}
+
+
+pub fn make_irq_sgi_signal_cap(irq_obj_id: ObjectId) -> Cap {
+    Cap::SGISignal(cap::SGISignal {
+        object: irq_obj_id,
+    })
 }

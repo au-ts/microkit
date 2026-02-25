@@ -16,7 +16,7 @@ use crate::{
 
 #[derive(Clone, Serialize)]
 pub struct ElfContent {
-    pub elf_id: usize,
+    pub elf_pd_name: String,
     pub elf_seg_idx: usize,
     pub elf_seg_data_range: Range<usize>,
 }
@@ -68,6 +68,7 @@ pub fn capdl_obj_human_name(obj: &Object<FrameFill>, sel4_config: &Config) -> &'
         Object::IrqMsi(_) => "x86 MSI IRQ",
         Object::IrqIOApic(_) => "x86 IOAPIC IRQ",
         Object::RiscvIrq(_) => "RISC-V IRQ",
+        Object::SGISignal(_) => "SGISignal",
         Object::IOPorts(_) => "x86 I/O Ports",
         Object::SchedContext(_) => "SchedContext",
         Object::Reply => "Reply",

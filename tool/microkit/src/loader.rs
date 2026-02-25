@@ -4,13 +4,18 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 use crate::elf::{ElfFile, ElfSegmentData};
-use crate::sel4::{Arch, Config};
+use crate::sel4::{Arch, Config, seL4_KernelBootInfo, seL4_KernelBoot_KernelRegion, seL4_KernelBoot_RamRegion,
+    seL4_KernelBoot_RootTaskRegion, seL4_KernelBoot_ReservedRegion, SEL4_KERNEL_BOOT_INFO_MAGIC, SEL4_KERNEL_BOOT_INFO_VERSION_0};
 use crate::uimage::uimage_serialise;
+use crate::capdl::initialiser::CapDLInitialiser;
 use crate::util::{mask, mb, round_up, struct_to_bytes};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::ops::Range;
 use std::path::Path;
+use std::iter::zip;
+use std::mem;
+use crate::MemoryRegion;
 
 const PAGE_TABLE_SIZE: usize = 4096;
 
@@ -80,9 +85,9 @@ impl Riscv64 {
 
 /// Checks that each region in the given list does not overlap with any other region.
 /// Panics upon finding an overlapping region
-fn check_non_overlapping(regions: &Vec<(u64, &[u8])>) {
+fn check_non_overlapping(regions: &Vec<(u64, &[u8], String)>) {
     let mut checked: Vec<(u64, u64)> = Vec::new();
-    for (base, data) in regions {
+    for (base, data, _) in regions {
         let end = base + data.len() as u64;
         // Check that this does not overlap with any checked regions
         for (b, e) in &checked {
@@ -98,7 +103,8 @@ fn check_non_overlapping(regions: &Vec<(u64, &[u8])>) {
 #[repr(C)]
 struct LoaderRegion64 {
     load_addr: u64,
-    size: u64,
+    load_size: u64,
+    write_size: u64,
     offset: u64,
     r#type: u64,
 }
@@ -107,23 +113,34 @@ struct LoaderRegion64 {
 struct LoaderHeader64 {
     magic: u64,
     size: u64,
-    kernel_entry: u64,
-    ui_p_reg_start: u64,
-    ui_p_reg_end: u64,
-    pv_offset: u64,
-    v_entry: u64,
+    flags: u64,
+    num_multikernels: u64,
+    // kernel_entry: u64,
+    // ui_p_reg_start: u64,
+    // ui_p_reg_end: u64,
+    // pv_offset: u64,
+    // v_entry: u64,
     num_regions: u64,
+    kernel_v_entry: u64,
 }
 
 pub struct Loader<'a> {
-    arch: Arch,
+    // arch: Arch,
     loader_image: Vec<u8>,
     header: LoaderHeader64,
+    kernel_bootinfos: Vec<(
+        seL4_KernelBootInfo,
+        // This ordering matches the ordering required by seL4_KernelBootInfo.
+        Vec<seL4_KernelBoot_KernelRegion>,
+        Vec<seL4_KernelBoot_RamRegion>,
+        Vec<seL4_KernelBoot_RootTaskRegion>,
+        Vec<seL4_KernelBoot_ReservedRegion>,
+    )>,
     region_metadata: Vec<LoaderRegion64>,
-    regions: Vec<(u64, &'a [u8])>,
-    word_size: usize,
-    elf_machine: u16,
-    entry: u64,
+    regions: Vec<(u64, &'a [u8], String)>,
+    // word_size: usize,
+    // elf_machine: u16,
+    // entry: u64,
 }
 
 impl<'a> Loader<'a> {
@@ -131,9 +148,14 @@ impl<'a> Loader<'a> {
         config: &Config,
         loader_elf_path: &Path,
         kernel_elf: &'a ElfFile,
-        initial_task_elf: &'a ElfFile,
-        initial_task_phy_base: u64,
-        initial_task_vaddr_range: &Range<u64>,
+        kernel_elf_pv_offsets: &[u64],
+        capdl_initialisers: &'a [CapDLInitialiser],
+        // system_regions: Vec<(u64, &'a [u8])>,
+        per_core_ram_regions: &[&[MemoryRegion]],
+        shared_memory_phys_regions: &[MemoryRegion],
+        // initial_task_elf: &'a ElfFile,
+        // initial_task_phy_base: u64,
+        // initial_task_vaddr_range: &Range<u64>,
     ) -> Loader<'a> {
         if config.arch == Arch::X86_64 {
             unreachable!("internal error: x86_64 does not support creating a loader image");
@@ -151,78 +173,99 @@ impl<'a> Loader<'a> {
             ),
         };
 
-        let mut regions: Vec<(u64, &[u8])> = Vec::new();
+        // Determine how many multikernels to load from the #defined value in loader.c
+        println!("Extracting multikernel address");
+        let (num_multikernels_addr, num_multikernels_size) = loader_elf
+            .find_symbol("num_multikernels")
+            .expect("Could not find 'num_multikernels' symbol");
 
-        let mut kernel_first_vaddr = None;
-        let mut kernel_last_vaddr = None;
-        let mut kernel_first_paddr = None;
-        let mut kernel_p_v_offset = None;
+        println!("Reading multikernel number at {:x}", num_multikernels_addr);
+        let num_multikernels: usize = (*(loader_elf
+            .get_data(num_multikernels_addr, num_multikernels_size)
+            .expect("Could not extract number of multikernels to boot"))
+        .first()
+        .expect("Failed to copy in number of multikernels to boot"))
+        .into();
+        println!("Received number {}", num_multikernels);
+        assert!(num_multikernels > 0);
 
-        for segment in &kernel_elf.segments {
-            if segment.loadable {
-                if kernel_first_vaddr.is_none() || segment.virt_addr < kernel_first_vaddr.unwrap() {
-                    kernel_first_vaddr = Some(segment.virt_addr);
-                }
+        let mut kernel_regions = Vec::new();
+        let mut inittask_regions: Vec<Vec<(u64, &'a [u8])>> = Vec::new();
 
-                if kernel_last_vaddr.is_none()
-                    || segment.virt_addr + segment.mem_size() > kernel_last_vaddr.unwrap()
-                {
-                    kernel_last_vaddr =
-                        Some(round_up(segment.virt_addr + segment.mem_size(), mb(2)));
-                }
+        // Delete it.
+        #[allow(unused_variables)]
+        let kernel_elf_p_v_offset = ();
 
-                if kernel_first_paddr.is_none() || segment.phys_addr < kernel_first_paddr.unwrap() {
-                    kernel_first_paddr = Some(segment.phys_addr);
-                }
+        let loadable_kernel_segments: Vec<_> = kernel_elf.loadable_segments();
+        let kernel_first_vaddr = loadable_kernel_segments
+            .first()
+            .expect("kernel has at least one loadable segment")
+            .virt_addr;
 
-                if let Some(p_v_offset) = kernel_p_v_offset {
-                    if p_v_offset != segment.virt_addr - segment.phys_addr {
-                        panic!("Kernel does not have a consistent physical to virtual offset");
-                    }
-                } else {
-                    kernel_p_v_offset = Some(segment.virt_addr - segment.phys_addr);
-                }
+        let mut kernel_first_paddrs: Vec<u64> = Vec::new();
+        for kernel_p_v_offset in kernel_elf_pv_offsets {
+            let kernel_first_paddr = kernel_first_vaddr - kernel_p_v_offset;
+            kernel_first_paddrs.push(kernel_first_paddr);
 
-                regions.push((segment.phys_addr, segment.data().as_slice()));
+            for segment in &loadable_kernel_segments {
+                let region_paddr = segment.virt_addr - kernel_p_v_offset;
+                kernel_regions.push((region_paddr, segment.data().as_slice()));
             }
         }
 
-        assert!(kernel_first_paddr.is_some());
+        println!("RUST LOADER|FINISHED COLLECTING KERNEL REGIONS");
+        let mut inittask_num_regions = 0;
 
-        // We support an initial task ELF with multiple segments. This is implemented by amalgamating all the segments
-        // into 1 segment, so if your segments are sparse, a lot of memory will be wasted.
-        let initial_task_segments = initial_task_elf.loadable_segments();
+        for multikernel_idx in 0..num_multikernels {
+            // We support an initial task ELF with multiple segments. This is implemented by amalgamating all the segments
+            // into 1 segment, so if your segments are sparse, a lot of memory will be wasted.
+            let initial_task_segments = capdl_initialisers[multikernel_idx].elf.loadable_segments();
 
-        // Compute an available physical memory segment large enough to house the initial task (CapDL initialiser with spec)
-        // that is after the kernel window.
-        let inittask_p_v_offset = initial_task_vaddr_range.start - initial_task_phy_base;
-        let inittask_v_entry = initial_task_elf.entry;
+            let mut core_init_task_regions: Vec<(u64, &'a [u8])> = Vec::new();
 
-        for segment in initial_task_segments.iter() {
-            if segment.mem_size() > 0 {
-                let segment_paddr =
-                    initial_task_phy_base + (segment.virt_addr - initial_task_vaddr_range.start);
-                regions.push((segment_paddr, segment.data()));
+            // Compute an available physical memory segment large enough to house the initial task (CapDL initialiser with spec)
+            // that is after the kernel window.
+            // let inittask_p_v_offset = capdl_initialisers[multikernel_idx].image_bound().start - capdl_initialisers[multikernel_idx].phys_base.unwrap();
+            // let inittask_v_entry = capdl_initialisers[multikernel_idx].elf.entry;
+
+            for segment in initial_task_segments.iter() {
+                if segment.mem_size() > 0 {
+                    let segment_paddr =
+                        capdl_initialisers[multikernel_idx].phys_base.unwrap() + (segment.virt_addr - capdl_initialisers[multikernel_idx].image_bound().start);
+                    core_init_task_regions.push((segment_paddr, segment.data()));
+                }
             }
+            inittask_regions.push(core_init_task_regions);
+            inittask_num_regions += 1;
         }
 
+        println!("RUST LOADER|FINISHED COLLECTING INITIAL TASK REGIONS");
         // Determine the pagetable variables
-        assert!(kernel_first_vaddr.is_some());
-        assert!(kernel_first_vaddr.is_some());
-        let pagetable_vars = match config.arch {
-            Arch::Aarch64 => Loader::aarch64_setup_pagetables(
-                &loader_elf,
-                kernel_first_vaddr.unwrap(),
-                kernel_first_paddr.unwrap(),
-            ),
-            Arch::Riscv64 => Loader::riscv64_setup_pagetables(
-                config,
-                &loader_elf,
-                kernel_first_vaddr.unwrap(),
-                kernel_first_paddr.unwrap(),
-            ),
-            Arch::X86_64 => unreachable!("x86_64 does not support creating a loader image"),
-        };
+        // assert!(kernel_first_vaddr.is_some());
+        // assert!(kernel_first_vaddr.is_some());
+
+        let mut pagetable_vars: Vec<_> = Vec::new();
+
+        for (idx, kernel_first_paddr) in kernel_first_paddrs.iter().enumerate() {
+            let pagetables = match config.arch {
+                Arch::Aarch64 => Loader::aarch64_setup_pagetables(
+                    &loader_elf,
+                    kernel_first_vaddr,
+                    *kernel_first_paddr,
+                    (idx * PAGE_TABLE_SIZE) as u64,
+                ),
+                Arch::Riscv64 => Loader::riscv64_setup_pagetables(
+                    config,
+                    &loader_elf,
+                    kernel_first_vaddr,
+                    *kernel_first_paddr,
+                ),
+                Arch::X86_64 => unreachable!("x86_64 does not support creating a loader image"),
+            };
+            pagetable_vars.push(pagetables);
+        }
+
+        println!("RUST LOADER|FINISHED CREATING PAGE TABLES");
 
         let image_segment = loader_elf
             .segments
@@ -239,64 +282,216 @@ impl<'a> Loader<'a> {
             panic!("The loader entry point must be the first byte in the image");
         }
 
-        for (var_addr, var_size, var_data) in pagetable_vars {
-            let offset = var_addr - image_vaddr;
-            assert!(var_size == var_data.len() as u64);
-            assert!(offset > 0);
-            assert!(offset <= loader_image.len() as u64);
-            loader_image[offset as usize..(offset + var_size) as usize].copy_from_slice(&var_data);
+        println!("RUST LOADER|COPYING PAGE TABLES INTO THE LOADER");
+        for multikernel_idx in 0..num_multikernels {
+            for (var_addr, var_size, var_data) in &pagetable_vars[multikernel_idx] {
+                let offset = var_addr - image_vaddr;
+                let var_size = var_size / (num_multikernels as u64);
+                assert!(var_size == var_data.len() as u64);
+                assert!(offset > 0);
+                assert!(offset <= loader_image.len() as u64);
+                loader_image[offset as usize..(offset + var_size) as usize].copy_from_slice(var_data);
+            }
         }
 
-        let kernel_entry = kernel_elf.entry;
+        // let kernel_entry = kernel_elf.entry;
 
-        let pv_offset = initial_task_phy_base.wrapping_sub(initial_task_vaddr_range.start);
+        // let pv_offset = initial_task_phy_base.wrapping_sub(initial_task_vaddr_range.start);
 
-        let ui_p_reg_start = initial_task_phy_base;
-        let ui_p_reg_end = initial_task_vaddr_range.end - inittask_p_v_offset;
-        assert!(ui_p_reg_end > ui_p_reg_start);
+        // let ui_p_reg_start = initial_task_phy_base;
+        // let ui_p_reg_end = initial_task_vaddr_range.end - inittask_p_v_offset;
+        // assert!(ui_p_reg_end > ui_p_reg_start);    
+
+        // Combine all the init task, kernel and system regions
+        let mut all_regions: Vec<(u64, &[u8], String)> = Vec::with_capacity(
+            inittask_num_regions + kernel_regions.len());
+ // + system_regions.len());
+
+        // First, add the kernel regions
+        for (kernel_idx, region) in kernel_regions.iter().enumerate() {
+            all_regions.push((region.0, region.1, format!("kernel {kernel_idx}")));
+        }
+
+        // Add all the initial task regions. There can be multiple init task regions per multikernel
+        for idx in 0..num_multikernels {
+            let core_init_task_regions = &inittask_regions[idx];
+            for (region_idx, region) in core_init_task_regions.iter().enumerate() {
+                all_regions.push((region.0, region.1, format!("loader {idx} region {region_idx}")));
+            }
+        }
+
+        // Add all the system regions
+        // for (idx, region) in system_regions.iter().enumerate() {
+        //     all_regions.push((region.0, region.1, format!("system region {idx}")));
+        // }
 
         // This clone isn't too bad as it is just a Vec<(u64, &[u8])>
-        let mut all_regions_with_loader = regions.clone();
-        all_regions_with_loader.push((image_vaddr, &loader_image));
+        let mut all_regions_with_loader = all_regions.clone();
+        all_regions_with_loader.push((image_vaddr, &loader_image, format!{"loader"}));
         check_non_overlapping(&all_regions_with_loader);
 
         let mut region_metadata = Vec::new();
         let mut offset: u64 = 0;
-        for (addr, data) in &regions {
+        for (addr, data, _) in &all_regions {
+            // @kwinter: Is it necessary to have load and write size here?
             region_metadata.push(LoaderRegion64 {
                 load_addr: *addr,
-                size: data.len() as u64,
+                load_size: data.len() as u64,
+                write_size: data.len() as u64,
                 offset,
                 r#type: 1,
             });
             offset += data.len() as u64;
         }
 
+        // Add all the shared memory regions to the region metadata vector
+        // @kwinter: Do we have to handle this differently when we handle
+        // "filled" frames? We should be adding the binary data here
+        for shared_mr in shared_memory_phys_regions.iter() {
+            region_metadata.push(LoaderRegion64 {
+                load_addr: shared_mr.base,
+                load_size: 0,
+                write_size: shared_mr.size(),
+                offset: 0,
+                r#type: 1,
+            })
+        }
+
+        // @kwinter: The following code hasn't been vetted. And address TODO's
+        let mut kernel_bootinfos = Vec::new();
+        for (&raw_ram_regions, (kernel_first_paddr, core_init_task)) in zip(
+            per_core_ram_regions, zip(kernel_first_paddrs, capdl_initialisers)) {
+            let kernel_regions = vec![seL4_KernelBoot_KernelRegion {
+                base: kernel_first_paddr,
+                // TODO
+                end: 0,
+            }];
+            let ram_regions = raw_ram_regions
+                .iter()
+                .map(|r| seL4_KernelBoot_RamRegion {
+                    base: r.base,
+                    end: r.end,
+                })
+                .collect::<Vec<_>>();
+
+            let init_task_phy_base = core_init_task.phys_base.unwrap();
+
+            let inittask_p_v_offset = core_init_task.image_bound().start - init_task_phy_base;
+
+            let root_task_regions = vec![
+                // TODO: remove pv_offset
+                seL4_KernelBoot_RootTaskRegion {
+                    paddr_base: init_task_phy_base,
+                    paddr_end: core_init_task.image_bound().end - inittask_p_v_offset,
+                    vaddr_base: core_init_task.image_bound().start,
+                    _padding: [0; 8],
+                },
+            ];
+
+            // @kwinter: I'm fairly sure we dont need this anymore
+            // let mut reserved_regions = vec![seL4_KernelBoot_ReservedRegion {
+            //     base: extra_device_region.base,
+            //     end: extra_device_region.end,
+            // }];
+
+            let mut reserved_regions = vec![];
+
+            // "Normal memory" and "kernel memory" (usually a subset of normal), i.e. "RAM"
+            // available to each core must be reserved so that kernels don't rely on
+            // memory available to other (e.g. for kernel-internal structures)
+            for other_core_ram in per_core_ram_regions
+                .iter()
+                .filter(|&&regions| regions != raw_ram_regions)
+            {
+                for region in other_core_ram.iter() {
+                    reserved_regions.push(seL4_KernelBoot_ReservedRegion {
+                        base: region.base,
+                        end: region.end,
+                    });
+                }
+            }
+
+            let info = seL4_KernelBootInfo {
+                magic: SEL4_KERNEL_BOOT_INFO_MAGIC,
+                version: SEL4_KERNEL_BOOT_INFO_VERSION_0,
+                _padding0: [0; 3],
+                root_task_entry: core_init_task.elf.entry,
+                num_kernel_regions: kernel_regions
+                    .len()
+                    .try_into()
+                    .expect("cannot fit # kernel regions into u8"),
+                num_ram_regions: ram_regions
+                    .len()
+                    .try_into()
+                    .expect("cannot fit # ram regions into u8"),
+                num_root_task_regions: root_task_regions
+                    .len()
+                    .try_into()
+                    .expect("cannot fit # root task regions into u8"),
+                num_reserved_regions: reserved_regions
+                    .len()
+                    .try_into()
+                    .expect("cannot fit # reserved regions into u8"),
+                num_mpidrs: num_multikernels
+                    .try_into()
+                    .expect("cannot fit # mpidrs into u8"),
+                _padding: [0; 3],
+            };
+
+            kernel_bootinfos.push((
+                info,
+                kernel_regions,
+                ram_regions,
+                root_task_regions,
+                reserved_regions,
+            ));
+        }
+
         let size = std::mem::size_of::<LoaderHeader64>() as u64
             + region_metadata.iter().fold(0_u64, |acc, x| {
-                acc + x.size + std::mem::size_of::<LoaderRegion64>() as u64
-            });
+                acc + x.load_size + std::mem::size_of::<LoaderRegion64>() as u64
+            })
+            // @kwinter: Is this assuming a small page per kernel boot info?
+            // Don't use magic numbers here
+            + kernel_bootinfos.len() as u64 * 0x1000;
+
+        // @kwinter: Do we need flags anymore?
+        let flags = match config.hypervisor {
+            true => 1,
+            false => 0,
+        };
 
         let header = LoaderHeader64 {
             magic,
             size,
-            kernel_entry,
-            ui_p_reg_start,
-            ui_p_reg_end,
-            pv_offset,
-            v_entry: inittask_v_entry,
-            num_regions: regions.len() as u64,
+            flags,
+            num_multikernels: num_multikernels as u64,
+            // kernel_entry,
+            // ui_p_reg_start,
+            // ui_p_reg_end,
+            // pv_offset,
+            // v_entry: inittask_v_entry,
+            num_regions: region_metadata.len() as u64,
+            kernel_v_entry: kernel_elf.entry,
         };
 
+        // Loader {
+        //     arch: config.arch,
+        //     loader_image,
+        //     header,
+        //     region_metadata,
+        //     regions,
+        //     word_size: kernel_elf.word_size,
+        //     elf_machine: kernel_elf.machine,
+        //     entry: loader_elf.entry,
+        // }
+
         Loader {
-            arch: config.arch,
             loader_image,
             header,
+            kernel_bootinfos,
             region_metadata,
-            regions,
-            word_size: kernel_elf.word_size,
-            elf_machine: kernel_elf.machine,
-            entry: loader_elf.entry,
+            regions: all_regions,
         }
     }
 
@@ -307,13 +502,50 @@ impl<'a> Loader<'a> {
         bytes.extend_from_slice(&self.loader_image);
         // Then we copy the loader metadata (known as the 'header')
         bytes.extend_from_slice(unsafe { struct_to_bytes(&self.header) });
+
+        for (bootinfo, kernel_regions, ram_regions, roottask_regions, reserved_regions) in
+            self.kernel_bootinfos.iter()
+        {
+            let mut total_size = mem::size_of_val(bootinfo);
+
+            bytes.extend_from_slice(unsafe { struct_to_bytes(bootinfo) });
+
+            // The ordering here needs to match what the kernel expects.
+
+            for region in kernel_regions.iter() {
+                total_size += mem::size_of_val(region);
+                bytes.extend_from_slice(unsafe { struct_to_bytes(region) });
+            }
+            for region in ram_regions.iter() {
+                total_size += mem::size_of_val(region);
+                bytes.extend_from_slice(unsafe { struct_to_bytes(region) });
+            }
+            for region in roottask_regions.iter() {
+                total_size += mem::size_of_val(region);
+                bytes.extend_from_slice(unsafe { struct_to_bytes(region) });
+            }
+            for region in reserved_regions.iter() {
+                total_size += mem::size_of_val(region);
+                bytes.extend_from_slice(unsafe { struct_to_bytes(region) });
+            }
+
+            if total_size > 0x1000 {
+                panic!("expected total size of bootinfo less than one page, got: {total_size:#x}");
+            }
+
+            // pack out to a page
+            for _ in 0..0x1000 - total_size {
+                bytes.push(0);
+            }
+        }
+
         // For each region, we need to copy the region metadata as well
         for region in &self.region_metadata {
             let region_metadata_bytes = unsafe { struct_to_bytes(region) };
             bytes.extend_from_slice(region_metadata_bytes);
         }
         // Now we can copy all the region data
-        for (_, data) in &self.regions {
+        for (_, data, _) in &self.regions {
             bytes.extend_from_slice(data);
         }
 
@@ -336,49 +568,51 @@ impl<'a> Loader<'a> {
         loader_buf.flush().unwrap();
     }
 
-    fn convert_to_elf(&self, path: &Path) -> ElfFile {
-        let mut loader_elf = ElfFile::new(
-            path.to_path_buf(),
-            self.word_size,
-            self.entry,
-            self.elf_machine,
-        );
+    // fn convert_to_elf(&self, path: &Path) -> ElfFile {
+    //     let mut loader_elf = ElfFile::new(
+    //         path.to_path_buf(),
+    //         self.word_size,
+    //         self.entry,
+    //         self.elf_machine,
+    //     );
 
-        loader_elf.add_segment(
-            true,
-            true,
-            true,
-            self.entry,
-            ElfSegmentData::RealData(self.to_bytes()),
-        );
+    //     loader_elf.add_segment(
+    //         true,
+    //         true,
+    //         true,
+    //         self.entry,
+    //         ElfSegmentData::RealData(self.to_bytes()),
+    //     );
 
-        loader_elf
-    }
+    //     loader_elf
+    // }
 
     pub fn write_elf(&self, path: &Path) {
-        let loader_elf = self.convert_to_elf(path);
+        // let loader_elf = self.convert_to_elf(path);
 
-        match loader_elf.reserialise(path) {
-            Ok(_) => {}
-            Err(e) => panic!("Could not create '{}': {}", path.display(), e),
-        }
+        // match loader_elf.reserialise(path) {
+        //     Ok(_) => {}
+        //     Err(e) => panic!("Could not create '{}': {}", path.display(), e),
+        // }
+        panic!("We are only building a binary image for now!\n");
     }
 
     pub fn write_uimage(&self, path: &Path) {
-        let executable_payload = self.to_bytes();
-        let entry_32: u32 = match <u64 as TryInto<u32>>::try_into(self.entry) {
-            Ok(entry_32) => entry_32,
-            Err(_) => panic!(
-                "Could not create '{}': Loader link address 0x{:x} cannot be above 4G for uImage.",
-                path.display(),
-                self.entry
-            ),
-        };
+        // let executable_payload = self.to_bytes();
+        // let entry_32: u32 = match <u64 as TryInto<u32>>::try_into(self.entry) {
+        //     Ok(entry_32) => entry_32,
+        //     Err(_) => panic!(
+        //         "Could not create '{}': Loader link address 0x{:x} cannot be above 4G for uImage.",
+        //         path.display(),
+        //         self.entry
+        //     ),
+        // };
 
-        match uimage_serialise(&self.arch, entry_32, executable_payload, path) {
-            Ok(_) => {}
-            Err(e) => panic!("Could not create '{}': {}", path.display(), e),
-        }
+        // match uimage_serialise(&self.arch, entry_32, executable_payload, path) {
+        //     Ok(_) => {}
+        //     Err(e) => panic!("Could not create '{}': {}", path.display(), e),
+        // }
+        panic!("We are only building a binary image for now!\n");
     }
 
     fn riscv64_setup_pagetables(
@@ -459,6 +693,7 @@ impl<'a> Loader<'a> {
         elf: &ElfFile,
         first_vaddr: u64,
         first_paddr: u64,
+        offset: u64,
     ) -> Vec<(u64, u64, [u8; PAGE_TABLE_SIZE])> {
         let (boot_lvl1_lower_addr, boot_lvl1_lower_size) = elf
             .find_symbol("boot_lvl1_lower")
@@ -475,6 +710,12 @@ impl<'a> Loader<'a> {
         let (boot_lvl0_upper_addr, boot_lvl0_upper_size) = elf
             .find_symbol("boot_lvl0_upper")
             .expect("Could not find 'boot_lvl0_upper' symbol");
+
+        let boot_lvl1_lower_addr = boot_lvl1_lower_addr + offset;
+        let boot_lvl1_upper_addr = boot_lvl1_upper_addr + offset;
+        let boot_lvl2_upper_addr = boot_lvl2_upper_addr + offset;
+        let boot_lvl0_lower_addr = boot_lvl0_lower_addr + offset;
+        let boot_lvl0_upper_addr = boot_lvl0_upper_addr + offset;
 
         let mut boot_lvl0_lower: [u8; PAGE_TABLE_SIZE] = [0; PAGE_TABLE_SIZE];
         boot_lvl0_lower[..8].copy_from_slice(&(boot_lvl1_lower_addr | 3).to_le_bytes());

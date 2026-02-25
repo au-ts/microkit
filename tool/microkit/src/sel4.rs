@@ -9,9 +9,16 @@ use serde::Deserialize;
 
 use crate::{elf::ElfFile, util, DisjointMemoryRegion, MemoryRegion, UntypedObject};
 
+use crate::sdf::{ChannelEnd, SysMemoryRegion, CpuCore, SystemDescription, SysMemoryRegionPaddr};
+
+use std::collections::BTreeMap;
+
+use crate::min;
+
 pub struct KernelPartialBootInfo {
     device_memory: DisjointMemoryRegion,
     normal_memory: DisjointMemoryRegion,
+    kernel_p_v_offset: u64,
     boot_region: MemoryRegion,
 }
 
@@ -24,6 +31,14 @@ pub struct BootInfo {
     pub page_cap_count: u64,
     pub untyped_objects: Vec<UntypedObject>,
     pub first_available_cap: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct FullSystemState {
+    pub sgi_irq_numbers: BTreeMap<ChannelEnd, u64>,
+    pub sys_memory_regions: Vec<SysMemoryRegion>,
+    pub per_core_ram_regions: BTreeMap<CpuCore, DisjointMemoryRegion>,
+    pub shared_memory_phys_regions: DisjointMemoryRegion,
 }
 
 #[repr(C, packed)]
@@ -93,35 +108,215 @@ fn kernel_boot_mem(kernel_elf: &ElfFile) -> MemoryRegion {
     MemoryRegion::new(base, ki_boot_end_p)
 }
 
+pub fn kernel_calculate_virt_image(kernel_elf: &ElfFile) -> MemoryRegion {
+    let kernel_first_vaddr = kernel_elf
+        .loadable_segments()
+        .first()
+        .expect("kernel has at least one loadable segment")
+        .virt_addr;
+
+    let (kernel_last_vaddr, _) = kernel_elf
+        .find_symbol("ki_end")
+        .expect("Could not find 'ki_end' symbol");
+
+    println!("CALCULATING KERNEL VIRT IMAGE: 0x{:x} to 0x{:x}", kernel_first_vaddr, kernel_last_vaddr);
+
+    MemoryRegion::new(kernel_first_vaddr, kernel_last_vaddr)
+}
+
+fn kernel_calculate_phys_image(
+    kernel_elf: &ElfFile,
+    ram_regions: &DisjointMemoryRegion,
+) -> (MemoryRegion, MemoryRegion, u64) {
+    // Calculate where the kernel image region is
+    let kernel_virt_image = kernel_calculate_virt_image(kernel_elf);
+
+    // nb: Picked arbitarily
+    let kernel_first_paddr = ram_regions.regions[0].base;
+    let kernel_p_v_offset = kernel_virt_image.base - kernel_first_paddr;
+
+    // Remove the kernel image.
+    let kernel_last_paddr = kernel_virt_image.end - kernel_p_v_offset;
+    let kernel_phys_image = MemoryRegion::new(kernel_first_paddr, kernel_last_paddr);
+
+    // but get the boot region, we'll add that back later
+    // FIXME: Why calculate it now if we add it back later?
+    let (ki_boot_end_v, _) = kernel_elf
+        .find_symbol("ki_boot_end")
+        .expect("Could not find 'ki_boot_end' symbol");
+    assert!(ki_boot_end_v < kernel_virt_image.end);
+    let ki_boot_end_p = ki_boot_end_v - kernel_p_v_offset;
+    let boot_region = MemoryRegion::new(kernel_first_paddr, ki_boot_end_p);
+
+    (kernel_phys_image, boot_region, kernel_p_v_offset)
+}
+
 ///
 /// Emulate what happens during a kernel boot, up to the point
 /// where the reserved region is allocated to determine the memory ranges
 /// available. Only valid for ARM and RISC-V platforms.
 ///
-fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile) -> KernelPartialBootInfo {
-    // Determine the untyped caps of the system
-    // This lets allocations happen correctly.
+fn kernel_partial_boot(
+    kernel_config: &Config,
+    kernel_elf: &ElfFile,
+    full_system_state: &FullSystemState,
+    cpu: CpuCore,
+) -> KernelPartialBootInfo {
+
+    // Reserved regions will cover device memory, and the memory of other
+    // cores that we do not wish to modify.
+    let mut reserved_regions = DisjointMemoryRegion::default();
+
+    // This mimics the arguments we pass to the kernel boot in loader.rs
+    for (_, other_core_ram) in full_system_state
+        .per_core_ram_regions
+        .iter()
+        .filter(|(&other_cpu, _)| other_cpu != cpu)
+    {
+        // Add all the regions of other core's allocated ram regions
+        // to reserved regions
+        for region in other_core_ram.regions.iter() {
+            reserved_regions.insert_region(region.base, region.end);
+        }
+    }
+
+    // Passed to the kernel
+    let ram_regions = full_system_state
+        .per_core_ram_regions
+        .get(&cpu)
+        .expect("INTERNAL: should have chosen RAM for a core we are booting");
+
+    // Add device regions to the reserved regions
+    for r in kernel_config.device_regions.as_ref().unwrap().iter() {
+        reserved_regions.insert_region(r.start, r.end);
+    }
+
+    let (kernel_region, boot_region, kernel_p_v_offset) =
+        kernel_calculate_phys_image(kernel_elf, ram_regions);
+
+    reserved_regions.insert_region(kernel_region.base, kernel_region.end);
+
+    let mut available_regions = ram_regions.clone();
+
+    // ============ init_freemem()
+
+    let mut free_memory = DisjointMemoryRegion::default();
+
+    // "Now iterate through the available regions, removing any reserved regions."
+    let reserved_regions = {
+        let mut reserved2 = DisjointMemoryRegion::default();
+        let mut a = 0;
+        let mut r = 0;
+        let reserved = &mut reserved_regions.regions;
+        let avail_reg = &mut available_regions.regions;
+        while a < avail_reg.len() && r < reserved.len() {
+            if reserved[r].base == reserved[r].end {
+                /* reserved region is empty - skip it */
+                r += 1;
+            } else if avail_reg[a].base >= avail_reg[a].end {
+                /* skip the entire region - it's empty now after trimming */
+                a += 1;
+            } else if reserved[r].end <= avail_reg[a].base {
+                /* the reserved region is below the available region - skip it */
+                reserved2.insert_region(reserved[r].base, reserved[r].end);
+                r += 1;
+            } else if reserved[r].base >= avail_reg[a].end {
+                /* the reserved region is above the available region - take the whole thing */
+                reserved2.insert_region(avail_reg[a].base, avail_reg[a].end);
+                free_memory.insert_region(avail_reg[a].base, avail_reg[a].end);
+                a += 1;
+            } else {
+                /* the reserved region overlaps with the available region */
+                if reserved[r].base <= avail_reg[a].base {
+                    /* the region overlaps with the start of the available region.
+                     * trim start of the available region */
+                    avail_reg[a].base = min(avail_reg[a].end, reserved[r].end);
+                    /* do not increment reserved index here - there could be more overlapping regions */
+                } else {
+                    assert!(reserved[r].base < avail_reg[a].end);
+                    /* take the first chunk of the available region and move
+                     * the start to the end of the reserved region */
+                    let mut m = avail_reg[a];
+                    m.end = reserved[r].base;
+                    reserved2.insert_region(m.base, m.end);
+                    free_memory.insert_region(m.base, m.end);
+                    if avail_reg[a].end > reserved[r].end {
+                        avail_reg[a].base = reserved[r].end;
+                        /* we could increment reserved index here, but it's more consistent with the
+                         * other overlapping case if we don't */
+                    } else {
+                        a += 1;
+                    }
+                }
+            }
+        }
+
+        // add the rest of the reserved
+        while r < reserved.len() {
+            if reserved[r].base < reserved[r].end {
+                reserved2.insert_region(reserved[r].base, reserved[r].end);
+            }
+
+            r += 1;
+        }
+
+        // add the rest of the available
+        while a < avail_reg.len() {
+            if avail_reg[a].base < avail_reg[a].end {
+                reserved2.insert_region(avail_reg[a].base, avail_reg[a].end);
+                free_memory.insert_region(avail_reg[a].base, avail_reg[a].end);
+            }
+
+            a += 1;
+        }
+
+        // println!("{:x?}\n{:x?}", reserved_regions.regions, reserved2.regions);
+
+        reserved2
+    };
+
+    println!("Finished the contstruction of reserved regions from the availabel ram!");
+
     let mut device_memory = DisjointMemoryRegion::default();
     let mut normal_memory = DisjointMemoryRegion::default();
 
-    for r in kernel_config.device_regions.as_ref().unwrap().iter() {
-        device_memory.insert_region(r.start, r.end);
+    // for r in kernel_config.device_regions.as_ref().unwrap().iter() {
+    //     device_memory.insert_region(r.start, r.end);
+    // }
+    // for r in kernel_config.normal_regions.as_ref().unwrap().iter() {
+    //     normal_memory.insert_region(r.start, r.end);
+    // }
+
+    let mut start = 0;
+    for reserved_reg in reserved_regions.regions.iter() {
+        // @kwinter: Why do we need this edge case?
+        if (reserved_reg.base != 0) {
+            device_memory.insert_region(start, reserved_reg.base);
+        }
+        start = reserved_reg.end;
     }
-    for r in kernel_config.normal_regions.as_ref().unwrap().iter() {
-        normal_memory.insert_region(r.start, r.end);
+
+    if start < kernel_config.paddr_user_device_top {
+        device_memory.insert_region(start, kernel_config.paddr_user_device_top);
+    }
+
+    // XXX: Don't add the boot_region to normal_memory, for some reason (???)
+
+    // =========== Add the free memory as normal
+    for free_memory in free_memory.regions.iter() {
+        normal_memory.insert_region(free_memory.base, free_memory.end);
     }
 
     // Remove the kernel image itself
-    let self_mem = kernel_self_mem(kernel_elf);
-    normal_memory.remove_region(self_mem.base, self_mem.end);
-
-    // but get the boot region, we'll add that back later
-    // @ivanv: Why calculate it now if we add it back later?
-    let boot_region = kernel_boot_mem(kernel_elf);
+    // let self_mem = kernel_self_mem(kernel_elf);
+    // println!("Attempting to remove region: {:?}", normal_memory);
+    // normal_memory.remove_region(self_mem.base, self_mem.end);
+    // println!("{:x?}\n{:x?}", normal_memory.regions, device_memory.regions);
 
     KernelPartialBootInfo {
         device_memory,
         normal_memory,
+        kernel_p_v_offset,
         boot_region,
     }
 }
@@ -129,9 +324,12 @@ fn kernel_partial_boot(kernel_config: &Config, kernel_elf: &ElfFile) -> KernelPa
 pub fn emulate_kernel_boot_partial(
     kernel_config: &Config,
     kernel_elf: &ElfFile,
-) -> (DisjointMemoryRegion, MemoryRegion) {
-    let partial_info = kernel_partial_boot(kernel_config, kernel_elf);
-    (partial_info.normal_memory, partial_info.boot_region)
+    full_system_state: &FullSystemState,
+    cpu: CpuCore
+) -> (DisjointMemoryRegion, MemoryRegion, u64) {
+    println!("Attempting to emulate kernel boot partial!");
+    let partial_info = kernel_partial_boot(kernel_config, kernel_elf, full_system_state, cpu);
+    (partial_info.normal_memory, partial_info.boot_region, partial_info.kernel_p_v_offset)
 }
 
 fn get_n_paging(region: MemoryRegion, bits: u64) -> u64 {
@@ -209,11 +407,13 @@ fn rootserver_max_size_bits(config: &Config) -> u64 {
 pub fn emulate_kernel_boot(
     config: &Config,
     kernel_elf: &ElfFile,
+    full_system_state: &FullSystemState,
+    cpu: CpuCore,
     initial_task_phys_region: MemoryRegion,
     user_image_virt_region: MemoryRegion,
 ) -> BootInfo {
     assert!(initial_task_phys_region.size() == user_image_virt_region.size());
-    let partial_info = kernel_partial_boot(config, kernel_elf);
+    let partial_info = kernel_partial_boot(config, kernel_elf, full_system_state, cpu);
     let mut normal_memory = partial_info.normal_memory;
     let device_memory = partial_info.device_memory;
     let boot_region = partial_info.boot_region;
@@ -286,12 +486,297 @@ pub fn emulate_kernel_boot(
     let first_available_cap =
         first_untyped_cap + device_regions.len() as u64 + normal_regions.len() as u64;
     BootInfo {
+        p_v_offset: partial_info.kernel_p_v_offset,
         fixed_cap_count,
         paging_cap_count,
         page_cap_count,
         sched_control_cap,
         first_available_cap,
         untyped_objects,
+    }
+}
+
+pub fn pick_sgi_channels(
+    system: &SystemDescription,
+    kernel_config: &Config,
+) -> BTreeMap<ChannelEnd, u64> {
+    // TODO: Add support for different architectures, the sgi mechanisms
+    // will be different
+    // TODO: other platforms.
+    assert!(kernel_config.arch == Arch::Aarch64);
+    let num_sgi_irqs_per_core = match kernel_config
+        .arm_gic_version
+        .expect("INTERNAL: arm_gic_version specified on arm")
+    {
+        // TODO: Source document?
+        // Maybe 16 not always OK????
+        ArmGicVersion::GICv2 => 8,
+        ArmGicVersion::GICv3 => 16,
+    };
+
+    // Because when we issue an SGI sender cap, we can specify a singular target,
+    // seL4 gives us the ability for each core to have {NUM_SGI} receivers and
+    // be able to distinguish between them.
+
+    // Storing only the receiver is necessary, but to be able to print a good error message we store (send, recv).
+    let mut sgi_receivers_by_core = BTreeMap::<CpuCore, Vec<(&ChannelEnd, &ChannelEnd)>>::new();
+
+    for (send, recv, _, recv_pd) in system
+        .channels
+        .iter()
+        // Make both directions of the channels
+        .flat_map(|cc| [(&cc.end_a, &cc.end_b), (&cc.end_b, &cc.end_a)])
+        .map(|(send, recv)| {
+            (
+                send,
+                recv,
+                &system.protection_domains[&send.pd],
+                &system.protection_domains[&recv.pd],
+            )
+        })
+        // On different cores.
+        .filter(|(_, _, send_pd, recv_pd)| send_pd.cpu != recv_pd.cpu)
+        // And only look at the ones where the sender can notify
+        //     and where the channel in the right direction
+        .filter(|(send, _, _, _)| send.notify)
+    {
+        sgi_receivers_by_core
+            .entry(recv_pd.cpu)
+            .or_default()
+            .push((send, recv));
+    }
+
+    let mut sgi_irq_numbers = BTreeMap::<ChannelEnd, u64>::new();
+    let mut failure = false;
+
+    for (_, channels) in sgi_receivers_by_core.iter() {
+        if channels.len() > num_sgi_irqs_per_core {
+            failure = true;
+            continue;
+        }
+
+        for (sgi_irq, &(_, recv)) in channels.iter().enumerate() {
+            sgi_irq_numbers.insert(recv.clone(), sgi_irq.try_into().expect("IRQ fits in u64"));
+        }
+    }
+
+    if failure {
+        eprintln!("at least one core needed more than {num_sgi_irqs_per_core} SGI IRQs");
+        eprintln!("channels needing SGIs:");
+        for (cpu, channels) in sgi_receivers_by_core.iter() {
+            eprintln!("    receiver {cpu}; count: {}:", channels.len());
+            for &(send, recv) in channels.iter() {
+                eprintln!(
+                    "       {:<30} (id: {:>2}) |-> {:<30} (id: {:>2})",
+                    send.pd, send.id, recv.pd, recv.id,
+                );
+            }
+        }
+
+        std::process::exit(1);
+    }
+
+    // TODO: add the used SGIs to the report.
+    for (cpu, channels) in sgi_receivers_by_core.iter() {
+        eprintln!("    receiver {cpu}; count: {}:", channels.len());
+        for &(send, recv) in channels.iter() {
+            eprintln!(
+                "       {:<30} (id: {:>2}) |-> {:<30} (id: {:>2}) ==> SGI {:>2}",
+                send.pd, send.id, recv.pd, recv.id, sgi_irq_numbers[recv],
+            );
+        }
+    }
+
+    sgi_irq_numbers
+}
+
+pub fn build_full_system_state(
+    system: &SystemDescription,
+    kernel_config: &Config,
+    kernel_virt_image: MemoryRegion
+) -> FullSystemState {
+    let sgi_irq_numbers = pick_sgi_channels(system, kernel_config);
+
+    // Take all the memory regions used on multiple cores and make them shared.
+    // Note: there are a few annoying things we have to deal with:
+    // - users might specify phys_addr that point into RAM
+    // - users might also specify phys_addr that points to device registers (is this ever sensible?)
+    // - the phys_addr the user specify in RAM may overlap with our auto-allocated physical addresses
+    //   for when that don't specify RAM phys_addr in shared memory
+    // - a lot of user code expects these regions to be zeroed out on boot
+    //   (like how seL4 would otherwise make them) so we need to zero them out
+    //    in the loader
+    //
+    // We do the following, which is somewhat hacky:
+    //  for each user memory region, if it's used across multiple cores:
+    //      1. check if it has a phys_addr; if it does:
+    //          a. if it corresponds to device RAM, then we remove it
+    //             from "normal memory" and mark it as a shared region
+    //             to be zeroed in the loader
+    //          b. if it doesn't correspond to device RAM, then it's device registers
+    //             this is already device memory which can be "shared" and
+    //             shouldn't be zeroed in the loader.
+    //      2. else, we need to autoassign it. save it temporarily and once
+    //         we have processed all the user-specified memory regions
+    //         (which might allocate more holes) we allocate a shared region
+    //         started from the top of RAM and moving down.
+    //         FIXME: This might need to be split into multiple to handle overlaps
+    //                for now we check if it does happen, but we don't resolve it.
+
+    let mut sys_memory_regions = vec![];
+    // This checks overlaps of the shared memory regions if specified by paddr
+    let mut shared_memory_phys_regions = DisjointMemoryRegion::default();
+    let mut to_allocate_phys_addr_shared_indices = vec![];
+
+    for mr in system.memory_regions.iter().cloned() {
+        if mr.used_cores.len() > 1 {
+            println!("allocation shared: {mr:?}");
+
+            match mr.phys_addr {
+                SysMemoryRegionPaddr::Specified(phys_addr) => {
+                    if kernel_config.normal_regions.is_some() {
+                        let in_ram = kernel_config.normal_regions.as_ref().unwrap().iter().fold(false, |acc, reg| {
+                            let in_region = reg.start <= phys_addr && phys_addr < reg.end;
+
+                            // We could early exit instead of reducing, but this extra
+                            // check is nice to make sure we haven't messed up any of the
+                            // logic.
+                            if acc && in_region {
+                                panic!("INTERNAL: phys_addr is somehow in two memory regions");
+                            }
+
+                            in_region
+                        });
+
+                        if in_ram {
+                            shared_memory_phys_regions.insert_region(phys_addr, phys_addr + mr.size);
+                        } else {
+                            // Do nothing to it.
+                        }
+                    }
+                }
+                _ => {
+                    // index of the memory region in sys_memory_regions.
+                    to_allocate_phys_addr_shared_indices.push(sys_memory_regions.len());
+                }
+            }
+        }
+
+        sys_memory_regions.push(mr);
+    }
+
+    // FIXME: this would need to be changed if we want to handle overlaps
+    //        of specified phys regions.
+    // @kwinter: We shouldn't be using is_some
+    let last_ram_region = if kernel_config.normal_regions.is_some() {
+            kernel_config
+            .normal_regions
+            .as_ref()
+            .unwrap()
+            .last()
+            .expect("kernel should have one memory region")
+        } else {
+            panic!("We shouldn't be calling build state for x86 builds yet!\n");
+        };
+
+    let mut shared_phys_addr_prev = last_ram_region.end;
+
+    for &shared_index in to_allocate_phys_addr_shared_indices.iter() {
+        let mr = sys_memory_regions
+            .get_mut(shared_index)
+            .expect("should be valid by construction");
+
+        let phys_addr = shared_phys_addr_prev
+            .checked_sub(mr.size)
+            .expect("no underflow :(");
+        mr.phys_addr = SysMemoryRegionPaddr::ToolAllocated(Some(phys_addr));
+        // FIXME: This would crash if overlap happens with shared memory paddrs.
+        shared_memory_phys_regions.insert_region(phys_addr, phys_addr + mr.size);
+        shared_phys_addr_prev = phys_addr;
+    }
+
+    let per_core_ram_regions = {
+        let mut per_core_regions = BTreeMap::new();
+
+        let mut available_normal_memory = DisjointMemoryRegion::default();
+        if kernel_config.normal_regions.is_some() {
+            for region in kernel_config.normal_regions.as_ref().unwrap().iter() {
+                available_normal_memory.insert_region(region.start, region.end);
+            }
+        } else {
+            panic!("We shouldn't be calling build full system state for x86 builds yet!");
+        }
+
+        // Remove shared memory.
+        for s_mr in shared_memory_phys_regions.regions.iter() {
+            available_normal_memory.remove_region(s_mr.base, s_mr.end);
+        }
+
+        println!("available memory:");
+        for r in available_normal_memory.regions.iter() {
+            println!("    [{:x}..{:x})", r.base, r.end);
+        }
+
+        // TODO: I'm not convinced of this algorithm's correctness of always working.
+        //       It might not be the most efficient, but I don't know if it will always work.
+
+        let kernel_size = kernel_virt_image.size();
+
+        for cpu in 0..kernel_config.num_multikernels {
+            let mut normal_memory = DisjointMemoryRegion::default();
+
+            // FIXME: ARM64 requires LargePage alignment, what about others?
+            let kernel_mem = available_normal_memory.allocate_aligned(
+                kernel_size,
+                ObjectType::LargePage.fixed_size(&kernel_config).unwrap(),
+            );
+
+            println!(
+                "cpu({cpu}) kernel ram: [{:x}..{:x})",
+                kernel_mem.base, kernel_mem.end,
+            );
+
+            normal_memory.insert_region(kernel_mem.base, kernel_mem.end);
+            per_core_regions.insert(CpuCore(cpu), normal_memory);
+        }
+
+        println!("available memory after allocating kernels:");
+        for r in available_normal_memory.regions.iter() {
+            println!("    [{:x}..{:x})", r.base, r.end);
+        }
+
+        let total_ram_size: u64 = available_normal_memory
+            .regions
+            .iter()
+            .map(|mr| mr.size())
+            .sum();
+
+        let per_core_ram_size = util::round_down(
+            total_ram_size / u64::from(kernel_config.num_multikernels),
+            ObjectType::SmallPage.fixed_size(&kernel_config).unwrap(),
+        );
+
+        for (&cpu, core_normal_memory) in per_core_regions.iter_mut() {
+            let ram_mem = available_normal_memory
+                .allocate_non_contiguous(per_core_ram_size)
+                .expect("should have been able to allocate part of the RAM we chose");
+
+            println!("cpu({}) normal ram: ", cpu.0);
+            for r in ram_mem.regions.iter() {
+                println!("    [{:x}..{:x})", r.base, r.end);
+            }
+
+            core_normal_memory.extend(&ram_mem);
+        }
+
+        per_core_regions
+    };
+
+    FullSystemState {
+        sgi_irq_numbers,
+        sys_memory_regions,
+        per_core_ram_regions,
+        shared_memory_phys_regions,
     }
 }
 
@@ -312,7 +797,7 @@ pub struct PlatformKernelDeviceRegion {
 #[derive(Deserialize)]
 pub struct PlatformConfig {
     pub devices: Vec<PlatformConfigRegion>,
-    pub kernel_devices: Vec<PlatformKernelDeviceRegion>,
+    pub kernel_devs: Vec<PlatformKernelDeviceRegion>,
     pub memory: Vec<PlatformConfigRegion>,
 }
 
@@ -344,8 +829,9 @@ pub struct Config {
     /// x86 specific, user context size
     pub x86_xsave_size: Option<usize>,
     pub invocations_labels: serde_json::Value,
+    pub kernel_devices: Option<Vec<PlatformKernelDeviceRegion>>,
     /// The two remaining fields are only valid on ARM and RISC-V
-    pub kernel_devices: Vec<PlatformKernelDeviceRegion>,
+    pub device_regions: Option<Vec<PlatformConfigRegion>>,
     pub normal_regions: Option<Vec<PlatformConfigRegion>>,
     pub domain_scheduler: bool,
 }
@@ -436,7 +922,7 @@ impl Config {
     }
 }
 
-#[derive(PartialEq, Clone, Copy, Eq, PartialEq)]
+#[derive(PartialEq, Clone, Copy, Eq)]
 pub enum Arch {
     Aarch64,
     Riscv64,

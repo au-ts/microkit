@@ -10,11 +10,13 @@ use crate::{
     sel4::{Config, PageSize},
 };
 
+use std::collections::BTreeMap;
+
 pub fn pack_spec_into_initial_task(
     sel4_config: &Config,
     build_config: &str,
     spec_container: &CapDLSpecContainer,
-    system_elfs: &[ElfFile],
+    system_elfs: &BTreeMap<String, ElfFile>,
     capdl_initialiser: &mut CapDLInitialiser,
 ) {
     let compress_frames = true;
@@ -25,7 +27,7 @@ pub fn pack_spec_into_initial_task(
         |_| embed_frames,
         |d, buf| {
             buf.copy_from_slice(
-                &system_elfs[d.elf_id].segments[d.elf_seg_idx].data()[d.elf_seg_data_range.clone()],
+                &system_elfs.get(&d.elf_pd_name).unwrap().segments[d.elf_seg_idx].data()[d.elf_seg_data_range.clone()],
             );
             compress_frames
         },

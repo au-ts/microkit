@@ -22,8 +22,6 @@ pub mod symbols;
 pub mod uimage;
 pub mod util;
 
-use crate::sel4::Config;
-
 // Note that these values are used in the monitor so should also be changed there
 // if any of these were to change.
 pub const MAX_PDS: usize = 63;
@@ -219,7 +217,10 @@ impl DisjointMemoryRegion {
     }
 
     pub fn insert_region(&mut self, base: u64, end: u64) {
+                println!("Inserting region from {:x} to {:x}", base, end);
+
         assert!(base < end);
+
 
         if self.regions.is_empty() {
             self.regions.push(MemoryRegion::new(base, end));
@@ -393,7 +394,9 @@ impl DisjointMemoryRegion {
             let amount_left_needed = size - allocated_amount;
             let to_allocate = std::cmp::min(first_region.size(), amount_left_needed);
 
-            let base = self.allocate(to_allocate);
+            // @kwinter: Is it ok to always allocate small pages here?
+            // also add proper error handling
+            let base = self.allocate(to_allocate, PageSize::Small).unwrap();
             allocated_amount += to_allocate;
             new.insert_region(base, base + to_allocate);
         }

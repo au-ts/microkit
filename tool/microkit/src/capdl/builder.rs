@@ -8,6 +8,7 @@ use core::ops::Range;
 use std::{
     cmp::{min, Ordering},
     collections::HashMap,
+    collections:: BTreeMap,
 };
 
 use sel4_capdl_initializer_types::{
@@ -17,7 +18,8 @@ use sel4_capdl_initializer_types::{
 
 use crate::{
     capdl::{
-        irq::create_irq_handler_cap,
+        irq::{create_irq_handler_cap, create_irq_handler_cap_no_ntfn,
+            capdl_util_make_sgi_signal_obj, make_irq_sgi_signal_cap},
         memory::{create_vspace, create_vspace_ept, map_page},
         spec::{capdl_obj_physical_size_bits, ElfContent},
         util::*,
@@ -25,9 +27,10 @@ use crate::{
     elf::ElfFile,
     sdf::{
         CpuCore, SysMap, SysMapPerms, SystemDescription, BUDGET_DEFAULT, MONITOR_PD_NAME,
-        MONITOR_PRIORITY,
+        MONITOR_PRIORITY, SysMemoryRegion, SysMemoryRegionKind, ChannelEnd, SysIrq,
+        SysIrqKind, ProtectionDomain, Channel
     },
-    sel4::{Arch, Config, PageSize},
+    sel4::{Arch, Config, PageSize, ArmGicVersion, FullSystemState, ArmRiscvIrqTrigger},
     util::{ranges_overlap, round_down, round_up},
 };
 
@@ -116,6 +119,8 @@ pub struct CapDLSpecContainer {
     pub spec: Spec<FrameFill>,
     /// Track allocations as we build the system for later use by the report.
     pub expected_allocations: HashMap<ObjectId, ExpectedAllocation>,
+    // @kwinter: Do we NEED to return this in here?
+    pub cross_core_recv_channels: Option<Vec<(ChannelEnd, ChannelEnd)>>,
 }
 
 impl Default for CapDLSpecContainer {
@@ -138,8 +143,10 @@ impl CapDLSpecContainer {
                 untyped_covers: Vec::new(),
                 cached_orig_cap_slots: None,
                 log_level: None,
+                cpu_id: 0,
             },
             expected_allocations: HashMap::new(),
+            cross_core_recv_channels: None,
         }
     }
 
@@ -181,7 +188,6 @@ impl CapDLSpecContainer {
         sel4_config: &Config,
         pd_name: &str,
         pd_cpu: CpuCore,
-        elf_id: usize,
         elf: &ElfFile,
     ) -> Result<ObjectId, String> {
         // We assumes that ELFs and PDs have a one-to-one relationship. So for each ELF we create a VSpace.
@@ -230,8 +236,9 @@ impl CapDLSpecContainer {
                             start: dest_offset,
                             end: dest_offset + len_to_cpy,
                         },
+                        // @kwinter: Change this pd.name.clone() to an immutable ref
                         content: FillEntryContent::Data(ElfContent {
-                            elf_id,
+                            elf_pd_name: pd_name.to_string(),
                             elf_seg_idx: seg_idx,
                             elf_seg_data_range: (section_offset as usize
                                 ..((section_offset + len_to_cpy) as usize)),
@@ -316,9 +323,10 @@ impl CapDLSpecContainer {
         let tcb_name = format!("tcb_{pd_name}");
         let entry_point = elf.entry;
 
+        // Always set a TCB's affinity to 0 for multikernel purposes.
         let tcb_extra_info = object::TcbExtraInfo {
             ipc_buffer_addr: ipcbuf_vaddr.into(),
-            affinity: Word(pd_cpu.0.into()),
+            affinity: Word(0),
             prio: 0,
             max_prio: 0,
             resume: false,
@@ -384,26 +392,32 @@ fn map_memory_region(
 /// Build a CapDL Spec according to the System Description File.
 pub fn build_capdl_spec(
     kernel_config: &Config,
-    elfs: &mut [ElfFile],
+    elfs: &BTreeMap<String, ElfFile>,
+    core_protection_domains: &BTreeMap<String, ProtectionDomain>,
+    memory_regions: &Vec<SysMemoryRegion>,
     system: &SystemDescription,
+    full_system_state: &FullSystemState,
+    cpu_id: u8,
 ) -> Result<CapDLSpecContainer, String> {
     let mut spec_container = CapDLSpecContainer::new();
-
+    println!("MICROKIT SPEC| Setting spec cpu id to: {}", cpu_id);
+    spec_container.spec.cpu_id = cpu_id;
     // *********************************
     // Step 1. Create the monitor's spec.
     // *********************************
     // Parse ELF, create VSpace, map in all ELF loadable frames and IPC buffer, and create TCB.
     // We expect the PD ELFs to be first and the monitor ELF last in the list of ELFs.
-    let mon_elf_id = elfs.len() - 1;
-    assert!(elfs.len() == system.protection_domains.len() + 1);
+    println!("This is the len of elfs: {}  --- this is the len of protection_domains {}", elfs.len(), core_protection_domains.len());
+    // @kwinter: Why is this elfs.len and pd.len + 1?
+    assert!(elfs.len() == core_protection_domains.len() + 1);
     let monitor_tcb_obj_id = {
-        let monitor_elf = elfs.get(mon_elf_id).unwrap();
+        // @kwinter: Ditto, hardcoding monitor is probably a bad idea
+        let monitor_elf = elfs.get("monitor").unwrap();
         spec_container
             .add_elf_to_spec(
                 kernel_config,
                 MONITOR_PD_NAME,
                 CpuCore(0),
-                mon_elf_id,
                 monitor_elf,
             )
             .unwrap()
@@ -502,7 +516,7 @@ pub fn build_capdl_spec(
     // Step 2. Create the memory regions' spec. Result is a hashmap keyed on MR name, value is (parsed XML obj, Vec of frame object IDs)
     // *********************************
     let mut mr_name_to_frames: HashMap<&String, Vec<ObjectId>> = HashMap::new();
-    for mr in system.memory_regions.iter() {
+    for mr in memory_regions.iter() {
         let mut frame_ids = Vec::new();
         let frame_size_bits = mr.page_size.fixed_size_bits(kernel_config);
 
@@ -530,7 +544,7 @@ pub fn build_capdl_spec(
     // On ARM, check if we need to create the SMC object
     let arm_smc_obj_id = if kernel_config.arch == Arch::Aarch64
         && kernel_config.arm_smc.unwrap_or(false)
-        && system.protection_domains.iter().any(|pd| pd.smc)
+        && core_protection_domains.values().any(|pd| pd.smc)
     {
         Some(spec_container.add_root_object(NamedObject {
             name: "arm_smc".to_owned().into(),
@@ -541,9 +555,9 @@ pub fn build_capdl_spec(
     };
 
     // Keep tabs on each PD's CSpace, Notification and Endpoint objects so we can create channels between them at a later step.
-    let mut pd_id_to_cspace_id: HashMap<usize, ObjectId> = HashMap::new();
-    let mut pd_id_to_ntfn_id: HashMap<usize, ObjectId> = HashMap::new();
-    let mut pd_id_to_ep_id: HashMap<usize, ObjectId> = HashMap::new();
+    let mut pd_name_to_cspace_id: BTreeMap<String, ObjectId> = BTreeMap::new();
+    let mut pd_name_to_ntfn_id: BTreeMap<String, ObjectId> = BTreeMap::new();
+    let mut pd_name_to_ep_id: BTreeMap<String, ObjectId> = BTreeMap::new();
 
     // Keep track of the global count of vCPU objects so we can bind them to the monitor for setting TCB name in debug config.
     // Only used on ARM and RISC-V as on x86-64 VMs share the same TCB as PD's which will have their TCB name set separately.
@@ -552,15 +566,20 @@ pub fn build_capdl_spec(
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
 
-    for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
-        let elf_obj = &elfs[pd_global_idx];
+    // @kwinter: Remove the need for this. Right now this is used to construct a correct badge.
+    let mut pd_global_idx = 0;
+
+    for pd in core_protection_domains.values() {
+        println!("This is elf btreemap: {:?}\nThis is the key we are trying to get: {}", elfs.keys(), pd.name);
+        // @kwinter: we should fail this unwrap gracefully
+        let elf_obj = &elfs.get(&pd.name).unwrap();
 
         let mut caps_to_bind_to_tcb: Vec<CapTableEntry> = Vec::new();
         let mut caps_to_insert_to_pd_cspace: Vec<CapTableEntry> = Vec::new();
 
         // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
         let pd_tcb_obj_id = spec_container
-            .add_elf_to_spec(kernel_config, &pd.name, pd.cpu, pd_global_idx, elf_obj)
+            .add_elf_to_spec(kernel_config, &pd.name, pd.cpu, elf_obj)
             .unwrap();
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec_container, pd_tcb_obj_id);
 
@@ -666,14 +685,16 @@ pub fn build_capdl_spec(
             let badge: u64 = pd_global_idx as u64 + 1;
             capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, badge)
         } else {
-            assert!(pd_global_idx > pd.parent.unwrap());
+            // @kwinter: Why is this assert necessary?
+            // assert!(pd_global_idx > pd.parent.unwrap());
             let badge: u64 = FAULT_BADGE | pd.id.unwrap();
-            let parent_ep_obj_id = pd_id_to_ep_id.get(&pd.parent.unwrap()).unwrap();
+            // @kwinter: Try and get rid of these clones, compiler complains about moves
+            let parent_ep_obj_id = pd_name_to_ep_id.get(&pd.parent.clone().unwrap()).unwrap();
             let fault_ep_cap =
                 capdl_util_make_endpoint_cap(*parent_ep_obj_id, true, true, true, badge);
 
             // Allow the parent PD to access the child's TCB:
-            let parent_cspace_obj_id = pd_id_to_cspace_id.get(&pd.parent.unwrap()).unwrap();
+            let parent_cspace_obj_id = pd_name_to_cspace_id.get(&pd.parent.clone().unwrap()).unwrap();
             capdl_util_insert_cap_into_cspace(
                 &mut spec_container,
                 *parent_cspace_obj_id,
@@ -711,8 +732,8 @@ pub fn build_capdl_spec(
         let pd_ntfn_obj_id = capdl_util_make_ntfn_obj(&mut spec_container, &pd.name);
         let pd_ntfn_cap = capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0);
         let mut pd_ep_obj_id: Option<ObjectId> = None;
-        pd_id_to_ntfn_id.insert(pd_global_idx, pd_ntfn_obj_id);
-        if pd.needs_ep(pd_global_idx, &system.channels) {
+        pd_name_to_ntfn_id.insert(pd.name.clone(), pd_ntfn_obj_id);
+        if pd.needs_ep(&system.channels) {
             pd_ep_obj_id = Some(capdl_util_make_endpoint_obj(
                 &mut spec_container,
                 &pd.name,
@@ -720,7 +741,7 @@ pub fn build_capdl_spec(
             ));
             let pd_ep_cap =
                 capdl_util_make_endpoint_cap(pd_ep_obj_id.unwrap(), true, true, true, 0);
-            pd_id_to_ep_id.insert(pd_global_idx, pd_ep_obj_id.unwrap());
+            pd_name_to_ep_id.insert(pd.name.clone(), pd_ep_obj_id.unwrap());
             caps_to_insert_to_pd_cspace
                 .push(capdl_util_make_cte(PD_INPUT_CAP_IDX as u32, pd_ep_cap));
         } else {
@@ -967,7 +988,7 @@ pub fn build_capdl_spec(
             TcbBoundSlot::CSpace as u32,
             pd_cnode_cap,
         ));
-        pd_id_to_cspace_id.insert(pd_global_idx, pd_cnode_obj_id);
+        pd_name_to_cspace_id.insert(pd.name.clone(), pd_cnode_obj_id);
 
         // Step 3-14 Set the TCB parameters and all the various caps that we need to bind to this TCB.
         if let Object::Tcb(pd_tcb) = &mut spec_container
@@ -1013,16 +1034,114 @@ pub fn build_capdl_spec(
                 capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0),
             );
         }
+        pd_global_idx += 1;
     }
 
     // *********************************
     // Step 4. Create channels
-    // *********************************
-    for channel in system.channels.iter() {
-        let pd_a_cspace_id = *pd_id_to_cspace_id.get(&channel.end_a.pd).unwrap();
-        let pd_b_cspace_id = *pd_id_to_cspace_id.get(&channel.end_b.pd).unwrap();
-        let pd_a_ntfn_id = *pd_id_to_ntfn_id.get(&channel.end_a.pd).unwrap();
-        let pd_b_ntfn_id = *pd_id_to_ntfn_id.get(&channel.end_b.pd).unwrap();
+    // ********************************
+    
+    // Seperate the channels into same-core and cross-core channels
+    
+    let (same_core_channels, cross_core_channels) : (Vec<_>, Vec<_>) =
+        system.channels.iter().partition(|channel| {
+            // If both the channels end points are within the protection domain
+            // list supplied for this core, then partition into same_core channels,
+            // otherwise into cross_core
+            core_protection_domains.contains_key(&channel.end_a.pd)
+            && core_protection_domains.contains_key(&channel.end_b.pd)
+        });
+
+    // Constructs maps for channels where this core is the receiver, and for
+    // when this core is the sender
+
+    let cross_core_sender_channels: Vec<_> =
+        cross_core_channels
+        .iter()
+        .flat_map(|channel| [(&channel.end_a, &channel.end_b), (&channel.end_b, &channel.end_a)])
+        .filter(|(send, _)| core_protection_domains.contains_key(&send.pd) && send.notify)
+        .collect();
+
+    let cross_core_recv_channels: Vec<_> =
+        cross_core_channels
+        .iter()
+        .flat_map(|channel| [(&channel.end_a, &channel.end_b), (&channel.end_b, &channel.end_a)])
+        .filter(|(send, recv)| core_protection_domains.contains_key(&recv.pd) && send.notify)
+        .map(|(send,recv)| (send.clone(), recv.clone()))
+        .collect();
+
+    // Construct the list of SGI's that we need to allocate for the receiver
+    
+    for (_, recv) in cross_core_recv_channels.iter() {
+        let sgi_irq = *full_system_state
+            .sgi_irq_numbers
+            .get(&recv)
+            .expect("internal error: receiver should have allocated irq number");
+
+        let recv_irq = SysIrq {
+            id: recv.id,
+            // ARM GIC Spec: §4.4 Software Generated Interrupts
+            kind: SysIrqKind::Conventional { irq: sgi_irq, trigger: ArmRiscvIrqTrigger::Edge },
+        };
+
+        let recv_ntfn_obj_id = *pd_name_to_ntfn_id.get(&recv.pd).unwrap();
+        let recv_cspace_id = *pd_name_to_cspace_id.get(&recv.pd).unwrap();
+
+        let irq_handle_cap = create_irq_handler_cap(
+            &mut spec_container,
+            kernel_config,
+            &recv.pd,
+            CpuCore(cpu_id),
+            recv_ntfn_obj_id,
+            &recv_irq,
+        );
+
+        // @kwinter: Are we doing appropriate error checking of overlapping
+        // channel ids and irq ids? This should be covered in sdf.rs but double check
+        let irq_cap_idx = PD_BASE_IRQ_CAP + recv_irq.id;
+        capdl_util_insert_cap_into_cspace(
+                &mut spec_container,
+                recv_cspace_id,
+                irq_cap_idx as u32,
+                irq_handle_cap,
+            );
+    }
+
+
+    for &(send, recv) in cross_core_sender_channels.iter() {
+        let recv_pd = &system.protection_domains[&recv.pd];
+
+        let send_cspace_id = *pd_name_to_cspace_id.get(&send.pd).unwrap();
+        let send_cap_idx = PD_BASE_OUTPUT_NOTIFICATION_CAP + send.id;
+
+        println!("sender: {:?}, receiver: {:?}", send, recv);
+
+        let &recv_irq_number = full_system_state
+            .sgi_irq_numbers
+            .get(recv)
+            .expect("INTERNAL: receiver should have an allocated IRQ number");
+
+        let sgi_signal_obj_id = capdl_util_make_sgi_signal_obj(
+            &mut spec_container,
+            recv_irq_number,
+            recv_pd.cpu.0 as u64,
+            );
+
+        let sgi_signal_cap = make_irq_sgi_signal_cap(sgi_signal_obj_id);
+
+        capdl_util_insert_cap_into_cspace(
+                &mut spec_container,
+                send_cspace_id,
+                send_cap_idx as u32,
+                sgi_signal_cap,
+            );
+    }
+
+    for channel in same_core_channels {
+        let pd_a_cspace_id = *pd_name_to_cspace_id.get(&channel.end_a.pd).unwrap();
+        let pd_b_cspace_id = *pd_name_to_cspace_id.get(&channel.end_b.pd).unwrap();
+        let pd_a_ntfn_id = *pd_name_to_ntfn_id.get(&channel.end_a.pd).unwrap();
+        let pd_b_ntfn_id = *pd_name_to_ntfn_id.get(&channel.end_b.pd).unwrap();
 
         // We trust that the SDF parsing code have checked for duplicate IDs.
         if channel.end_a.notify {
@@ -1052,7 +1171,7 @@ pub fn build_capdl_spec(
         if channel.end_a.pp {
             let pd_a_ep_cap_idx = PD_BASE_OUTPUT_ENDPOINT_CAP + channel.end_a.id;
             let pd_a_ep_badge = PPC_BADGE | channel.end_b.id;
-            let pd_b_ep_id = *pd_id_to_ep_id.get(&channel.end_b.pd).unwrap();
+            let pd_b_ep_id = *pd_name_to_ep_id.get(&channel.end_b.pd).unwrap();
             let pd_a_ep_cap =
                 capdl_util_make_endpoint_cap(pd_b_ep_id, true, true, true, pd_a_ep_badge);
             capdl_util_insert_cap_into_cspace(
@@ -1066,7 +1185,7 @@ pub fn build_capdl_spec(
         if channel.end_b.pp {
             let pd_b_ep_cap_idx = PD_BASE_OUTPUT_ENDPOINT_CAP + channel.end_b.id;
             let pd_b_ep_badge = PPC_BADGE | channel.end_a.id;
-            let pd_a_ep_id = *pd_id_to_ep_id.get(&channel.end_a.pd).unwrap();
+            let pd_a_ep_id = *pd_name_to_ep_id.get(&channel.end_a.pd).unwrap();
             let pd_b_ep_cap =
                 capdl_util_make_endpoint_cap(pd_a_ep_id, true, true, true, pd_b_ep_badge);
             capdl_util_insert_cap_into_cspace(
@@ -1078,8 +1197,42 @@ pub fn build_capdl_spec(
         }
     }
 
+
     // *********************************
-    // Step 5. Sort the root objects
+    // Step 5. Final IRQ handling
+    // *********************************
+    // Only core 0's kernel is allowed to modify the GIC. If we are building for
+    // core 0, we need to also setup every other pd's irq's. Iterate through the rest
+    // of the pd's in the system's IRQ's.
+
+    if cpu_id == 0 {
+        let other_core_pds: BTreeMap<String, ProtectionDomain> = system
+            .protection_domains
+            .clone()
+            .into_iter()
+            .filter(|(_, pd)| pd.cpu != CpuCore(cpu_id))
+            .collect();
+        for other_core_pd in other_core_pds.values() {
+            for irq in other_core_pd.irqs.iter() {
+                // Create a IRQ handler cap, but don't bind any ntfn to it.
+                // This handler cap will be used just to setup the GIC for this
+                // interrupt and affinity. The other core's kernel will need
+                // to create another irq handler and bind a notification to receive
+                // the interrupts.
+                println!("Creating an irq handler for irq {} on core {}", irq.id, cpu_id);
+                let irq_handle_cap = create_irq_handler_cap_no_ntfn(
+                    &mut spec_container,
+                    kernel_config,
+                    &other_core_pd.name,
+                    other_core_pd.cpu,
+                    irq,
+                );
+            }
+        }
+    }
+
+    // *********************************
+    // Step 6. Sort the root objects
     // *********************************
     // The CapDL initialiser expects objects with paddr to come first, then sorted by size so that the
     // allocation algorithm at run-time can run more efficiently.
@@ -1179,6 +1332,6 @@ pub fn build_capdl_spec(
                 .unwrap()
                 .sort_by_key(|cte| cte.slot.0)
         });
-
+    spec_container.cross_core_recv_channels = Some(cross_core_recv_channels);
     Ok(spec_container)
 }

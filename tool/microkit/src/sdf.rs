@@ -247,7 +247,7 @@ pub struct ChannelEnd {
     pub setvar_id: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Channel {
     pub end_a: ChannelEnd,
     pub end_b: ChannelEnd,
@@ -468,10 +468,10 @@ impl SysMap {
 }
 
 impl ProtectionDomain {
-    pub fn needs_ep(&self, channels: &[&Channel]) -> bool {
+    pub fn needs_ep(&self, channels: &Vec<Channel>) -> bool {
         self.has_children
             || self.virtual_machine.is_some()
-            || channels.iter().any(|&channel| {
+            || channels.iter().any(|channel| {
                 (channel.end_a.pp && channel.end_b.pd == self.name)
                     || (channel.end_b.pp && channel.end_a.pd == self.name)
             })
@@ -1742,7 +1742,7 @@ fn pd_tree_to_list(
         new_child_pds.extend(pd_tree_to_list(
             xml_sdf,
             child_pd,
-        ));
+        )?);
     }
 
     let mut all = vec![pd];
@@ -1955,6 +1955,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
     // This means checking that no interrupt IDs clash with any channel IDs
     let mut ch_ids: BTreeMap<String, Vec<_>> = BTreeMap::new();
     for pd in pds.values() {
+        ch_ids.insert(pd.name.clone(), vec![]);
         for sysirq in &pd.irqs {
             if ch_ids[&pd.name].contains(&sysirq.id) {
                 return Err(format!(

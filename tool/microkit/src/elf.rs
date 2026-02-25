@@ -7,6 +7,7 @@
 use crate::sel4::PageSize;
 use crate::util::{bytes_to_struct, round_down, struct_to_bytes};
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fs::{self, metadata, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -213,7 +214,7 @@ impl ElfFile {
             entry,
             machine,
             segments: [].into(),
-            symbols: HashMap::new(),
+            symbols: BTreeMap::new(),
         }
     }
 
