@@ -687,6 +687,8 @@ def build_elf_component(
     defines_str = " ".join(f"{k}={v}" for k, v in defines)
     defines_str += f" ARCH={board.arch.to_str()} BOARD={board.name} BUILD_DIR={build_dir.absolute()} SEL4_SDK={sel4_dir.absolute()} TARGET_TRIPLE={target_triple} LLVM={llvm}"
 
+    print(f"THIS IS THE DEFINES STRING: {defines_str}")
+
     if board.gcc_cpu is not None:
         defines_str += f" GCC_CPU={board.gcc_cpu}"
 
@@ -867,6 +869,8 @@ def main() -> None:
     for board in selected_boards:
         elaborated_configs = elaborate_all_board_configs(board)
 
+        print(f"\n\n\n-------------------------------\n These are the elaborated configs: {elaborated_configs}\n\n\n\n\n")
+
         if args.configs is not None:
             elaborated_config_names = frozenset(config.name for config in elaborated_configs)
             selected_config_names = frozenset(args.configs.split(","))
@@ -952,6 +956,7 @@ def main() -> None:
 
                 if not board.arch.is_x86():
                     loader_defines.append(("LINK_ADDRESS", hex(board.loader_link_address)))
+                    print(f"BUILDING LOADER FOR BOARD -- {board.name}")
                     build_elf_component("loader", root_dir, build_dir, board, config, args.llvm, loader_defines)
 
                 build_elf_component("monitor", root_dir, build_dir, board, config, args.llvm, [])
