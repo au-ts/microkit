@@ -1,54 +1,23 @@
 #include <microkit.h>
 #include <stdint.h>
 #include "types.h"
-/**
- * I have made a couple assumptions:
- * - there is a fixed maximum of PD's
- * - 
+/** Assumptions and Restrictions:
+ * - there is a fixed maximum of PD's (64 currently)
+ * - Heap is bounded to 128 4k frames.
  */
 
-// i need to create the following things:
 
-
-
-#define INTO_PT(x) // make this macro such that it indexes into the struct page tables.
-
-/**
- * frame table
- * sys brk/mmap munmap
- * shadow page tables
- * page file.
+/** Questions:
+ * - How do I set the dirtybit???
+ * - How do I do concurrency?
+ * - How do I write to the file?
  */
 
 static uint64_t unmapped_frames_addr;
 static uint64_t num_frames;
 
 
-typedef struct FrameInfo {
-    Cap cap;
-    uint64_t last_accessed; // for working set.
-    pe *page; // the page this frame is mapped to.
-    uint32_t next;
-} FrameInfo;
 
-typedef struct Rights {
-    bool read;
-    bool write;
-    bool grant;
-    bool grant_reply;
-} Rights;
-
-typedef struct Cap {
-    uint32_t object;
-    Rights rights;
-    bool cached;
-    bool executable;
-} Cap;
-
-typedef struct microkit_data {
-    Cap frame_cap;
-    uintptr_t pd_idx;
-} frame_pd_id;
 
 
 
@@ -56,10 +25,6 @@ frame_pd_id *frames = (frame_pd_id *) unmapped_frames_addr;
 
 
 
-typedef struct page_entry {
-    void *frame_addr;
-    bool dirty;
-} pe; // might need more stuff here.
 
 
 // stuff required for the vm fault handling
@@ -77,7 +42,7 @@ FrameInfo *wshand[MAX_PDS] = {NULL};
 // TODO: have process vspace ptrs here as well.
 unsigned long vspaces[MAX_PDS];
 unsigned long long time = 0; // Working set clock.
-#define TAU 10 // not too sure what the optimal number for this would be.
+
 
 static inline void move_hand(uint32_t pd_idx) {
     wshand[pd_idx] = &frame_table[pd_idx][wshand[pd_idx]->next];
@@ -133,16 +98,6 @@ void init(void)
     }
 }
 
-void notified(microkit_channel ch)
-{
-    // TODO: this may not be required 
-}
-
-seL4_MessageInfo_t protected(microkit_channel ch, microkit_msginfo msginfo)
-{
-    // TODO: this may not be required.
-}
-
 seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
 {
     ++time;
@@ -162,12 +117,20 @@ seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo
     // map the page to the frame
     microkit_arm_page_map(frame->cap, vspaces[pd_idx], ROUND_DOWN_TO_4K(fault_addr));
     frame->page = page_table[pd_idx][INDEX_INTO_MMAP_ARRAY(fault_addr)];
-
-    
 }
 
 
+// NOT USED BELOW:
 
+void notified(microkit_channel ch)
+{
+    // TODO: this may not be required 
+}
+
+seL4_MessageInfo_t protected(microkit_channel ch, microkit_msginfo msginfo)
+{
+    // TODO: this may not be required.
+}
 
 
 

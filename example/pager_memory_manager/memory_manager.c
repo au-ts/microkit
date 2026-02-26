@@ -6,26 +6,17 @@
 #include "types.h"
 
 // I should have a list of free and used 
-struct mmap_node
-{
-    /* data */
-    uintptr_t addr;
-    struct mmap_node *next;
-    struct mmap_node *prev;
-};
+
 
 // pool of mmap nodes
 struct mmap_node node_pool[MAX_PDS][NUM_PT_ENTRIES]; 
 struct mmap_node *used_nodes[MAX_PDS] = {NULL};
 struct mmap_node *free_nodes[MAX_PDS] = {NULL};
 
-// a LL of free allows O(1) malloc
-// an array of in use allows O(1) free.
-
 /**
  * Allocates the next free 4K block.
  */
-int64_t malloc(microkit_child pd) {
+static int64_t malloc(microkit_child pd) {
     struct mmap_node *ptr = free_nodes[pd];
     free_nodes[pd] = ptr->next;
     ptr->next = used_nodes[pd];
@@ -36,7 +27,7 @@ int64_t malloc(microkit_child pd) {
 /**
  * free the 4k block of memory which this addr is at.
  */
-int64_t free(uintptr_t addr, microkit_child pd) {
+static int64_t free(uintptr_t addr, microkit_child pd) {
     struct mmap_node* ptr = node_pool[pd][INDEX_INTO_MMAP_ARRAY(addr)];
     // remove from used_nodes
     ptr->prev->next = ptr->next;
@@ -57,10 +48,7 @@ void init(void)
     }
 }
 
-void notified(microkit_channel ch)
-{
-    // this may not be required
-}
+
 
 seL4_MessageInfo_t protected(microkit_channel ch, microkit_msginfo msginfo)
 {
@@ -75,6 +63,13 @@ seL4_MessageInfo_t protected(microkit_channel ch, microkit_msginfo msginfo)
         return microkit_msginfo_new(0, malloc(pd));
     }
     
+}
+
+// NOT USED BELOW:
+
+void notified(microkit_channel ch)
+{
+    // this may not be required
 }
 
 seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
