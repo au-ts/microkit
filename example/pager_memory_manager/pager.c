@@ -26,7 +26,6 @@ static uint64_t num_frames;
 
 typedef struct FrameInfo {
     Cap cap;
-    uint32_t frame_id;
     uint64_t last_accessed; // for working set.
     pe *page; // the page this frame is mapped to.
     uint32_t next;
@@ -48,7 +47,6 @@ typedef struct Cap {
 
 typedef struct microkit_data {
     Cap frame_cap;
-    uint32_t frame_id;
     uintptr_t pd_idx;
 } frame_pd_id;
 
@@ -59,8 +57,7 @@ frame_pd_id *frames = (frame_pd_id *) unmapped_frames_addr;
 
 
 typedef struct page_entry {
-    uint32_t frame_id;
-    Cap frame_cap;
+    void *frame_addr;
     bool dirty;
 } pe; // might need more stuff here.
 
@@ -124,12 +121,14 @@ void init(void)
         frame_pd_id *cur_frame = &frames[i];
         int pd_idx = cur_frame->pd_idx;
 
-        frame_table[pd_idx][frame_indicies[pd_idx]] = { .cap = cur_frame->frame_cap, .frame_id = cur_frame->frame_id, .last_accessed = 0, page = NULL, .next = ++frame_indicies[pd_idx]};
+        frame_table[pd_idx][frame_indicies[pd_idx]] = { .cap = cur_frame->frame_cap, .last_accessed = 0, page = NULL, .next = ++frame_indicies[pd_idx]};
     }
 
-    // set the wshand to the start for every pd
+    
     for (int i = 0; i < num_frames; ++i) {
+        // set the wshand to the start for every pd
         wshand[i] = frame_table[i];
+        // make the frame tables circular
         frame_table[i][frame_indicies[i] - 1].next = 0; 
     }
 }
@@ -149,11 +148,20 @@ seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo
     ++time;
     // TODO: this is when the child has a vm fault...
     uintptr_t fault_addr = microkit_mr_get(1); // I am not sure if this is the right mr number so will need to check later.
+    uint32_t pd_idx = microkit_mr_get(0);
     // check if a page in is required.
-    
-    // check if page out is required.
+    FrameInfo *frame = get_frame(pd_idx);
+    if (frame->page) {
+        // page out.
+    }
 
-    // find a unused frame and map
+    if (page_table[pd_idx][INDEX_INTO_MMAP_ARRAY(fault_addr)].frame_addr) {
+        // page in.
+    }
+
+    // map the page to the frame
+    microkit_arm_page_map(frame->cap, vspaces[pd_idx], ROUND_DOWN_TO_4K(fault_addr));
+    frame->page = page_table[pd_idx][INDEX_INTO_MMAP_ARRAY(fault_addr)];
 
     
 }
