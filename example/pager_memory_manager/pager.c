@@ -28,10 +28,8 @@ typedef struct FrameInfo {
     Cap cap;
     uint32_t frame_id;
     uint64_t last_accessed; // for working set.
-    // bool dirty; // probably better to keep a bool instead of a pointer to the shadow page table
     pe *page; // the page this frame is mapped to.
     uint32_t next;
-    uint32_t prev;
 } FrameInfo;
 
 typedef struct Rights {
@@ -63,45 +61,76 @@ frame_pd_id *frames = (frame_pd_id *) unmapped_frames_addr;
 typedef struct page_entry {
     uint32_t frame_id;
     Cap frame_cap;
+    bool dirty;
 } pe; // might need more stuff here.
 
 
 // stuff required for the vm fault handling
 // I cannot have actual page tables due to missing malloc.
-pe [MAX_PDS][NUM_PT_ENTRIES]; // page tables for the children. // each pd has 512 total max pages in heap.
+pe page_table[MAX_PDS][NUM_PT_ENTRIES]; // page tables for the children. // each pd has 512 total max pages in heap.
 
 
-FrameInfo frame_table[MAX_PDS]; // this functions as a doubly ll.
+FrameInfo frame_table[MAX_PDS][NUM_PT_ENTRIES]; // this functions as a doubly ll.
 
+/**
+ * wsclock hand ptr.
+ */
+FrameInfo *wshand[MAX_PDS] = {NULL};
 
 // TODO: have process vspace ptrs here as well.
 unsigned long vspaces[MAX_PDS];
 unsigned long long time = 0; // Working set clock.
 #define TAU 10 // not too sure what the optimal number for this would be.
 
-#define PGD_INDEX(va) (((va) >> 39) & 0x1FF)
-#define PUD_INDEX(va) (((va) >> 30) & 0x1FF)
-#define PD_INDEX(va)  (((va) >> 21) & 0x1FF)
-#define PT_INDEX(va)  (((va) >> 12) & 0x1FF)
+static inline void move_hand(uint32_t pd_idx) {
+    wshand[pd_idx] = &frame_table[pd_idx][wshand[pd_idx]->next];
+}
 
-static retrieve_page(uintptr_t fault_addr, uint32_t pd_idx) {
-    if (!pgd[pd_idx][PGD_INDEX(fault_addr)]) {
-        
+/**
+ * Gets the next frame to allocate, may need to page out the frame
+ * currently recursive, may/may not want to change.
+ */
+static FrameInfo *get_frame(uint32_t pd_idx) {
+    if (!wshand[pd_idx]->page) {
+        FrameInfo *ret = wshand;
+        move_hand(pd_idx);
+        return ret;
     }
+
+    if (wshand[pd_idx]->page->dirty) {
+        --wshand[pd_idx]->page->dirty;
+        move_hand(pd_idx);
+    } else if (time - wshand[pd_idx]->last_accessed < TAU)
+    {
+        move_hand(pd_idx); // this has potential to cause infinite loop if I don't increment time.
+    } else {
+        FrameInfo *ret = wshand;
+        move_hand(pd_idx);
+        return ret;
+    }
+
+    return get_frame(pd_idx);
+}
+
+static inline pe retrieve_page(uintptr_t fault_addr, uint32_t pd_idx) {
+    return page_table[pd_idx][INDEX_INTO_MMAP_ARRAY(fault_addr)];
 }
 
 void init(void)
 {
-    // TODO:
-    // each child has a frame table associated to it. this ft should also keep track of the wsclock algo
-    // each child has a shadow page table for the heap.
-    // need to initialise these
-
+    int frame_indicies[MAX_PDS] = {0};
     for (int i = 0; i < num_frames; ++i) {
         uint32_t next = i + 1, prev = i - 1;
-        if (i == 0) prev = num_frames - 1;
-        if (i == num_frames - 1) next = 0;
-        frame_table[frames[i].pd_idx] = {frames[i].frame_cap, frames[i].frame_id, 0, false, next, prev};
+        frame_pd_id *cur_frame = &frames[i];
+        int pd_idx = cur_frame->pd_idx;
+
+        frame_table[pd_idx][frame_indicies[pd_idx]] = { .cap = cur_frame->frame_cap, .frame_id = cur_frame->frame_id, .last_accessed = 0, page = NULL, .next = ++frame_indicies[pd_idx]};
+    }
+
+    // set the wshand to the start for every pd
+    for (int i = 0; i < num_frames; ++i) {
+        wshand[i] = frame_table[i];
+        frame_table[i][frame_indicies[i] - 1].next = 0; 
     }
 }
 
