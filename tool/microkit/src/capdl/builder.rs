@@ -787,6 +787,8 @@ pub fn build_capdl_spec(
             elfs[pager_idx].write_symbol("num_frames", serde_json::to_string(&unmapped_frames.len()).unwrap().as_bytes());
             // TODO: I also need to send vspace cap id's over, this should just be an array of size 128...
             elfs[pager_idx].write_symbol("vspaces", serde_json::to_string(&vspace_ids).unwrap().as_bytes());
+            // the vspace of the pager.
+            elfs[pager_idx].write_symbol("pager_vspace", serde_json::to_string(&vspace_ids[pager_idx]).unwrap().as_bytes());
         }
 
         // Step 3-3: Create and map in the stack (bottom up)
