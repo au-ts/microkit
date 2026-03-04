@@ -142,6 +142,17 @@ SUPPORTED_BOARDS = (
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
+        name="tqma8xqp1gb_multikernel",
+        arch=KernelArch.AARCH64,
+        gcc_cpu="cortex-a35",
+        loader_link_address=0x90280000,
+        kernel_options={
+            "KernelPlatform": "tqma8xqp1gb",
+            "KernelEnableMultikernelSupport": True,
+            "KernelMultikernelNumCPUs": 2,
+        } | DEFAULT_KERNEL_OPTIONS_AARCH64,
+    ),
+    BoardInfo(
         name="zcu102",
         arch=KernelArch.AARCH64,
         gcc_cpu="cortex-a53",

@@ -86,17 +86,17 @@ impl Riscv64 {
 /// Checks that each region in the given list does not overlap with any other region.
 /// Panics upon finding an overlapping region
 fn check_non_overlapping(regions: &Vec<(u64, &[u8], String)>) {
-    let mut checked: Vec<(u64, u64)> = Vec::new();
-    for (base, data, _) in regions {
+    let mut checked: Vec<(u64, u64, &String)> = Vec::new();
+    for (base, data, name) in regions {
         let end = base + data.len() as u64;
         // Check that this does not overlap with any checked regions
-        for (b, e) in &checked {
+        for (b, e, checked_name) in &checked {
             if !(end <= *b || *base >= *e) {
-                panic!("Overlapping regions: [{base:x}..{end:x}) overlaps [{b:x}..{e:x})");
+                panic!("Overlapping regions: {name}: [{base:x}..{end:x}) overlaps {checked_name}:[{b:x}..{e:x})");
             }
         }
 
-        checked.push((*base, end));
+        checked.push((*base, end, name));
     }
 }
 
@@ -223,11 +223,6 @@ impl<'a> Loader<'a> {
 
             let mut core_init_task_regions: Vec<(u64, &'a [u8])> = Vec::new();
 
-            // Compute an available physical memory segment large enough to house the initial task (CapDL initialiser with spec)
-            // that is after the kernel window.
-            // let inittask_p_v_offset = capdl_initialisers[multikernel_idx].image_bound().start - capdl_initialisers[multikernel_idx].phys_base.unwrap();
-            // let inittask_v_entry = capdl_initialisers[multikernel_idx].elf.entry;
-
             for segment in initial_task_segments.iter() {
                 if segment.mem_size() > 0 {
                     let segment_paddr =
@@ -294,18 +289,9 @@ impl<'a> Loader<'a> {
             }
         }
 
-        // let kernel_entry = kernel_elf.entry;
-
-        // let pv_offset = initial_task_phy_base.wrapping_sub(initial_task_vaddr_range.start);
-
-        // let ui_p_reg_start = initial_task_phy_base;
-        // let ui_p_reg_end = initial_task_vaddr_range.end - inittask_p_v_offset;
-        // assert!(ui_p_reg_end > ui_p_reg_start);    
-
         // Combine all the init task, kernel and system regions
         let mut all_regions: Vec<(u64, &[u8], String)> = Vec::with_capacity(
             inittask_num_regions + kernel_regions.len());
- // + system_regions.len());
 
         // First, add the kernel regions
         for (kernel_idx, region) in kernel_regions.iter().enumerate() {
@@ -320,14 +306,9 @@ impl<'a> Loader<'a> {
             }
         }
 
-        // Add all the system regions
-        // for (idx, region) in system_regions.iter().enumerate() {
-        //     all_regions.push((region.0, region.1, format!("system region {idx}")));
-        // }
-
         // This clone isn't too bad as it is just a Vec<(u64, &[u8])>
         let mut all_regions_with_loader = all_regions.clone();
-        all_regions_with_loader.push((image_vaddr, &loader_image, format!{"loader"}));
+        all_regions_with_loader.push((image_vaddr, &loader_image, format!{"altloader"}));
         check_non_overlapping(&all_regions_with_loader);
 
         let mut region_metadata = Vec::new();

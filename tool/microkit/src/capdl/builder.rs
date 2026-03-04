@@ -407,8 +407,6 @@ pub fn build_capdl_spec(
     // *********************************
     // Parse ELF, create VSpace, map in all ELF loadable frames and IPC buffer, and create TCB.
     // We expect the PD ELFs to be first and the monitor ELF last in the list of ELFs.
-    println!("This is the len of elfs: {}  --- this is the len of protection_domains {}", elfs.len(), core_protection_domains.len());
-    // @kwinter: Why is this elfs.len and pd.len + 1?
     assert!(elfs.len() == core_protection_domains.len() + 1);
     let monitor_tcb_obj_id = {
         // @kwinter: Ditto, hardcoding monitor is probably a bad idea
@@ -566,11 +564,9 @@ pub fn build_capdl_spec(
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
 
-    // @kwinter: Remove the need for this. Right now this is used to construct a correct badge.
     let mut pd_global_idx = 0;
 
     for pd in core_protection_domains.values() {
-        println!("This is elf btreemap: {:?}\nThis is the key we are trying to get: {}", elfs.keys(), pd.name);
         // @kwinter: we should fail this unwrap gracefully
         let elf_obj = &elfs.get(&pd.name).unwrap();
 
