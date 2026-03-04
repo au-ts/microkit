@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<system>
+    <protection_domain name="cross">
+        <program_image path="cross.elf" />
+    </protection_domain>
+</system>
