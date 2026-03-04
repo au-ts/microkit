@@ -27,17 +27,17 @@
 /@ method ffimicrokit_report_debug(c: Int, c2: Int, a: Int, a2: Int) @/
 /@ method ffimicrokit_report_error(c: Int, c2: Int, a: Int, a2: Int) @/
 
-fun microkit_notify(microkit_channel ch) {
+export fun microkit_notify(microkit_channel ch) {
     panseL4_Signal(BASE_OUTPUT_NOTIFICATION_CAP + ch);
     return 0;
 }
 
-fun microkit_irq_ack(microkit_channel ch) {
+export fun microkit_irq_ack(microkit_channel ch) {
     panseL4_IRQHandler_Ack(BASE_IRQ_CAP + ch);
     return 0;
 }
 
-fun panseL4_Error microkit_pd_stop(microkit_child pd) {
+export fun panseL4_Error microkit_pd_stop(microkit_child pd) {
     var panseL4_Error err = panseL4_TCB_Suspend(BASE_TCB_CAP + pd);
     if (err != panseL4_NoError) {
         @microkit_report_error(0, 1, 0, err);
@@ -45,7 +45,7 @@ fun panseL4_Error microkit_pd_stop(microkit_child pd) {
     return err;
 }
 
-fun panseL4_Error microkit_pd_restart(microkit_child pd, 1 entry_point) {
+export fun panseL4_Error microkit_pd_restart(microkit_child pd, 1 entry_point) {
     var panseL4_Error err = panseL4_TCB_WriteRegisters_spec(BASE_TCB_CAP + pd, entry_point);
     if (err != panseL4_NoError) {
         @microkit_report_error(0, 2, 0, err);
@@ -53,24 +53,24 @@ fun panseL4_Error microkit_pd_restart(microkit_child pd, 1 entry_point) {
     return err;
 }
 
-fun microkit_msginfo microkit_ppcall(microkit_channel ch, microkit_msginfo msginfo) {
+export fun microkit_msginfo microkit_ppcall(microkit_channel ch, microkit_msginfo msginfo) {
     var microkit_msginfo tag = panseL4_Call(BASE_ENDPOINT_CAP + ch, msginfo);
     return tag;
 }
 
-fun microkit_msginfo microkit_msginfo_new(1 label, 1 count) {
+export fun microkit_msginfo microkit_msginfo_new(1 label, 1 count) {
     var microkit_msginfo tag = panseL4_MessageInfo_new(label, 0, 0, count);
     return tag;
 }
 
-fun microkit_deferred_notify(microkit_channel ch) {
+export fun microkit_deferred_notify(microkit_channel ch) {
     microkit_have_signal = true;
     microkit_signal_msg = panseL4_MessageInfo_new(0, 0, 0, 0);
     microkit_signal_cap = BASE_OUTPUT_NOTIFICATION_CAP + ch;
     return 0;
 }
 
-fun microkit_deferred_irq_ack(microkit_channel ch) {
+export fun microkit_deferred_irq_ack(microkit_channel ch) {
     microkit_have_signal = true;
     //microkit_signal_msg = panseL4_MessageInfo_new(IRQAckIRQ, 0, 0, 0);
     microkit_signal_msg = panseL4_MessageInfo_IRQAckIRQ();
