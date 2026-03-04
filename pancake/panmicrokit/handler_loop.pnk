@@ -1,0 +1,90 @@
+#define LIBMICROKIT_FFI_OFFSET @base
+
+#define INPUT_CAP 1
+#define REPLY_CAP 4
+
+#define PD_MASK 255
+#define CHANNEL_MASK 63
+
+var panseL4_Bool microkit_have_signal = false;
+var panseL4_CPtr microkit_signal_cap = 0;
+var panseL4_MessageInfo_t microkit_signal_msg = 0;
+
+var panseL4_Word patched_microkit_irqs = 0;
+var panseL4_Word patched_microkit_notifications = 0;
+var panseL4_Word patched_microkit_pps = 0;
+var panseL4_Word patched_microkit_ioports = 0;
+
+fun 1 handler_loop()
+{
+    var 1 irq_index = 0;
+    var panseL4_Word irqs_to_ack = patched_microkit_irqs;
+    while (irqs_to_ack != 0) {
+        if (irqs_to_ack & 1) {
+            microkit_irq_ack(irq_index);
+        }
+        irqs_to_ack = irqs_to_ack >>> 1;
+        irq_index = irq_index + 1;
+    }
+
+    var panseL4_Bool have_reply = false;
+    var panseL4_MessageInfo_t reply_tag = 0;
+    while (true) {
+        var panseL4_Response response = <0,0>;
+        if (have_reply) {
+            response = panseL4_ReplyRecv(INPUT_CAP, reply_tag, REPLY_CAP);
+        }
+        if (!have_reply && !microkit_have_signal) {
+            response = panseL4_Recv(INPUT_CAP, REPLY_CAP);
+        }
+        if (!have_reply && microkit_have_signal) {
+            response = panseL4_NBSendRecv(microkit_signal_cap, microkit_signal_msg, INPUT_CAP, REPLY_CAP);
+            microkit_have_signal = false;
+        }
+        var panseL4_MessageInfo_t tag = response.0;
+        var 1 badge = response.1;
+        have_reply = false;
+
+        var 1 is_endpoint = badge >>> 63;
+        var 1 is_fault = (badge >>> 62) & 1;
+
+        if (is_fault) {
+            var microkit_fault_reply_option reply_to_fault = uep_fault(badge & PD_MASK, tag);
+            if (reply_to_fault.0) {
+                have_reply = true;
+                reply_tag = reply_to_fault.1;
+            }
+        }
+        if (!is_fault && is_endpoint) {
+            have_reply = true;
+            reply_tag = uep_protected(badge & CHANNEL_MASK, tag);
+        }
+        if (!is_fault && !is_endpoint) {
+            var 1 channel_index = 0;
+            while (badge != 0) {
+                if (badge & 1) {
+                    uep_notified(channel_index);
+                }
+                badge = badge >>> 1;
+                channel_index = channel_index + 1;
+            }
+        }
+    }
+    return 0;
+}
+
+fun 1 microkit_get_constant(1 constant) {
+    @microkit_get_constant(0, 0, LIBMICROKIT_FFI_OFFSET, constant);
+    var ret = lds 1 LIBMICROKIT_FFI_OFFSET;
+    return ret;
+}
+
+fun 1 main() {
+    patched_microkit_irqs = microkit_get_constant(0);
+    patched_microkit_notifications = microkit_get_constant(1);
+    patched_microkit_pps = microkit_get_constant(2);
+    patched_microkit_ioports = microkit_get_constant(3);
+    uep_init();
+    handler_loop();
+    return 0;
+}

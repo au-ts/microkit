@@ -1,0 +1,125 @@
+#define LIBSEL4_FFI_OFFSET @base
+// requires 5*@biw space below this offset
+// must be 8-byte aligned
+
+#define panseL4_Bool 1
+
+// TODO: replace with named struct once supported
+#define panseL4_Response {1, 1}
+#define panseL4_Response_tag(x) x.0
+#define panseL4_Response_badge(x) x.1
+
+#define panseL4_Word 1
+#define panseL4_MessageInfo_t 1
+#define panseL4_CPtr 1
+#define panseL4_TCB 1
+
+#define panseL4_Error 1
+#define panseL4_NoError 0
+
+/@ method ffiouter_seL4_MessageInfo_new(c: Int, c2: Int, a: Int, a2: Int) @/
+/@ method ffiouter_seL4_MessageInfo_IRQAckIRQ(c: Int, c2: Int, a: Int, a2: Int) @/
+/@ method ffiouter_seL4_MessageInfo_get_label(c: Int, c2: Int, a: Int, a2: Int) @/
+/@ method ffiouter_seL4_MessageInfo_get_length(c: Int, c2: Int, a: Int, a2: Int) @/
+/@ method ffiouter_seL4_SetMR(c: Int, c2: Int, a: Int, a2: Int) @/
+/@ method ffiouter_seL4_GetMR(c: Int, c2: Int, a: Int, a2: Int) @/
+/@ method ffiouter_seL4_Signal(c: Int, c2: Int, a: Int, a2: Int) @/
+/@ method ffiouter_seL4_IRQHandler_Ack(c: Int, c2: Int, a: Int, a2: Int) @/
+/@ method ffiouter_seL4_Recv(c: Int, c2: Int, a: Int, a2: Int) @/
+/@ method ffiouter_seL4_ReplyRecv(c: Int, c2: Int, a: Int, a2: Int) @/
+/@ method ffiouter_seL4_NBSendRecv(c: Int, c2: Int, a: Int, a2: Int) @/
+/@ method ffiouter_seL4_Call(c: Int, c2: Int, a: Int, a2: Int) @/
+/@ method ffiouter_seL4_TCB_WriteRegisters_spec(c: Int, c2: Int, a: Int, a2: Int) @/
+/@ method ffiouter_seL4_TCB_Suspend(c: Int, c2: Int, a: Int, a2: Int) @/
+
+fun panseL4_MessageInfo_t panseL4_MessageInfo_new(1 label, 1 capsUnwrapped, 1 extraCaps, 1 length) {
+    st LIBSEL4_FFI_OFFSET, label;
+    st LIBSEL4_FFI_OFFSET + 1*@biw, capsUnwrapped;
+    st LIBSEL4_FFI_OFFSET + 2*@biw, extraCaps;
+    st LIBSEL4_FFI_OFFSET + 3*@biw, length;
+    @outer_seL4_MessageInfo_new(0, 0, LIBSEL4_FFI_OFFSET, 0);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+fun panseL4_MessageInfo_t panseL4_MessageInfo_IRQAckIRQ() {
+    @outer_seL4_MessageInfo_IRQAckIRQ(0, 0, LIBSEL4_FFI_OFFSET, 0);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+fun 1 panseL4_MessageInfo_get_label(panseL4_MessageInfo_t msginfo) {
+    @outer_seL4_MessageInfo_get_label(0, 0, LIBSEL4_FFI_OFFSET, msginfo);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+fun 1 panseL4_MessageInfo_get_length(panseL4_MessageInfo_t msginfo) {
+    @outer_seL4_MessageInfo_get_length(0, 0, LIBSEL4_FFI_OFFSET, msginfo);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+fun panseL4_SetMR(1 mr, 1 value) {
+    @outer_seL4_SetMR(0, mr, 0, value);
+    return 0;
+}
+
+fun 1 panseL4_GetMR(1 mr) {
+    @outer_seL4_GetMR(0, 0, LIBSEL4_FFI_OFFSET, mr);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+fun panseL4_Signal(panseL4_CPtr dest) {
+    @outer_seL4_Signal(0, 0, 0, dest);
+    return 0;
+}
+
+fun panseL4_Error panseL4_IRQHandler_Ack(panseL4_CPtr service) {
+    @outer_seL4_IRQHandler_Ack(0, 0, LIBSEL4_FFI_OFFSET, service);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+fun panseL4_Response panseL4_Recv(panseL4_CPtr src, panseL4_CPtr reply) {
+    @outer_seL4_Recv(0, src, LIBSEL4_FFI_OFFSET, reply);
+    var panseL4_Response ret = lds panseL4_Response LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+fun panseL4_Response panseL4_ReplyRecv(panseL4_CPtr src, panseL4_MessageInfo_t msginfo, panseL4_CPtr reply) {
+    st LIBSEL4_FFI_OFFSET, reply;
+    @outer_seL4_ReplyRecv(0, src, LIBSEL4_FFI_OFFSET, msginfo);
+    var panseL4_Response ret = lds panseL4_Response LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+fun panseL4_Response panseL4_NBSendRecv(panseL4_CPtr dest, panseL4_MessageInfo_t msginfo, panseL4_CPtr src, panseL4_CPtr reply) {
+    st LIBSEL4_FFI_OFFSET, src;
+    st LIBSEL4_FFI_OFFSET + 1*@biw, reply;
+    @outer_seL4_NBSendRecv(0, dest, LIBSEL4_FFI_OFFSET, msginfo);
+    var panseL4_Response ret = lds panseL4_Response LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+fun panseL4_MessageInfo_t panseL4_Call(panseL4_CPtr dest, panseL4_MessageInfo_t msginfo) {
+    @outer_seL4_Call(0, dest, LIBSEL4_FFI_OFFSET, msginfo);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+// Specialized version of panseL4_TCB_WriteRegisters for starting a thread at a
+// given program counter value. TODO: write a proper implementation of
+// panseL4_TCB_WriteRegisters(..) itself.
+fun panseL4_Error panseL4_TCB_WriteRegisters_spec(panseL4_TCB tcb, 1 entry_point) {
+    @outer_seL4_TCB_WriteRegisters_spec(0, tcb, LIBSEL4_FFI_OFFSET, entry_point);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+fun panseL4_Error panseL4_TCB_Suspend(panseL4_TCB tcb) {
+    @outer_seL4_TCB_Suspend(0, 0, LIBSEL4_FFI_OFFSET, tcb);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
