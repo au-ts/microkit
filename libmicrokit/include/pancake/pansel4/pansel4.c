@@ -1,3 +1,11 @@
+/*
+ * Copyright 2026, UNSW
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+/* TODO: Currently compatible with ARCH=riscv64 only! */
+
 /* FFI wrappers for sel4/sel4.h on RISC-V */
 /*
  * Naming convention used here:

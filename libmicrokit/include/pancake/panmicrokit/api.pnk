@@ -1,3 +1,9 @@
+/*
+ * Copyright 2026, UNSW
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
 // basic types
 #define microkit_channel 1
 #define microkit_child 1

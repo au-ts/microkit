@@ -747,6 +747,9 @@ def build_lib_component(
         if not p.is_file():
             continue
         rel = p.relative_to(source_dir)
+        if rel.parts[0] == "pancake" and not board.arch.is_riscv():
+            # The Pancake components currently only support RISC-V
+            continue
         dest = include_dir / rel
         dest.parent.mkdir(exist_ok=True, parents=True)
         dest.unlink(missing_ok=True)

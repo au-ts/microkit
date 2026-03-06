@@ -1,3 +1,9 @@
+/*
+ * Copyright 2026, UNSW
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
 #define LIBMICROKIT_FFI_OFFSET @base
 
 #define INPUT_CAP 1
@@ -41,8 +47,8 @@ fun 1 handler_loop()
             response = panseL4_NBSendRecv(microkit_signal_cap, microkit_signal_msg, INPUT_CAP, REPLY_CAP);
             microkit_have_signal = false;
         }
-        var panseL4_MessageInfo_t tag = response.0;
-        var 1 badge = response.1;
+        var panseL4_MessageInfo_t tag = panseL4_Response_tag(response);
+        var 1 badge = panseL4_Response_badge(response);
         have_reply = false;
 
         var 1 is_endpoint = badge >>> 63;
