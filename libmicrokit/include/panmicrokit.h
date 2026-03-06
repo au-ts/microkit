@@ -83,13 +83,8 @@ void ffic_protected(unsigned char* c, long clen, unsigned char* a, long alen) {
     return;
 }
 
-seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
-{
-    microkit_dbg_puts(microkit_name);
-    microkit_dbg_puts(" is missing the 'fault' entry point, unsupported for C PDs on Pancake Microkit\n");
-    microkit_internal_crash(0);
-    return seL4_False;
-}
+// seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
+// TODO: fault currently unsupported in C-over-Pancake
 
 /*
  * Output a single character on the debug console.
@@ -136,3 +131,12 @@ static inline seL4_Word microkit_mr_get(seL4_Uint8 mr)
 {
     return seL4_GetMR(mr);
 }
+
+seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
+{
+    microkit_dbg_puts(microkit_name);
+    microkit_dbg_puts(" is missing the 'fault' entry point, unsupported for C PDs on Pancake Microkit\n");
+    microkit_internal_crash(0);
+    return seL4_False;
+}
+
