@@ -6,10 +6,6 @@ ifeq ($(strip $(MICROKIT_SDK)),)
 $(error MICROKIT_SDK must be specified)
 endif
 
-ifeq ($(strip $(MICROKIT_PANCAKE_SDK)),)
-$(error MICROKIT_PANCAKE_SDK must be specified. Try the pancake dir in this repo)
-endif
-
 ifeq ($(strip $(MICROKIT_BOARD)),)
 $(error MICROKIT_BOARD must be specified)
 endif
@@ -19,6 +15,7 @@ $(error MICROKIT_CONFIG must be specified)
 endif
 
 BOARD_DIR := $(MICROKIT_SDK)/board/$(MICROKIT_BOARD)/$(MICROKIT_CONFIG)
+MICROKIT_PANCAKE_SDK := $(BOARD_DIR)/include/pancake
 
 ifeq ($(ARCH),riscv64)
   TARGET_TRIPLE := riscv64-unknown-elf
@@ -72,7 +69,7 @@ $(BUILD_DIR):
 $(PINGSTAGE1): ping.pnk | $(BUILD_DIR)
 	@cat $(MICROKIT_PANCAKE_SDK)/pansel4/pansel4.pnk > $(PINGSTAGE1)
 	@cat $(MICROKIT_PANCAKE_SDK)/panmicrokit/api.pnk >> $(PINGSTAGE1)
-	@cat $(MICROKIT_PANCAKE_SDK)/panmicrokit/handler_loop.pnk >> $(PINGSTAGE1)
+	@cat $(MICROKIT_PANCAKE_SDK)/panmicrokit/main.pnk >> $(PINGSTAGE1)
 	@cat ping.pnk >> $(PINGSTAGE1)
 
 # Stage2: run C preprocessor on Stage1
@@ -109,7 +106,7 @@ $(BUILD_DIR)/pong.o: pong.c | $(BUILD_DIR)
 
 # Link everything to create the final Pancake ping executable
 $(PINGELF): $(OBJS) | $(BUILD_DIR)
-	$(LD) $(LDFLAGS) $(OBJS) -T$(MICROKIT_PANCAKE_SDK)/panmicrokit/microkit.ld -o $@
+	$(LD) $(LDFLAGS) $(OBJS) -T$(BOARD_DIR)/lib/microkit.ld -o $@
 
 # Link everything to create the final C pong executable
 $(PONGELF): $(BUILD_DIR)/pong.o | $(BUILD_DIR)

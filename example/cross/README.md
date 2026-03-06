@@ -10,7 +10,6 @@ make \
   ARCH=riscv64 \
   BUILD_DIR=./build \
   MICROKIT_SDK=path/to/sdk \
-  MICROKIT_PANCAKE_SDK=path/to/this/repo/pancake \
   MICROKIT_BOARD=qemu_virt_riscv64 \
   MICROKIT_CONFIG=debug
 ```
