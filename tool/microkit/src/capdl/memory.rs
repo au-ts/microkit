@@ -98,7 +98,7 @@ fn get_pt_level_to_insert(sel4_config: &Config, page_size_bytes: u64) -> usize {
     }
 }
 
-fn top_pt_level_number(sel4_config: &Config) -> usize {
+pub fn top_pt_level_number(sel4_config: &Config) -> usize {
     if sel4_config.arch == Arch::Aarch64 && sel4_config.aarch64_vspace_s2_start_l1() {
         1
     } else {
@@ -339,6 +339,10 @@ pub fn create_page_structure_recursive(
     sel4_config: &Config,
     vaddr: u64,
     page_size_bytes: u64,
+    spec_container: &mut CapDLSpecContainer,
+    pd_name: &str,
+    vspace_obj_id: ObjectId,
+    pt_obj_id: ObjectId
 ) {
     if cur_level >= sel4_config.num_page_table_levels() {
         unreachable!("internal bug: we should have never recursed further!");
@@ -366,9 +370,9 @@ pub fn create_page_structure_recursive(
             Ok(next_level_pt_obj_id) => create_page_structure_recursive(
                 cur_level + 1, 
                 sel4_config, vaddr, 
-                page_size_bytes
+                page_size_bytes, spec_container, pd_name, vspace_obj_id, next_level_pt_obj_id
             ),
-            Err(err_reason) => unreachable!(err_reason),
+            Err(err_reason) => unreachable!("{}", err_reason),
         }
     }
 }

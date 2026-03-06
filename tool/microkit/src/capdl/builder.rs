@@ -6,23 +6,24 @@
 use core::ops::Range;
 
 use std::{
-    backtrace, cmp::{Ordering, min}, collections::{HashMap, HashSet}, hash::Hash, iter::Enumerate
+    backtrace, cmp::{Ordering, min}, collections::{HashMap, HashSet}, hash::Hash, io::Error, iter::Enumerate, usize
 };
 
 use sel4_capdl_initializer_types::{
     CapTableEntry, Fill, FillEntry, FillEntryContent, NamedObject, Object, ObjectId, Spec, Word, cap::Frame, object
 };
+use sel4_capdl_initializer_types::Cap;
 
 use crate::{
     capdl::{
         irq::create_irq_handler_cap,
-        memory::{create_page_structure_recursive, create_vspace, create_vspace_ept, map_page},
-        spec::{ElfContent, capdl_obj_physical_size_bits},
+        memory::{top_pt_level_number, create_page_structure_recursive, create_vspace, create_vspace_ept, map_page},
+        spec::{ElfContent, capdl_obj_physical_size_bits, ByteData, FrameData},
         util::*,
     },
     elf::ElfFile,
     sdf::{
-        BUDGET_DEFAULT, CpuCore, MONITOR_PD_NAME, MONITOR_PRIORITY, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription
+        BUDGET_DEFAULT, CpuCore, MONITOR_PD_NAME, MONITOR_PRIORITY, SysMap, SysMapPerms, SysMemoryRegion, SystemDescription, ProtectionDomain
     },
     sel4::{Arch, Config, PageSize},
     util::{ranges_overlap, round_down, round_up},
@@ -101,7 +102,8 @@ const PD_SCHEDCONTEXT_EXTRA_SIZE_BITS: u64 = PD_SCHEDCONTEXT_EXTRA_SIZE.ilog2() 
 pub const SLOT_BITS: u64 = 5;
 pub const SLOT_SIZE: u64 = 1 << SLOT_BITS;
 
-pub type FrameFill = Fill<ElfContent>;
+// pub type FrameFill = Fill<ElfContent>;
+pub type FrameFill = Fill<FrameData>;
 pub type CapDLNamedObject = NamedObject<FrameFill>;
 
 pub struct ExpectedAllocation {
@@ -125,7 +127,7 @@ fn find_free_contiguous_memory(
     size: u64,
     spec_container: &mut CapDLSpecContainer,
 
-    ) -> Result<u64> {
+    ) -> Result<u64, String> {
     // Work downwards now, and find a contiguous memory range that does not overlap
             // with any elf loadable segment or user defined MR
 
@@ -175,7 +177,7 @@ fn find_free_contiguous_memory(
     if (found_valid_region) {
         Ok(cur_vaddr)
     } else {
-        Err("no valid region")
+        Err(format!("no valid region"))
     }
 }
 
@@ -291,12 +293,12 @@ impl CapDLSpecContainer {
                             start: dest_offset,
                             end: dest_offset + len_to_cpy,
                         },
-                        content: FillEntryContent::Data(ElfContent {
+                        content: FillEntryContent::Data(FrameData::Elf( ElfContent {
                             elf_id,
                             elf_seg_idx: seg_idx,
                             elf_seg_data_range: (section_offset as usize
                                 ..((section_offset + len_to_cpy) as usize)),
-                        }),
+                        })),
                     });
                 }
 
@@ -617,9 +619,9 @@ pub fn build_capdl_spec(
 
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
-    let mut vspace_ids: [ObjectId; 128] = [ObjectId(0); 128];
+    let mut vspace_ids = vec![ObjectId(0); 128];
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
-        let unmapped_frames: Vec<(Cap, ObjectId, usize)> = Vec::new(); // vector of tuple of frame cap, frame id and index of pd which owns frame.
+        let mut unmapped_frames: Vec<(Cap, ObjectId, usize)> = Vec::new(); // vector of tuple of frame cap, frame id and index of pd which owns frame.
 
         let elf_obj = &elfs[pd_global_idx];
 
@@ -656,6 +658,10 @@ pub fn build_capdl_spec(
                     kernel_config, 
                     map.vaddr,
                     mr_name_to_mr.get(&map.mr).unwrap().page_size_bytes(),
+                    &mut spec_container,
+                    &pd.name,
+                    pd_vspace_obj_id,
+                    pd_vspace_obj_id
                 );
                 // JOSHUA TODO: maybe i want to do the frame and frame cap creation here idk.
                 // frame obj already created.
@@ -716,19 +722,19 @@ pub fn build_capdl_spec(
         }
 
         // add the unmapped frames to the pager's elf
-        if let Some((pager_idx, pd)) = system.protection_domains.iter().enumerate().find(pd.name.eq("pager")) {
+        if let Some((pager_idx, pd)) = system.protection_domains.iter().enumerate().find(|(_, pd)| pd.name.eq("pager")) {
             // put the pager inside the memory region that we find.
             
             // first i need to convert unmapped_frames into contiguous memory.
-            let unmapped_frames_data = serde_json::to_string(&unmapped_frames).unwrap().as_bytes();
-            let top_addr = find_free_contiguous_memory(&mr_name_to_frames, pd, elfs, pager_idx, kernel_config, unmapped_frames_data.len() as u64, &mut spec_container);
-            let base_addr = (top_addr - unmapped_frames_data.len()) as u64;
+            let unmapped_frames_data = serde_json::to_string(&unmapped_frames).unwrap().as_bytes().to_owned(); // TODO: This is very dodgy, doubt that this would work.
+            let top_addr = find_free_contiguous_memory(&mr_name_to_frames, pd, elfs, pager_idx, kernel_config, unmapped_frames_data.len() as u64, &mut spec_container).unwrap();
+            let base_addr = (top_addr - (unmapped_frames_data.len() as u64)) as u64;
             
-            let frame_base = round_down(base_addr, PageSize::Small as u64);
-            let num_frames = (top_addr - frame_base + PageSize::Small - 1) / PageSize::Small;
-            let pd_vspace_obj_id = *pd_id_to_vspace_id.get(&pager_idx).unwrap();
+            let mut frame_base = round_down(base_addr, PageSize::Small as u64);
+            let num_frames = (top_addr - frame_base + (PageSize::Small as u64) - 1) / (PageSize::Small as u64);
+            let pd_vspace_obj_id =  vspace_ids[pager_idx];
             let mut dest_offset = 0;
-            for i in 0..num_frames {
+            for i in 0..num_frames { 
                 let mut frame_fill = Fill {
                     entries: [].to_vec(),
                 };
@@ -736,13 +742,16 @@ pub fn build_capdl_spec(
                 // fill the frames. 
                 // The below code might do a buffer overflow so
                 // TODO: prevent buffer overflow. 
-                frame_fill.entries.push(FillEntry { 
+                frame_fill.entries.push(FillEntry { // the fillentry content must be elfcontent somehow....
                     range: Range { start: 0, end: PageSize::Small as u64 }, 
-                    content: FillEntryContent::Data(FrameData::Bytes( ByteData {
-                        data: unmapped_frames_data[dest_offset..(PageSize::Small + dest_offset)]
-                    }))
+                    content: FillEntryContent::Data(FrameData::Bytes(
+                        ByteData {
+                            data: unmapped_frames_data[dest_offset..((PageSize::Small as usize) + dest_offset)].into(),
+                        }
+                    )
+                    )
                 });
-                dest_offset += PageSize::Small;
+                dest_offset += PageSize::Small as usize;
 
                 let frame_obj_id = capdl_util_make_frame_obj(
                     &mut spec_container,
@@ -768,7 +777,7 @@ pub fn build_capdl_spec(
                     frame_base,
                 ) {
                     Ok(_) => {
-                        frame_base += i * PageSize::Small;
+                        frame_base += i * (PageSize::Small as u64);
                     }
                     Err(map_err_reason) => {
                         return Err(format!(
@@ -782,13 +791,13 @@ pub fn build_capdl_spec(
             // let cur_vaddr = find_memory_for_symbol(&mr_name_to_frames, pd, elfs, pager_idx, kernel_config, , &mut spec_container);
             // JOSHUA TODO: i need to find a way to convert the vec into bytes.
             // TODO: this symbol should become u64
-            elfs[pager_idx].write_symbol("unmapped_frames_addr", serde_json::to_string(&base_addr).unwrap().as_bytes());
+            elfs[pager_idx].write_symbol("unmapped_frames_addr", &base_addr.to_ne_bytes());
             // TODO: this symbol should become u64
-            elfs[pager_idx].write_symbol("num_frames", serde_json::to_string(&unmapped_frames.len()).unwrap().as_bytes());
+            elfs[pager_idx].write_symbol("num_frames", &unmapped_frames.len().to_ne_bytes());
             // TODO: I also need to send vspace cap id's over, this should just be an array of size 128...
-            elfs[pager_idx].write_symbol("vspaces", serde_json::to_string(&vspace_ids).unwrap().as_bytes());
+            elfs[pager_idx].write_symbol("vspaces", vspace_ids.iter().flat_map(|&f| f.0.to_ne_bytes()).collect::<Vec<_>>().as_slice());
             // the vspace of the pager.
-            elfs[pager_idx].write_symbol("pager_vspace", serde_json::to_string(&vspace_ids[pager_idx]).unwrap().as_bytes());
+            elfs[pager_idx].write_symbol("pager_vspace", &vspace_ids[pager_idx].0.to_ne_bytes());
         }
 
         // Step 3-3: Create and map in the stack (bottom up)
