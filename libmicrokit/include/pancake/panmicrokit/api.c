@@ -1,3 +1,9 @@
+/*
+ * Copyright 2026, UNSW
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
 #include <sel4/sel4.h>
 
 void microkit_dbg_putc(int c) {

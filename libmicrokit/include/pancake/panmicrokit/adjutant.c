@@ -1,3 +1,11 @@
+/*
+ * Copyright 2026, UNSW
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+/* The adjutant is the Pancake runtime and has the main entry point. */
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -44,8 +52,6 @@ static void run_init_funcs(void)
     }
 }
 
-extern void microkit_dbg_puts(const char* s); // provided by api.c
-
 void ffimicrokit_get_constant(unsigned char* c, long clen, unsigned char* a, long alen) {
     unsigned char* a_bytes = a;
     void* a_void = (void*)a_bytes;
@@ -73,6 +79,5 @@ void main()
     run_init_funcs();
     init_pancake_mem();
     cml_main();
-    microkit_dbg_puts("microkit_adjutant: returned from handler loop\n");
     for (;;) {}
 }

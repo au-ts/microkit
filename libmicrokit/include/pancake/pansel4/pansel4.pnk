@@ -1,3 +1,11 @@
+/*
+ * Copyright 2026, UNSW
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+/* TODO: Currently compatible with ARCH=riscv64 only! */
+
 #define LIBSEL4_FFI_OFFSET @base
 // requires 5*@biw space below this offset
 // must be 8-byte aligned
