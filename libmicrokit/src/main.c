@@ -27,6 +27,10 @@ seL4_Bool microkit_have_signal = seL4_False;
 seL4_CPtr microkit_signal_cap;
 seL4_MessageInfo_t microkit_signal_msg;
 
+#if defined(CONFIG_VTX)
+seL4_Bool microkit_x86_do_vcpu_resume = seL4_False;
+#endif /* CONFIG_VTX */
+
 seL4_Word microkit_irqs;
 seL4_Word microkit_notifications;
 seL4_Word microkit_pps;
@@ -63,6 +67,18 @@ static void run_init_funcs(void)
     }
 }
 
+static seL4_MessageInfo_t receive_event(bool have_reply, seL4_MessageInfo_t reply_tag, seL4_Word *badge)
+{
+    if (have_reply) {
+        return seL4_ReplyRecv(INPUT_CAP, reply_tag, badge, REPLY_CAP);
+    } else if (microkit_have_signal) {
+        return seL4_NBSendRecv(microkit_signal_cap, microkit_signal_msg, INPUT_CAP, badge, REPLY_CAP);
+        microkit_have_signal = seL4_False;
+    } else {
+        return seL4_Recv(INPUT_CAP, badge, REPLY_CAP);
+    }
+}
+
 static void handler_loop(void)
 {
     bool have_reply = false;
@@ -89,25 +105,62 @@ static void handler_loop(void)
         seL4_Word badge;
         seL4_MessageInfo_t tag;
 
-        if (have_reply) {
-            tag = seL4_ReplyRecv(INPUT_CAP, reply_tag, &badge, REPLY_CAP);
-        } else if (microkit_have_signal) {
-            tag = seL4_NBSendRecv(microkit_signal_cap, microkit_signal_msg, INPUT_CAP, &badge, REPLY_CAP);
-            microkit_have_signal = seL4_False;
+#if defined(CONFIG_VTX)
+        seL4_Word x86_vmenter_result;
+        seL4_Bool x86_vmenter_result_valid = seL4_False;
+        if (microkit_x86_do_vcpu_resume) {
+            /* There isn't a syscall that atomically send signal or reply, perform vmenter while waiting for
+               incoming notifications. So we have to dispatch any signal or reply first. Then switch execution
+               to the bound VCPU. */
+            if (have_reply) {
+                seL4_Send(REPLY_CAP, reply_tag);
+            } else if (microkit_have_signal) {
+                seL4_NBSend(microkit_signal_cap, microkit_signal_msg);
+            }
+
+            x86_vmenter_result = seL4_VMEnter(&badge);
+
+            x86_vmenter_result_valid = seL4_True;
+            microkit_x86_do_vcpu_resume = seL4_False;
         } else {
-            tag = seL4_Recv(INPUT_CAP, &badge, REPLY_CAP);
+            tag = receive_event(have_reply, reply_tag, &badge);
         }
+#else
+        tag = receive_event(have_reply, reply_tag, &badge);
+#endif /* CONFIG_VTX */
 
         uint64_t is_endpoint = badge >> 63;
         uint64_t is_fault = (badge >> 62) & 1;
+
+#if defined(CONFIG_VTX)
+        if (x86_vmenter_result_valid) {
+            if (x86_vmenter_result == SEL4_VMENTER_RESULT_FAULT) {
+                is_fault = 1;
+                /* Create a dummy tag so that we can call `fault()`, as VM Exits on x86 isn't modelled as an IPC like ARM. */
+                tag = seL4_MessageInfo_new(0, 0, 0, SEL4_VMENTER_NUM_FAULT_MSGS);
+            } else if (x86_vmenter_result == SEL4_VMENTER_RESULT_NOTIF) {
+                /* VCPU was interrupted while executing from a notification. There's nothing to do,
+                 * `notified()` will be called. */
+            }
+        }
+#endif /* CONFIG_VTX */
 
         have_reply = false;
 
         if (is_fault) {
             seL4_Bool reply_to_fault = fault(badge & PD_MASK, tag, &reply_tag);
-            if (reply_to_fault) {
+
+#if defined(CONFIG_VTX)
+            if (x86_vmenter_result_valid == seL4_False && reply_to_fault == seL4_True) {
+                /* Fault from child PD rather than from bound VCPU */
                 have_reply = true;
             }
+#else
+            if (reply_to_fault == seL4_True) {
+                have_reply = true;
+            }
+#endif /* CONFIG_VTX */
+
         } else if (is_endpoint) {
             have_reply = true;
             reply_tag = protected(badge & CHANNEL_MASK, tag);
