@@ -83,7 +83,7 @@ impl ImageOutputType {
                 Arch::X86_64 | Arch::Aarch64 => None,
             },
             RequestedImageType::Unspecified =>
-                Some(Self::default_from_arch_and_board(&arch, board_name)),
+                Some(Self::default_from_arch_and_board(arch, board_name)),
         }
     }
 }
