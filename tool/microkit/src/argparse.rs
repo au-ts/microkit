@@ -8,6 +8,10 @@
 // we want our asserts, even if the compiler figures out they hold true already during compile-time
 #![allow(clippy::assertions_on_constants)]
 
+use std::iter::Peekable;
+use std::path::PathBuf;
+use std::fmt;
+
 
 fn print_usage() {
     println!("usage: microkit [-h] [-o OUTPUT] [--image-type {{binary,elf,uimage}}] [-r REPORT] --board BOARD --config CONFIG [--capdl-json CAPDL_SPEC] --search-path [SEARCH_PATH ...] system")
@@ -21,11 +25,137 @@ fn print_help(available_boards: &[String]) {
     println!("  -h, --help, show this help message and exit");
     println!("  -o, --output OUTPUT");
     println!("  -r, --report REPORT");
-    println!("  --image-type {{binary,elf}}");
+    println!("  --image-type {{binary,elf,uimage}}");
     println!("  --board {}", available_boards.join("\n          "));
     println!("  --config CONFIG");
     println!("  --capdl-json CAPDL_SPEC (JSON format)");
     println!("  --search-path [SEARCH_PATH ...]");
+}
+
+#[derive(Debug,Clone)]
+struct BuildConfig {
+    sdf_path: PathBuf,
+    board: String,
+    config: String,
+    report_path: PathBuf,
+    capdl_json_path: Option<PathBuf>,
+    output_path: PathBuf,
+    search_paths: Vec<PathBuf>,
+    requested_image_type: Option<String>,
+}
+
+#[derive(Debug)]
+enum BuildConfigError {
+    InvalidImageTypeParameter { parameter: String },
+    MissingParameter { parentArgument: &'static str },
+    MissingRequiredArgument { arg: &'static str },
+    UnrecognizedArgument { arg: String },
+}
+
+impl fmt::Display for BuildConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidImageTypeParameter { parameter } => {
+                write!(f, "argument --image-type: unknown parameter '{parameter}'")
+            }
+            Self::MissingParameter { parentArgument } => {
+                write!(f, "argument {parentArgument}: expected one parameter")
+            }
+            Self::MissingRequiredArgument { arg } => {
+                write!(f, "missing required argument '{arg}'")
+            }
+            Self::UnrecognizedArgument { arg } => {
+                write!(f, "unrecognised argument '{arg}'")
+            }
+        }
+    }
+}
+
+fn consume_parameter<I>(args: &mut I, argname: &'static str) -> Result<String, BuildConfigError>
+where
+    I: Iterator<Item = String>,
+{
+    args.next().ok_or(BuildConfigError::MissingParameter {parentArgument: argname})
+}
+
+fn consume_parameters<I>(args: &mut Peekable<I>) -> Vec<String>
+where
+    I: Iterator<Item = String>,
+{
+    let mut values = Vec::new();
+    while let Some(next) = args.peek() {
+        if next.starts_with("-") { break; }
+        if let Some(next) = args.next() { values.push(next) };
+    }
+    values
+}
+
+impl BuildConfig {
+    fn parse(args: &[String], available_boards: &[String]) -> Result<Self, BuildConfigError> {
+        let mut args = args.iter().skip(1).cloned().peekable();
+
+        let mut output_path = PathBuf::from("loader.img");
+        let mut report_path = PathBuf::from("report.txt");
+        let mut capdl_json_path = None;
+        let mut search_paths = Vec::new();
+
+        let mut sdf_path = None;
+        let mut board = None;
+        let mut config = None;
+        let mut requested_image_type = None;
+
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "-h" | "--help" => {
+                    print_help(available_boards);
+                    std::process::exit(0);
+                }
+                "-o" | "--output" => {
+                    output_path = consume_parameter(&mut args, "--output")?.into();
+                }
+                "-r" | "--report" => {
+                    report_path = consume_parameter(&mut args, "--report")?.into();
+                }
+                "--board" => {
+                    board = Some(consume_parameter(&mut args, "--board")?);
+                }
+                "--config" => {
+                    config = Some(consume_parameter(&mut args, "--config")?);
+                }
+                "--capdl-json" => {
+                    capdl_json_path = Some(consume_parameter(&mut args, "--capdl-json")?.into());
+                }
+                "--search-path" => {
+                    let params = consume_parameters(&mut args);
+                    search_paths.extend(params.into_iter().map(PathBuf::from));
+                }
+                "--image-type" => {
+                    let value = consume_parameter(&mut args, "--image-type")?;
+                    requested_image_type = Some(value);
+                }
+                value => {
+                    if sdf_path.is_none() {
+                        sdf_path = Some(value.into());
+                    } else {
+                        return Err( BuildConfigError::UnrecognizedArgument {arg: value.to_owned()} );
+                    }
+                }
+            }
+        }
+        let sdf_path = sdf_path.ok_or(BuildConfigError::MissingRequiredArgument {arg: "sdf path"})?;
+        let board = board.ok_or(BuildConfigError::MissingRequiredArgument {arg: "--board"})?;
+        let config = config.ok_or(BuildConfigError::MissingRequiredArgument {arg: "--config"})?;
+        Ok(Self {
+            sdf_path,
+            board,
+            config,
+            report_path,
+            capdl_json_path,
+            output_path,
+            search_paths,
+            requested_image_type,
+        })
+    }
 }
 
 pub struct Args<'a> {
@@ -38,7 +168,6 @@ pub struct Args<'a> {
     pub search_paths: Vec<&'a String>,
     pub output_image_type: Option<&'a str>,
 }
-
 
 impl<'a> Args<'a> {
     pub fn parse(args: &'a [String], available_boards: &[String]) -> Args<'a> {
