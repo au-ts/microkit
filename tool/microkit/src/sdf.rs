@@ -75,7 +75,7 @@ fn sdf_parse_number(s: &str, node: &roxmltree::Node) -> Result<u64, String> {
 }
 
 fn loc_string(xml_sdf: &XmlSystemDescription, pos: roxmltree::TextPos) -> String {
-    format!("{}:{}:{}", xml_sdf.filename, pos.row, pos.col)
+    format!("{}:{}:{}", xml_sdf.filename.display(), pos.row, pos.col)
 }
 
 #[repr(u8)]
@@ -1393,7 +1393,7 @@ impl Channel {
 }
 
 struct XmlSystemDescription<'a> {
-    filename: &'a str,
+    filename: &'a Path,
     doc: &'a roxmltree::Document<'a>,
 }
 
@@ -1489,7 +1489,7 @@ fn checked_lookup<'a>(
             "Error: Missing required attribute '{}' on element '{}': {}:{}:{}",
             attribute,
             node.tag_name().name(),
-            xml_sdf.filename,
+            xml_sdf.filename.display(),
             pos.row,
             pos.col
         ))
@@ -1502,7 +1502,7 @@ fn value_error(xml_sdf: &XmlSystemDescription, node: &roxmltree::Node, err: Stri
         "Error: {} on element '{}': {}:{}:{}",
         err,
         node.tag_name().name(),
-        xml_sdf.filename,
+        xml_sdf.filename.display(),
         pos.row,
         pos.col
     )
@@ -1616,10 +1616,10 @@ fn pd_flatten(
     Ok(all_pds)
 }
 
-pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescription, String> {
+pub fn parse(filename: &Path, xml: &str, config: &Config) -> Result<SystemDescription, String> {
     let doc = match roxmltree::Document::parse(xml) {
         Ok(doc) => doc,
-        Err(err) => return Err(format!("Could not parse '{filename}': {err}")),
+        Err(err) => return Err(format!("Could not parse '{0}': {err}", filename.display())),
     };
 
     let xml_sdf = XmlSystemDescription {
@@ -1759,7 +1759,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
                     "Error: duplicate irq: {} in protection domain: '{}' @ {}:{}:{}",
                     sysirq.irq_num(),
                     pd.name,
-                    filename,
+                    filename.display(),
                     pd.text_pos.unwrap().row,
                     pd.text_pos.unwrap().col
                 ));
@@ -1778,7 +1778,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
                     "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
                     sysirq.id,
                     pd.name,
-                    filename,
+                    filename.display(),
                     pd.text_pos.unwrap().row,
                     pd.text_pos.unwrap().col
                 ));
@@ -1794,7 +1794,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
                 "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
                 ch.end_a.id,
                 pd.name,
-                filename,
+                filename.display(),
                 pd.text_pos.unwrap().row,
                 pd.text_pos.unwrap().col
             ));
@@ -1806,7 +1806,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
                 "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
                 ch.end_b.id,
                 pd.name,
-                filename,
+                filename.display(),
                 pd.text_pos.unwrap().row,
                 pd.text_pos.unwrap().col
             ));
@@ -1841,7 +1841,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
                     "Error: duplicate I/O port id: {} in protection domain: '{}' @ {}:{}:{}",
                     ioport.id,
                     pd.name,
-                    filename,
+                    filename.display(),
                     pd.text_pos.unwrap().row,
                     pd.text_pos.unwrap().col
                 ));
@@ -1865,14 +1865,14 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
                             left_range.start,
                             left_range.end,
                             pd.name,
-                            filename,
+                            filename.display(),
                             this_ioport.text_pos.row,
                             this_ioport.text_pos.col,
                             seen_ioport.id,
                             right_range.start,
                             right_range.end,
                             seen_pd_name,
-                            filename,
+                            filename.display(),
                             seen_ioport.text_pos.row,
                             seen_ioport.text_pos.col
                         ));

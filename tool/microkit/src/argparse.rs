@@ -12,11 +12,13 @@ use std::iter::Peekable;
 use std::path::PathBuf;
 use std::fmt;
 
-fn print_usage() {
+// we put the output functions here to keep all argument-related code together
+
+pub fn print_usage() {
     println!("usage: microkit [-h] [-o OUTPUT] [--image-type {{binary,elf,uimage}}] [-r REPORT] --board BOARD --config CONFIG [--capdl-json CAPDL_SPEC] --search-path [SEARCH_PATH ...] system")
 }
 
-fn print_help(available_boards: &[String]) {
+pub fn print_help(available_boards: &[String]) {
     print_usage();
     println!("\npositional arguments:");
     println!("  system");
@@ -40,8 +42,8 @@ pub enum RequestedImageType {
 }
 
 impl RequestedImageType {
-    fn parse(str: &str) -> Option<Self> {
-        match str {
+    fn parse(arg: &str) -> Option<Self> {
+        match arg {
             "binary" => Some(RequestedImageType::Binary),
             "elf" => Some(RequestedImageType::Elf),
             "uimage" => Some(RequestedImageType::Uimage),
@@ -50,9 +52,19 @@ impl RequestedImageType {
     }
 }
 
+impl fmt::Display for RequestedImageType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RequestedImageType::Binary => write!(f, "binary"),
+            RequestedImageType::Elf => write!(f, "elf"),
+            RequestedImageType::Uimage => write!(f, "uimage"),
+            RequestedImageType::Unspecified => write!(f, "unspecified"),
+        }
+    }
+}
 
 #[derive(Debug,Clone)]
-pub struct BuildConfig {
+pub struct Args {
     pub sdf_path: PathBuf,
     pub board: String,
     pub config: String,
@@ -64,7 +76,7 @@ pub struct BuildConfig {
 }
 
 #[derive(Debug)]
-pub enum BuildConfigError {
+pub enum ArgsError {
     InvalidImageTypeParameter { parameter: String },
     InvalidBoardParameter { parameter: String },
     MissingParameter { parent_argument: &'static str },
@@ -73,7 +85,7 @@ pub enum BuildConfigError {
     HelpWanted,
 }
 
-impl fmt::Display for BuildConfigError {
+impl fmt::Display for ArgsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidImageTypeParameter { parameter } => {
@@ -102,11 +114,11 @@ impl fmt::Display for BuildConfigError {
     }
 }
 
-fn consume_parameter<I>(args: &mut I, argname: &'static str) -> Result<String, BuildConfigError>
+fn consume_parameter<I>(args: &mut I, argname: &'static str) -> Result<String, ArgsError>
 where
     I: Iterator<Item = String>,
 {
-    args.next().ok_or(BuildConfigError::MissingParameter {parent_argument: argname})
+    args.next().ok_or(ArgsError::MissingParameter {parent_argument: argname})
 }
 
 fn consume_parameters<I>(args: &mut Peekable<I>) -> Vec<String>
@@ -121,8 +133,8 @@ where
     values
 }
 
-impl BuildConfig {
-    pub fn parse(args: &[String], available_boards: &[String]) -> Result<Self, BuildConfigError> {
+impl Args {
+    pub fn parse(args: &[String], available_boards: &[String]) -> Result<Self, ArgsError> {
         let mut args = args.iter().skip(1).cloned().peekable();
 
         let mut output_path = PathBuf::from("loader.img");
@@ -138,7 +150,7 @@ impl BuildConfig {
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "-h" | "--help" => {
-                    return Err(BuildConfigError::HelpWanted);
+                    return Err(ArgsError::HelpWanted);
                 }
                 "-o" | "--output" => {
                     output_path = consume_parameter(&mut args, "--output")?.into();
@@ -149,7 +161,7 @@ impl BuildConfig {
                 "--board" => {
                     let board_param = consume_parameter(&mut args, "--board")?;
                     if !available_boards.contains(&board_param) {
-                        return Err(BuildConfigError::InvalidBoardParameter {parameter: board_param});
+                        return Err(ArgsError::InvalidBoardParameter {parameter: board_param});
                     }
                     board = Some(board_param);
                 }
@@ -170,7 +182,7 @@ impl BuildConfig {
                             requested_image_type = image_type;
                         }
                         None => {
-                            return Err( BuildConfigError::InvalidImageTypeParameter {parameter: value} );
+                            return Err( ArgsError::InvalidImageTypeParameter {parameter: value} );
                         }
                     }
                 }
@@ -178,7 +190,7 @@ impl BuildConfig {
                     if sdf_path.is_none() {
                         sdf_path = Some(value.into());
                     } else {
-                        return Err( BuildConfigError::UnrecognizedArgument {arg: value.to_owned()} );
+                        return Err( ArgsError::UnrecognizedArgument {arg: value.to_owned()} );
                     }
                 }
             }
@@ -195,7 +207,7 @@ impl BuildConfig {
             missing_args.push("system");
         }
         if !missing_args.is_empty() {
-            return Err(BuildConfigError::MissingRequiredArguments {args: missing_args} );
+            return Err(ArgsError::MissingRequiredArguments {args: missing_args} );
         }
         let board = board.unwrap();
         let config = config.unwrap();
@@ -214,160 +226,3 @@ impl BuildConfig {
     }
 }
 
-pub struct Args<'a> {
-    pub system: &'a str,
-    pub board: &'a str,
-    pub config: &'a str,
-    pub report: &'a str,
-    pub capdl_json: Option<&'a str>,
-    pub output: &'a str,
-    pub search_paths: Vec<&'a String>,
-    pub output_image_type: Option<&'a str>,
-}
-
-impl<'a> Args<'a> {
-    pub fn parse(args: &'a [String], available_boards: &[String]) -> Args<'a> {
-        // Default arguments
-        let mut output = "loader.img";
-        let mut report = "report.txt";
-        let mut capdl_json = None;
-        let mut search_paths = Vec::new();
-        // Arguments expected to be provided by the user
-        let mut system = None;
-        let mut board = None;
-        let mut config = None;
-        let mut output_image_type = None;
-
-        if args.len() <= 1 {
-            print_usage();
-            std::process::exit(1);
-        }
-
-        let mut i = 1;
-        let mut unknown = vec![];
-        let mut in_search_path = false;
-        while i < args.len() {
-            match args[i].as_str() {
-                "-h" | "--help" => {
-                    print_help(available_boards);
-                    std::process::exit(0);
-                }
-                "-o" | "--output" => {
-                    in_search_path = false;
-                    if i < args.len() - 1 {
-                        output = &args[i + 1];
-                        i += 1;
-                    } else {
-                        eprintln!("microkit: error: argument -o/--output: expected one argument");
-                        std::process::exit(1);
-                    }
-                }
-                "-r" | "--report" => {
-                    in_search_path = false;
-                    if i < args.len() - 1 {
-                        report = &args[i + 1];
-                        i += 1;
-                    } else {
-                        eprintln!("microkit: error: argument -r/--report: expected one argument");
-                        std::process::exit(1);
-                    }
-                }
-                "--board" => {
-                    in_search_path = false;
-                    if i < args.len() - 1 {
-                        board = Some(&args[i + 1]);
-                        i += 1;
-                    } else {
-                        eprintln!("microkit: error: argument --board: expected one argument");
-                        std::process::exit(1);
-                    }
-                }
-                "--config" => {
-                    in_search_path = false;
-                    if i < args.len() - 1 {
-                        config = Some(&args[i + 1]);
-                        i += 1;
-                    } else {
-                        eprintln!("microkit: error: argument --config: expected one argument");
-                        std::process::exit(1);
-                    }
-                }
-                "--capdl-json" => {
-                    in_search_path = false;
-                    if i < args.len() - 1 {
-                        capdl_json = Some(args[i + 1].as_str());
-                        i += 1;
-                    } else {
-                        eprintln!("microkit: error: argument --capdl-json: expected one argument");
-                        std::process::exit(1);
-                    }
-                }
-                "--search-path" => {
-                    in_search_path = true;
-                }
-                "--image-type" => {
-                    if i < args.len() - 1 {
-                        output_image_type = Some(args[i + 1].as_str());
-                        i += 1;
-                    } else {
-                        eprintln!("microkit: error: argument --image-type: expected one argument");
-                        std::process::exit(1);
-                    }
-                }
-                _ => {
-                    if in_search_path {
-                        search_paths.push(&args[i]);
-                    } else if system.is_none() {
-                        system = Some(&args[i]);
-                    } else {
-                        // This call to clone is okay since having unknown
-                        // arguments is rare.
-                        unknown.push(args[i].clone());
-                    }
-                }
-            }
-
-            i += 1;
-        }
-
-        if !unknown.is_empty() {
-            print_usage();
-            eprintln!(
-                "microkit: error: unrecognised arguments: {}",
-                unknown.join(" ")
-            );
-            std::process::exit(1);
-        }
-
-        let mut missing_args = Vec::new();
-        if board.is_none() {
-            missing_args.push("--board");
-        }
-        if config.is_none() {
-            missing_args.push("--config");
-        }
-        if system.is_none() {
-            missing_args.push("system");
-        }
-
-        if !missing_args.is_empty() {
-            print_usage();
-            eprintln!(
-                "microkit: error: the following arguments are required: {}",
-                missing_args.join(", ")
-            );
-            std::process::exit(1);
-        }
-
-        Args {
-            system: system.unwrap(),
-            board: board.unwrap(),
-            config: config.unwrap(),
-            report,
-            capdl_json,
-            output,
-            search_paths,
-            output_image_type,
-        }
-    }
-}

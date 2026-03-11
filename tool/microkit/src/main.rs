@@ -25,7 +25,8 @@ use microkit_tool::symbols::patch_symbols;
 use microkit_tool::util::{
     human_size_strict, json_str, json_str_as_bool, json_str_as_u64, round_down, round_up,
 };
-use microkit_tool::argparse::{Args};
+use microkit_tool::argparse::{Args, ArgsError, RequestedImageType};
+use microkit_tool::argparse;
 use microkit_tool::{DisjointMemoryRegion, MemoryRegion};
 use std::collections::HashMap;
 use std::fs::{self, metadata};
@@ -70,22 +71,19 @@ impl ImageOutputType {
         }
     }
 
-    fn parse(str: &str, arch: Arch) -> Result<Self, String> {
-        match str {
-            "binary" => match arch {
-                Arch::Aarch64 | Arch::Riscv64 => Ok(ImageOutputType::Binary),
-                Arch::X86_64 => Err(format!(
-                    "building the output image as binary is unsupported for target architecture '{arch}'"
-                )),
+    fn based_on_requested(requested: &RequestedImageType, arch: &Arch, board_name: &str) -> Option<Self> {
+        match requested {
+            RequestedImageType::Binary => match arch {
+                Arch::Aarch64 | Arch::Riscv64 => Some(Self::Binary),
+                Arch::X86_64 => None,
             },
-            "elf" => Ok(ImageOutputType::Elf),
-            "uimage" => match arch {
-                Arch::Riscv64 => Ok(ImageOutputType::Uimage),
-                Arch::X86_64 | Arch::Aarch64 => Err(format!(
-                    "building the output image as uImage is unsupported for target architecture '{arch}'"
-                )),
+            RequestedImageType::Elf => Some(Self::Elf),
+            RequestedImageType::Uimage => match arch {
+                Arch::Riscv64 => Some(Self::Uimage),
+                Arch::X86_64 | Arch::Aarch64 => None,
             },
-            _ => Err(format!("unknown value '{str}'")),
+            RequestedImageType::Unspecified =>
+                Some(Self::default_from_arch_and_board(&arch, board_name)),
         }
     }
 }
@@ -135,9 +133,26 @@ fn main() -> Result<(), String> {
     available_boards.sort();
 
     let env_args: Vec<_> = std::env::args().collect();
-    let args = Args::parse(&env_args, &available_boards);
+    let args = match Args::parse(&env_args, &available_boards) {
+        Ok(result) => { result }
+        Err(ArgsError::HelpWanted) => {
+            argparse::print_help(&available_boards);
+            std::process::exit(0);
+        }
+        Err(err) => {
+            match err {
+                ArgsError::UnrecognizedArgument { arg: _ } |
+                ArgsError::MissingRequiredArguments { args: _ } => {
+                    argparse::print_usage();
+                }
+                _ => { }
+            };
+            eprintln!("microkit: error: {err}");
+            std::process::exit(1);
+        }
+    };
 
-    let board_path = boards_path.join(args.board);
+    let board_path = boards_path.join(&args.board);
     if !board_path.exists() {
         eprintln!(
             "Error: board path '{}' does not exist.",
@@ -170,8 +185,8 @@ fn main() -> Result<(), String> {
 
     let elf_path = sdk_dir
         .join("board")
-        .join(args.board)
-        .join(args.config)
+        .join(&args.board)
+        .join(&args.config)
         .join("elf");
     let loader_elf_path = elf_path.join("loader.elf");
     let kernel_elf_path = elf_path.join("sel4.elf");
@@ -180,14 +195,14 @@ fn main() -> Result<(), String> {
 
     let kernel_config_path = sdk_dir
         .join("board")
-        .join(args.board)
-        .join(args.config)
+        .join(&args.board)
+        .join(&args.config)
         .join("include/kernel/gen_config.json");
 
     let invocations_all_path = sdk_dir
         .join("board")
-        .join(args.board)
-        .join(args.config)
+        .join(&args.board)
+        .join(&args.config)
         .join("invocations_all.json");
 
     if !elf_path.exists() {
@@ -233,7 +248,7 @@ fn main() -> Result<(), String> {
         std::process::exit(1);
     }
 
-    let system_path = Path::new(args.system);
+    let system_path = &args.sdf_path;
     if !system_path.exists() {
         eprintln!(
             "Error: system description file '{}' does not exist",
@@ -242,7 +257,7 @@ fn main() -> Result<(), String> {
         std::process::exit(1);
     }
 
-    let xml: String = fs::read_to_string(args.system).unwrap();
+    let xml: String = fs::read_to_string(system_path).unwrap();
 
     let kernel_config_json: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(kernel_config_path).unwrap()).unwrap();
@@ -257,25 +272,25 @@ fn main() -> Result<(), String> {
         _ => panic!("Unsupported kernel config architecture"),
     };
 
-    let image_output_type = if let Some(image_type) = args.output_image_type {
-        match ImageOutputType::parse(image_type, arch) {
-            Ok(output_image_type) => output_image_type,
-            Err(reason) => {
-                eprintln!("microkit: error: argument --image-type: {reason}");
+    let image_output_type =
+        match ImageOutputType::based_on_requested(&args.requested_image_type, &arch, &args.board.as_str()) {
+            Some(iot) => iot,
+            None => {
+                eprintln!(
+                    "microkit: error: building the output image as '{0}' is unsupported for target architecture '{arch}'",
+                    args.requested_image_type
+                );
                 std::process::exit(1);
             }
-        }
-    } else {
-        ImageOutputType::default_from_arch_and_board(&arch, args.board)
-    };
+        };
 
     let (device_regions, normal_regions) = match arch {
         Arch::X86_64 => (None, None),
         _ => {
             let kernel_platform_config_path = sdk_dir
                 .join("board")
-                .join(args.board)
-                .join(args.config)
+                .join(&args.board)
+                .join(&args.config)
                 .join("platform_gen.json");
 
             if !kernel_platform_config_path.exists() {
@@ -385,7 +400,7 @@ fn main() -> Result<(), String> {
         "Microkit tool has various assumptions about the word size being 64-bits."
     );
 
-    let mut system = match parse(args.system, &xml, &kernel_config) {
+    let mut system = match parse(system_path.as_path(), &xml, &kernel_config) {
         Ok(system) => system,
         Err(err) => {
             eprintln!("{err}");
@@ -497,7 +512,7 @@ fn main() -> Result<(), String> {
         let mut spec_container = build_capdl_spec(&kernel_config, &mut system_elfs, &system)?;
         pack_spec_into_initial_task(
             &kernel_config,
-            args.config,
+            args.config.as_str(),
             &spec_container,
             &system_elfs,
             &mut capdl_initialiser,
@@ -722,7 +737,7 @@ fn main() -> Result<(), String> {
                 human_size_strict(initialiser_vaddr_range.end - initialiser_vaddr_range.start),
             );
 
-            let image_out_path = Path::new(args.output);
+            let image_out_path = args.output_path.as_path();
 
             match kernel_config.arch {
                 Arch::X86_64 => match capdl_initialiser.elf.reserialise(image_out_path) {
@@ -781,12 +796,12 @@ fn main() -> Result<(), String> {
                 }
             };
 
-            if let Some(capdl_json) = args.capdl_json {
+            if let Some(capdl_json) = args.capdl_json_path {
                 let serialised = serde_json::to_string_pretty(&spec_container.spec).unwrap();
                 fs::write(capdl_json, &serialised).unwrap();
             };
 
-            write_report(&spec_container, &kernel_config, args.report);
+            write_report(&spec_container, &kernel_config, &args.report_path);
             system_built = true;
             break;
         } else {
