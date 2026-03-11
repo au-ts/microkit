@@ -33,23 +33,25 @@ fn print_help(available_boards: &[String]) {
 }
 
 #[derive(Debug,Clone)]
-struct BuildConfig {
-    sdf_path: PathBuf,
-    board: String,
-    config: String,
-    report_path: PathBuf,
-    capdl_json_path: Option<PathBuf>,
-    output_path: PathBuf,
-    search_paths: Vec<PathBuf>,
-    requested_image_type: Option<String>,
+pub struct BuildConfig {
+    pub sdf_path: PathBuf,
+    pub board: String,
+    pub config: String,
+    pub report_path: PathBuf,
+    pub capdl_json_path: Option<PathBuf>,
+    pub output_path: PathBuf,
+    pub search_paths: Vec<PathBuf>,
+    pub requested_image_type: Option<String>,
 }
 
 #[derive(Debug)]
-enum BuildConfigError {
+pub enum BuildConfigError {
     InvalidImageTypeParameter { parameter: String },
-    MissingParameter { parentArgument: &'static str },
-    MissingRequiredArgument { arg: &'static str },
+    MissingParameter { parent_argument: &'static str },
+    MissingRequiredArguments { args: Vec<&'static str> },
     UnrecognizedArgument { arg: String },
+    HelpWanted,
+    UsageWanted,
 }
 
 impl fmt::Display for BuildConfigError {
@@ -58,14 +60,24 @@ impl fmt::Display for BuildConfigError {
             Self::InvalidImageTypeParameter { parameter } => {
                 write!(f, "argument --image-type: unknown parameter '{parameter}'")
             }
-            Self::MissingParameter { parentArgument } => {
-                write!(f, "argument {parentArgument}: expected one parameter")
+            Self::MissingParameter { parent_argument } => {
+                write!(f, "argument {parent_argument}: expected one parameter")
             }
-            Self::MissingRequiredArgument { arg } => {
-                write!(f, "missing required argument '{arg}'")
+            Self::MissingRequiredArguments { args } => {
+                write!(
+                    f,
+                    "the following arguments are required: {}",
+                    args.join(", ")
+                )
             }
             Self::UnrecognizedArgument { arg } => {
-                write!(f, "unrecognised argument '{arg}'")
+                write!(f, "unrecognized argument '{arg}'")
+            }
+            Self::HelpWanted => {
+                write!(f, "printing help text")
+            }
+            Self::UsageWanted => {
+                write!(f, "printing usage text")
             }
         }
     }
@@ -75,7 +87,7 @@ fn consume_parameter<I>(args: &mut I, argname: &'static str) -> Result<String, B
 where
     I: Iterator<Item = String>,
 {
-    args.next().ok_or(BuildConfigError::MissingParameter {parentArgument: argname})
+    args.next().ok_or(BuildConfigError::MissingParameter {parent_argument: argname})
 }
 
 fn consume_parameters<I>(args: &mut Peekable<I>) -> Vec<String>
@@ -91,7 +103,7 @@ where
 }
 
 impl BuildConfig {
-    fn parse(args: &[String], available_boards: &[String]) -> Result<Self, BuildConfigError> {
+    pub fn parse(args: &[String]) -> Result<Self, BuildConfigError> {
         let mut args = args.iter().skip(1).cloned().peekable();
 
         let mut output_path = PathBuf::from("loader.img");
@@ -107,8 +119,7 @@ impl BuildConfig {
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "-h" | "--help" => {
-                    print_help(available_boards);
-                    std::process::exit(0);
+                    return Err(BuildConfigError::HelpWanted);
                 }
                 "-o" | "--output" => {
                     output_path = consume_parameter(&mut args, "--output")?.into();
@@ -131,7 +142,14 @@ impl BuildConfig {
                 }
                 "--image-type" => {
                     let value = consume_parameter(&mut args, "--image-type")?;
-                    requested_image_type = Some(value);
+                    match value.as_str() {
+                        "binary" | "elf" | "uimage" => {
+                            requested_image_type = Some(value);
+                        }
+                        _ => {
+                            return Err( BuildConfigError::InvalidImageTypeParameter {parameter: value} );
+                        }
+                    }
                 }
                 value => {
                     if sdf_path.is_none() {
@@ -142,9 +160,26 @@ impl BuildConfig {
                 }
             }
         }
-        let sdf_path = sdf_path.ok_or(BuildConfigError::MissingRequiredArgument {arg: "sdf path"})?;
-        let board = board.ok_or(BuildConfigError::MissingRequiredArgument {arg: "--board"})?;
-        let config = config.ok_or(BuildConfigError::MissingRequiredArgument {arg: "--config"})?;
+
+        // check for any missing arguments
+        let mut missing_args = Vec::new();
+        if board.is_none() {
+            missing_args.push("--board");
+        }
+        let board = board.unwrap();
+        if config.is_none() {
+            missing_args.push("--config");
+        }
+        let config = config.unwrap();
+        if sdf_path.is_none() {
+            missing_args.push("system");
+        }
+        let sdf_path = sdf_path.unwrap();
+        if !missing_args.is_empty() {
+            return Err(BuildConfigError::MissingRequiredArguments {args: missing_args} );
+        }
+
+        // a-ok, we can return
         Ok(Self {
             sdf_path,
             board,
