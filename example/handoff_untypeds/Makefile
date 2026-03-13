@@ -59,14 +59,28 @@ LIBS := -lmicrokit -Tmicrokit.ld
 IMAGE_FILE = $(BUILD_DIR)/loader.img
 REPORT_FILE = $(BUILD_DIR)/report.txt
 SPEC = $(BUILD_DIR)/capdl_spec.json
+KERNEL_32B = $(BUILD_DIR)/sel4_32.elf
+INITIAL_TASK = $(BUILD_DIR)/loader.img
 
 all: $(IMAGE_FILE)
 
-$(BUILD_DIR)/%.o: %.c Makefile
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+$(BUILD_DIR)/%.o: %.c Makefile $(BUILD_DIR)
 	$(CC) -c $(CFLAGS) $< -o $@
 
 $(BUILD_DIR)/hello.elf: $(addprefix $(BUILD_DIR)/, $(HELLO_OBJS))
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
-$(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) handoff_untypeds.system
+$(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) handoff_untypeds.system $(BUILD_DIR)
 	$(MICROKIT_TOOL) handoff_untypeds.system --search-path $(BUILD_DIR) --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE) --capdl-json ${SPEC}
+
+qemu: $(IMAGE_FILE)
+	qemu-system-x86_64                      \
+			-cpu qemu64,+fsgsbase,+pdpe1gb,+xsaveopt,+xsave \
+			-m "1G"                         \
+			-display none                   \
+			-serial mon:stdio               \
+		-kernel $(KERNEL_32B) \
+		-initrd $(INITIAL_TASK)
