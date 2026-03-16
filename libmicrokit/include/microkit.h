@@ -11,6 +11,7 @@
 
 #define __thread
 #include <sel4/sel4.h>
+#include <sel4/sel4_arch/mapping.h>
 
 typedef unsigned int microkit_channel;
 typedef unsigned int microkit_child;
