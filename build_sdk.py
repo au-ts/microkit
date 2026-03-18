@@ -707,7 +707,7 @@ def build_lib_component(
 ) -> None:
     """Build a specific library component.
 
-    Right now this is just libmicrokit.a
+    Right now these are just libmicrokit.a and libmicrokitpnk.a
     """
     sel4_dir = root_dir / "board" / board.name / config.name
     build_dir = build_dir / board.name / config.name / component_name
@@ -747,8 +747,10 @@ def build_lib_component(
         if not p.is_file():
             continue
         rel = p.relative_to(source_dir)
-        if rel.parts[0] == "pancake" and not board.arch.is_riscv():
-            # The Pancake components currently only support RISC-V
+        # The Pancake components currently only support RISC-V
+        if not board.arch.is_riscv() and rel.parts[0] in ("panmicrokit", "pansel4"):
+            continue
+        if not board.arch.is_riscv() and rel.name == "panmicrokit.h":
             continue
         dest = include_dir / rel
         dest.parent.mkdir(exist_ok=True, parents=True)
@@ -931,6 +933,9 @@ def main() -> None:
 
                 build_elf_component("monitor", root_dir, build_dir, board, config, args.llvm, [])
                 build_lib_component("libmicrokit", root_dir, build_dir, board, config, args.llvm)
+                if board.arch.is_riscv():
+                    # the Pancake version is RISCV64 only for now
+                    build_lib_component("libmicrokitpnk", root_dir, build_dir, board, config, args.llvm)
                 if not args.skip_initialiser:
                     build_initialiser("initialiser", root_dir, build_dir, board, config)
 

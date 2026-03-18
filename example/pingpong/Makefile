@@ -14,8 +14,11 @@ ifeq ($(strip $(MICROKIT_CONFIG)),)
 $(error MICROKIT_CONFIG must be specified)
 endif
 
+ifeq ($(strip $(ARCH)),)
+$(error ARCH must be specified)
+endif
+
 BOARD_DIR := $(MICROKIT_SDK)/board/$(MICROKIT_BOARD)/$(MICROKIT_CONFIG)
-MICROKIT_PANCAKE_SDK := $(BOARD_DIR)/include/pancake
 
 ifeq ($(ARCH),riscv64)
   TARGET_TRIPLE := riscv64-unknown-elf
@@ -48,13 +51,6 @@ PINGSTAGE2 := $(BUILD_DIR)/stage2_processed.pnk
 PINGSTAGE3 := $(BUILD_DIR)/stage3_assembly.S
 PINGSTAGE4 := $(BUILD_DIR)/stage4_object.o
 
-OBJS := \
-  $(BUILD_DIR)/crt0.o \
-  $(BUILD_DIR)/adjutant.o \
-  $(BUILD_DIR)/api.o \
-  $(BUILD_DIR)/pansel4.o \
-  $(PINGSTAGE4)
-
 PINGELF := $(BUILD_DIR)/ping.elf
 PONGELF := $(BUILD_DIR)/pong.elf
 IMAGE   := $(BUILD_DIR)/loader.img
@@ -65,16 +61,16 @@ all: $(IMAGE)
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-# Stage1: concat the pancake files together
+# Stage1: concat the Pancake files together
 $(PINGSTAGE1): ping.pnk | $(BUILD_DIR)
-	@cat $(MICROKIT_PANCAKE_SDK)/pansel4/pansel4.pnk > $(PINGSTAGE1)
-	@cat $(MICROKIT_PANCAKE_SDK)/panmicrokit/api.pnk >> $(PINGSTAGE1)
-	@cat $(MICROKIT_PANCAKE_SDK)/panmicrokit/main.pnk >> $(PINGSTAGE1)
-	@cat ping.pnk >> $(PINGSTAGE1)
+	@cat $(BOARD_DIR)/include/pansel4/pansel4.pnk > $@
+	@cat $(BOARD_DIR)/include/panmicrokit/api.pnk >> $@
+	@cat $(BOARD_DIR)/include/panmicrokit/main.pnk >> $@
+	@cat ping.pnk >> $@
 
 # Stage2: run C preprocessor on Stage1
 $(PINGSTAGE2): $(PINGSTAGE1) | $(BUILD_DIR)
-	$(CPP) -P $< > $@
+	$(CPP) -P -I$(BOARD_DIR)/include $< > $@
 
 # Stage3: compile all Pancake code into asm / machine code
 $(PINGSTAGE3): $(PINGSTAGE2) | $(BUILD_DIR)
@@ -84,33 +80,18 @@ $(PINGSTAGE3): $(PINGSTAGE2) | $(BUILD_DIR)
 $(PINGSTAGE4): $(PINGSTAGE3) | $(BUILD_DIR)
 	$(CC) -c -x assembler-with-cpp $(CFLAGS) $< -o $@
 
-# panmicrokit library (TODO: move these out of here)
-
-$(BUILD_DIR)/crt0.o:
-	$(AS) -c -g $(MICROKIT_PANCAKE_SDK)/panmicrokit/crt0.s -o $@
-
-$(BUILD_DIR)/adjutant.o:
-	$(CC) -c $(CFLAGS) $(MICROKIT_PANCAKE_SDK)/panmicrokit/adjutant.c -o $@
-
-$(BUILD_DIR)/api.o:
-	$(CC) -c $(CFLAGS) $(MICROKIT_PANCAKE_SDK)/panmicrokit/api.c -o $@
-
-$(BUILD_DIR)/pansel4.o:
-	$(CC) -c $(CFLAGS) $(MICROKIT_PANCAKE_SDK)/pansel4/pansel4.c -o $@
-
 # C pd (pong)
-
 $(BUILD_DIR)/pong.o: pong.c | $(BUILD_DIR)
-	$(CC) -c  -nostdlib -ffreestanding -g -O3 -Wall  -Wno-unused-function -Werror -I$(BOARD_DIR)/include $(CFLAGS_ARCH) $< -o $@
+	$(CC) -c $(CFLAGS) $< -o $@
 
+MICROKIT_LD := $(BOARD_DIR)/lib/microkit.ld
+# Link the final Pancake ping executable against libmicrokitpnk
+$(PINGELF): $(PINGSTAGE4) | $(BUILD_DIR)
+	$(LD) $(LDFLAGS) $< -lmicrokitpnk -T$(MICROKIT_LD) -o $@
 
-# Link everything to create the final Pancake ping executable
-$(PINGELF): $(OBJS) | $(BUILD_DIR)
-	$(LD) $(LDFLAGS) $(OBJS) -T$(BOARD_DIR)/lib/microkit.ld -o $@
-
-# Link everything to create the final C pong executable
+# Link the final C pong executable against libmicrokit
 $(PONGELF): $(BUILD_DIR)/pong.o | $(BUILD_DIR)
-	$(LD) $(LDFLAGS) $^ -lmicrokit -Tmicrokit.ld -o $@
+	$(LD) $(LDFLAGS) $< -lmicrokit -T$(BOARD_DIR)/lib/microkit.ld -o $@
 
 # Build the whole system image
 $(IMAGE) $(REPORT): $(PINGELF) $(PONGELF) pingpong.system | $(BUILD_DIR)

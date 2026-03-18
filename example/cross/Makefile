@@ -14,8 +14,11 @@ ifeq ($(strip $(MICROKIT_CONFIG)),)
 $(error MICROKIT_CONFIG must be specified)
 endif
 
+ifeq ($(strip $(ARCH)),)
+$(error ARCH must be specified)
+endif
+
 BOARD_DIR := $(MICROKIT_SDK)/board/$(MICROKIT_BOARD)/$(MICROKIT_CONFIG)
-MICROKIT_PANCAKE_SDK := $(BOARD_DIR)/include/pancake
 
 ifeq ($(ARCH),riscv64)
   TARGET_TRIPLE := riscv64-unknown-elf
@@ -48,14 +51,6 @@ CROSSSTAGE2 := $(BUILD_DIR)/stage2_processed.pnk
 CROSSSTAGE3 := $(BUILD_DIR)/stage3_assembly.S
 CROSSSTAGE4 := $(BUILD_DIR)/stage4_object.o
 
-OBJS := \
-  $(BUILD_DIR)/crt0.o \
-  $(BUILD_DIR)/adjutant.o \
-  $(BUILD_DIR)/api.o \
-  $(BUILD_DIR)/pansel4.o \
-  $(BUILD_DIR)/cross.o \
-  $(CROSSSTAGE4)
-
 CROSSELF := $(BUILD_DIR)/cross.elf
 IMAGE   := $(BUILD_DIR)/loader.img
 REPORT  := $(BUILD_DIR)/report.txt
@@ -65,16 +60,16 @@ all: $(IMAGE)
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-# Stage1: concat the pancake files together
+# Stage1: concat the Pancake files together
 $(CROSSSTAGE1): cross.pnk | $(BUILD_DIR)
-	@cat $(MICROKIT_PANCAKE_SDK)/pansel4/pansel4.pnk > $(CROSSSTAGE1)
-	@cat $(MICROKIT_PANCAKE_SDK)/panmicrokit/api.pnk >> $(CROSSSTAGE1)
-	@cat $(MICROKIT_PANCAKE_SDK)/panmicrokit/main.pnk >> $(CROSSSTAGE1)
-	@cat cross.pnk >> $(CROSSSTAGE1)
+	@cat $(BOARD_DIR)/include/pansel4/pansel4.pnk > $@
+	@cat $(BOARD_DIR)/include/panmicrokit/api.pnk >> $@
+	@cat $(BOARD_DIR)/include/panmicrokit/main.pnk >> $@
+	@cat cross.pnk >> $@
 
 # Stage2: run C preprocessor on Stage1
 $(CROSSSTAGE2): $(CROSSSTAGE1) | $(BUILD_DIR)
-	$(CPP) -P $< > $@
+	$(CPP) -P -I$(BOARD_DIR)/include $< > $@
 
 # Stage3: compile all Pancake code into asm / machine code
 $(CROSSSTAGE3): $(CROSSSTAGE2) | $(BUILD_DIR)
@@ -84,30 +79,13 @@ $(CROSSSTAGE3): $(CROSSSTAGE2) | $(BUILD_DIR)
 $(CROSSSTAGE4): $(CROSSSTAGE3) | $(BUILD_DIR)
 	$(CC) -c -x assembler-with-cpp $(CFLAGS) $< -o $@
 
-# panmicrokit library (TODO: move these out of here)
-
-$(BUILD_DIR)/crt0.o:
-	$(AS) -c -g $(MICROKIT_PANCAKE_SDK)/panmicrokit/crt0.s -o $@
-
-$(BUILD_DIR)/adjutant.o:
-	$(CC) -c $(CFLAGS) $(MICROKIT_PANCAKE_SDK)/panmicrokit/adjutant.c -o $@
-
-$(BUILD_DIR)/api.o:
-	$(CC) -c $(CFLAGS) $(MICROKIT_PANCAKE_SDK)/panmicrokit/api.c -o $@
-
-$(BUILD_DIR)/pansel4.o:
-	$(CC) -c $(CFLAGS) $(MICROKIT_PANCAKE_SDK)/pansel4/pansel4.c -o $@
-
-
-# C pd (pong)
-
+# C side
 $(BUILD_DIR)/cross.o: cross.c | $(BUILD_DIR)
-	$(CC) -c $(CFLAGS) cross.c -o $@
+	$(CC) -c $(CFLAGS) $< -o $@
 
-
-# Link everything to create the final Pancake cross executable
-$(CROSSELF): $(OBJS) | $(BUILD_DIR)
-	$(LD) $(LDFLAGS) $(OBJS) -T$(BOARD_DIR)/lib/microkit.ld -o $@
+# Link the final executable against both libraries
+$(CROSSELF): $(BUILD_DIR)/cross.o $(CROSSSTAGE4) | $(BUILD_DIR)
+	$(LD) $(LDFLAGS) $^ -lmicrokitpnk -T$(BOARD_DIR)/lib/microkit.ld -o $@
 
 # Build the whole system image
 $(IMAGE) $(REPORT): $(CROSSELF) cross.system | $(BUILD_DIR)
