@@ -6,8 +6,6 @@
 
 use std::ops::Range;
 
-use serde_json;
-
 pub fn msb(x: u64) -> u64 {
     64 - x.leading_zeros() as u64 - 1
 }
