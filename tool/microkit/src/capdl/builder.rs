@@ -117,7 +117,6 @@ pub struct CapDLSpecContainer {
     pub expected_allocations: HashMap<ObjectId, ExpectedAllocation>,
 }
 
-// TODO: ask why it goes down instead of going up, surely easier to go up.
 fn find_free_contiguous_memory(
     mr_name_to_frames: &HashMap<&String, Vec<ObjectId>>, 
     pd: &ProtectionDomain, 
@@ -131,54 +130,64 @@ fn find_free_contiguous_memory(
     // Work downwards now, and find a contiguous memory range that does not overlap
             // with any elf loadable segment or user defined MR
 
-    let mut found_valid_region = false;
+    // let mut found_valid_region = false;
     let elf_obj = &elfs[pd_global_idx];
     let mut cur_vaddr = round_down(
                 kernel_config.pd_stack_bottom(pd.stack_size) as u64 - PageSize::Small as u64,
                 PageSize::Small as u64);
 
 
-    while cur_vaddr > 0 && !found_valid_region {
-        // Pick a range and make sure it doesn't overlap with any MR vaddr's
-        // and make it page aligned
-        let table_range = (cur_vaddr - size as u64)..cur_vaddr;
+    while cur_vaddr > 0 {
+        if cur_vaddr < size {
+            break;
+        }
 
-        for map in pd.maps.iter() {
+        let mut valid = true;
+        let table_range = (cur_vaddr - size)..cur_vaddr;
+
+        // Check MRs
+        for map in &pd.maps {
             let frames = mr_name_to_frames.get(&map.mr).unwrap();
-            // MRs have frames of equal size so just use the first frame's page size.
+
             let page_size_bytes =
-                1 << capdl_util_get_frame_size_bits(&spec_container, *frames.first().unwrap());
-            let mr_vaddr_range = map.vaddr..(map.vaddr + (page_size_bytes * frames.len() as u64));
-            if ranges_overlap(&mr_vaddr_range, &table_range) {
-                found_valid_region = false;
+                1 << capdl_util_get_frame_size_bits(spec_container, *frames.first().unwrap());
+
+            let mr_range =
+                map.vaddr..(map.vaddr + page_size_bytes * frames.len() as u64);
+
+            if ranges_overlap(&mr_range, &table_range) {
+                valid = false;
                 cur_vaddr = round_down(map.vaddr, PageSize::Small as u64);
                 break;
-            } else {
-                found_valid_region = true
             }
         }
 
-        if !found_valid_region {
+        if !valid {
             continue;
         }
 
-        for elf_seg in elf_obj.loadable_segments().iter() {
-            let elf_seg_vaddr_range = elf_seg.virt_addr
-                ..elf_seg.virt_addr + round_up(elf_seg.mem_size(), PageSize::Small as u64);
+        // Check ELF
+        for seg in elf_obj.loadable_segments() {
+            let seg_range =
+                seg.virt_addr..
+                (seg.virt_addr + round_up(seg.mem_size(), PageSize::Small as u64));
 
-            if ranges_overlap(&table_range, &elf_seg_vaddr_range) {
-                found_valid_region = false;
-                cur_vaddr = round_down(elf_seg.virt_addr, PageSize::Small as u64);
-            } else {
-                found_valid_region = true;
+            if ranges_overlap(&table_range, &seg_range) {
+                valid = false;
+                cur_vaddr = round_down(seg.virt_addr, PageSize::Small as u64);
+                break;
             }
         }
+
+        if valid {
+            return Ok(cur_vaddr);
+        }
+
+        // fallback step (avoid infinite loop)
+        cur_vaddr -= PageSize::Small as u64;
     }
-    if (found_valid_region) {
-        Ok(cur_vaddr)
-    } else {
-        Err(format!("no valid region"))
-    }
+
+    Err("no valid region".into())
 }
 
 impl Default for CapDLSpecContainer {
@@ -621,7 +630,7 @@ pub fn build_capdl_spec(
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
     let mut vspace_ids = vec![ObjectId(0); 128];
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
-        let mut unmapped_frames: Vec<(Cap, ObjectId, usize)> = Vec::new(); // vector of tuple of frame cap, frame id and index of pd which owns frame.
+        let mut unmapped_frames: Vec<(u64, ObjectId, usize)> = Vec::new(); // vector of tuple of frame cap, frame id and index of pd which owns frame.
 
         let elf_obj = &elfs[pd_global_idx];
 
@@ -663,8 +672,6 @@ pub fn build_capdl_spec(
                     pd_vspace_obj_id,
                     pd_vspace_obj_id
                 );
-                // JOSHUA TODO: maybe i want to do the frame and frame cap creation here idk.
-                // frame obj already created.
                 let frames = mr_name_to_frames.get(&map.mr).unwrap();
                 for frame in frames {
                     let mut cur_vaddr = map.vaddr;
@@ -672,8 +679,16 @@ pub fn build_capdl_spec(
                     let write = map.perms & SysMapPerms::Write as u8 != 0;
                     let execute = map.perms & SysMapPerms::Execute as u8 != 0;
                     let cached = map.cached;
+
+                    // JOSHUA TODO: i need to make this properly...
+                    capdl_util_insert_cap_into_cspace(
+                        &mut spec_container, 
+                        cspace_obj_id, 
+                        idx, 
+                        capdl_util_make_frame_cap(frame.clone(), read, write, execute, cached));
+
                     unmapped_frames.push((
-                        capdl_util_make_frame_cap(frame.clone(), read, write, execute, cached),
+                        ,
                         frame.clone(),
                         pd_global_idx, // index of the child pd.
                     ));
@@ -738,20 +753,20 @@ pub fn build_capdl_spec(
                 let mut frame_fill = Fill {
                     entries: [].to_vec(),
                 };
+                let end = std::cmp::min(dest_offset + page_size, unmapped_frames_data.len());
+                let len = end - dest_offset;
                 
                 // fill the frames. 
-                // The below code might do a buffer overflow so
-                // TODO: prevent buffer overflow. 
                 frame_fill.entries.push(FillEntry { // the fillentry content must be elfcontent somehow....
                     range: Range { start: 0, end: PageSize::Small as u64 }, 
                     content: FillEntryContent::Data(FrameData::Bytes(
                         ByteData {
-                            data: unmapped_frames_data[dest_offset..((PageSize::Small as usize) + dest_offset)].into(),
+                            data: unmapped_frames_data[dest_offset..end].into(),
                         }
                     )
                     )
                 });
-                dest_offset += PageSize::Small as usize;
+                dest_offset += len;
 
                 let frame_obj_id = capdl_util_make_frame_obj(
                     &mut spec_container,
