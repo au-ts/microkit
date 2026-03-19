@@ -90,15 +90,17 @@ const PD_BASE_OUTPUT_NOTIFICATION_CAP: u64 = 10;
 const PD_BASE_OUTPUT_ENDPOINT_CAP: u64 = PD_BASE_OUTPUT_NOTIFICATION_CAP + 64;
 const PD_BASE_IRQ_CAP: u64 = PD_BASE_OUTPUT_ENDPOINT_CAP + 64;
 const PD_BASE_PD_TCB_CAP: u64 = PD_BASE_IRQ_CAP + 64;
-const PD_BASE_VM_TCB_CAP: u64 = PD_BASE_PD_TCB_CAP + 64;
-const PD_BASE_VCPU_CAP: u64 = PD_BASE_VM_TCB_CAP + 64;
-const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
 
-pub const PD_CAP_SIZE: u32 = 512;
+
+pub const PD_CAP_SIZE: u32 = 4096;
 const PD_CAP_BITS: u8 = PD_CAP_SIZE.ilog2() as u8;
 const PD_SCHEDCONTEXT_EXTRA_SIZE: u64 = 256;
 const PD_SCHEDCONTEXT_EXTRA_SIZE_BITS: u64 = PD_SCHEDCONTEXT_EXTRA_SIZE.ilog2() as u64;
-
+const PD_BASE_PD_VSPACE_CAP: u64 = PD_BASE_PD_TCB_CAP + 64;
+const PD_BASE_VM_TCB_CAP: u64 = PD_BASE_PD_VSPACE_CAP + 64;
+const PD_BASE_VCPU_CAP: u64 = PD_BASE_VM_TCB_CAP + 64;
+const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
+const BASE_FRAME_CAP: u64 = PD_BASE_IOPORT_CAP + 64;
 pub const SLOT_BITS: u64 = 5;
 pub const SLOT_SIZE: u64 = 1 << SLOT_BITS;
 
@@ -631,12 +633,12 @@ pub fn build_capdl_spec(
     let mut vspace_ids = vec![ObjectId(0); 128];
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
         let mut unmapped_frames: Vec<(u64, ObjectId, usize)> = Vec::new(); // vector of tuple of frame cap, frame id and index of pd which owns frame.
-
+        let mut frame_cap_counter = 0;
         let elf_obj = &elfs[pd_global_idx];
 
         let mut caps_to_bind_to_tcb: Vec<CapTableEntry> = Vec::new();
         let mut caps_to_insert_to_pd_cspace: Vec<CapTableEntry> = Vec::new();
-
+        let pd_cspace_id = *pd_id_to_cspace_id.get(&pd_global_idx).unwrap();
         // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
         let pd_tcb_obj_id = spec_container
             .add_elf_to_spec(kernel_config, &pd.name, pd.cpu, pd_global_idx, elf_obj)
@@ -683,15 +685,16 @@ pub fn build_capdl_spec(
                     // JOSHUA TODO: i need to make this properly...
                     capdl_util_insert_cap_into_cspace(
                         &mut spec_container, 
-                        cspace_obj_id, 
-                        idx, 
+                        pd_cspace_id, 
+                        (BASE_FRAME_CAP + (frame_cap_counter as u64)) as u32, 
                         capdl_util_make_frame_cap(frame.clone(), read, write, execute, cached));
 
                     unmapped_frames.push((
-                        ,
+                        BASE_FRAME_CAP + (frame_cap_counter as u64),
                         frame.clone(),
                         pd_global_idx, // index of the child pd.
                     ));
+                    frame_cap_counter += 1;
 
                 }
 
@@ -736,6 +739,7 @@ pub fn build_capdl_spec(
             );
         }
 
+        // Maybe I can move this down to around 1200 and I think the problem might be solved...
         // add the unmapped frames to the pager's elf
         if let Some((pager_idx, pd)) = system.protection_domains.iter().enumerate().find(|(_, pd)| pd.name.eq("pager")) {
             // put the pager inside the memory region that we find.
@@ -753,7 +757,7 @@ pub fn build_capdl_spec(
                 let mut frame_fill = Fill {
                     entries: [].to_vec(),
                 };
-                let end = std::cmp::min(dest_offset + page_size, unmapped_frames_data.len());
+                let end = std::cmp::min(dest_offset + PageSize::Small as usize, unmapped_frames_data.len());
                 let len = end - dest_offset;
                 
                 // fill the frames. 
