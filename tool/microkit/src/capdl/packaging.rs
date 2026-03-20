@@ -40,7 +40,7 @@ pub fn pack_spec_into_initial_task(
         match build_config {
             "smp-debug" | "debug" => {}
             // We don't copy over the object names as there is no debug printing in these configuration to save memory.
-            "release" | "benchmark" | "smp-release" | "smp-benchmark" => named_obj.name = None,
+            "release" | "benchmark" | "smp-release" | "smp-benchmark" => {},
             _ => panic!("unknown configuration {build_config}"),
         };
     }

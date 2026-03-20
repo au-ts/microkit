@@ -11,7 +11,7 @@ use std::{
 };
 
 use sel4_capdl_initializer_types::{
-    object, CapTableEntry, Fill, FillEntry, FillEntryContent, NamedObject, Object, ObjectId, Spec,
+    object, CapTableEntry, Fill, FillEntry, FillEntryContent, FillEntryContentBootInfo, FillEntryContentBootInfoId, NamedObject, Object, ObjectId, Spec,
     Word,
 };
 
@@ -27,7 +27,7 @@ use crate::{
         CpuCore, SysMap, SysMapPerms, SystemDescription, BUDGET_DEFAULT, MONITOR_PD_NAME,
         MONITOR_PRIORITY,
     },
-    sel4::{Arch, Config, PageSize},
+    sel4::{Arch, Config, PageSize, ObjectType},
     util::{ranges_overlap, round_down, round_up},
 };
 
@@ -237,7 +237,22 @@ impl CapDLSpecContainer {
                                 ..((section_offset + len_to_cpy) as usize)),
                         }),
                     });
+
+                    // TODO: remove this experimental code
+                    if cur_vaddr + 4096 >= seg_base_vaddr + seg_mem_size {
+                        frame_fill.entries.push(FillEntry {
+                            range: Range {
+                                start: dest_offset + len_to_cpy,
+                                end: dest_offset + len_to_cpy + 10,
+                            },
+                            content: FillEntryContent::BootInfo(FillEntryContentBootInfo {
+                                id: FillEntryContentBootInfoId::X86AcpiRsdp,
+                                offset: 0,
+                            }),
+                        })
+                    }
                 }
+
 
                 // Create the frame object, cap to the object, add it to the spec and map it in.
                 let frame_obj_id = capdl_util_make_frame_obj(
@@ -277,6 +292,58 @@ impl CapDLSpecContainer {
                 };
             }
         }
+
+
+        // Create and map BootInfo for this PD
+        let mut frame_fill = Fill {
+            entries: [].to_vec(),
+        };
+        // TODO: fill the BootInfo according to SDF, and it just pass RSDP for test
+        frame_fill.entries.push(FillEntry {
+            range: Range {
+                start: 0,
+                end: 52,
+            },
+            content: FillEntryContent::BootInfo(FillEntryContentBootInfo {
+                id: FillEntryContentBootInfoId::X86AcpiRsdp,
+                offset: 0,
+            }),
+        });
+        // Create the frame object, cap to the object, add it to the spec and map it in.
+        let frame_obj_id = capdl_util_make_frame_obj(
+            self,
+            frame_fill,
+            &format!("elf_{pd_name}_bootinfo"),
+            None,
+            PageSize::Small.fixed_size_bits(sel4_config) as u8,
+            false,
+        );
+        let frame_cap = capdl_util_make_frame_cap(
+            frame_obj_id,
+            true,
+            false,
+            false,
+            true,
+        );
+
+        let page_size_bytes = PageSize::Small as u64;
+        match map_page(
+            self,
+            sel4_config,
+            pd_name,
+            vspace_obj_id,
+            frame_cap,
+            page_size_bytes,
+            0x300_0000,
+        ) {
+            Ok(_) => {
+            }
+            Err(map_err_reason) => {
+                return Err(format!(
+                    "add_elf_to_spec(): failed to map BootInfo page to ELF because: {map_err_reason}"
+                ))
+            }
+        };
 
         // Create and map the IPC buffer for this ELF
         let ipcbuf_frame_obj_id = capdl_util_make_frame_obj(
@@ -580,6 +647,7 @@ pub fn build_capdl_spec(
                 PD_TCB_CAP_IDX as u32,
                 capdl_util_make_tcb_cap(pd_tcb_obj_id),
             ));
+            println!("add tcb cap: {:?}", pd_tcb_obj_id);
         }
 
         // Allow PD to access their own VSpace for ops such as cache cleaning on ARM.
@@ -777,6 +845,7 @@ pub fn build_capdl_spec(
                 ioport_cap,
             ));
         }
+        println!("TEST TEST TEST");
 
         // Step 3-11 Create VM Spec.
         if let Some(virtual_machine) = &pd.virtual_machine {
@@ -1177,6 +1246,8 @@ pub fn build_capdl_spec(
         obj_name_to_old_id.insert(obj.name.as_ref().unwrap().clone(), id.into());
     }
 
+    println!("Vcpu bit size: {:?}", ObjectType::Vcpu.fixed_size_bits(kernel_config).unwrap());
+    println!("Tcb bit size: {:?}", ObjectType::Tcb.fixed_size_bits(kernel_config).unwrap());
     // Step 6-2
     spec_container.spec.objects.sort_by(|a, b| {
         // Objects with paddrs always come first.

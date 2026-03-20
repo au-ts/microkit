@@ -452,6 +452,7 @@ SUPPORTED_CONFIGS = (
         kernel_options={
             "KernelDebugBuild": False,
             "KernelVerificationBuild": False,
+            "KernelPrinting": True,
             "KernelBenchmarks": "track_utilisation",
             "KernelSignalFastpath": True,
         },
