@@ -631,9 +631,9 @@ pub fn build_capdl_spec(
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
     let mut vspace_ids = vec![ObjectId(0); 128];
-    return Err(format!("thsi ajlefjl    jfla sj"));
+    let mut unmapped_frames: Vec<(u64, ObjectId, usize)> = Vec::new(); // vector of tuple of frame cap, frame id and index of pd which owns frame.
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
-        let mut unmapped_frames: Vec<(u64, ObjectId, usize)> = Vec::new(); // vector of tuple of frame cap, frame id and index of pd which owns frame.
+        
         let mut frame_cap_counter = 0;
         let elf_obj = &elfs[pd_global_idx];
 
@@ -1056,89 +1056,7 @@ pub fn build_capdl_spec(
 /// 
 
         ///////////////////////////////////////////////////////////////////////////////////////////////
-        
-        // Maybe I can move this down to around 1200 and I think the problem might be solved...
-        // add the unmapped frames to the pager's elf
-        if let Some((pager_idx, pd)) = system.protection_domains.iter().enumerate().find(|(_, pd)| pd.name.eq("pager")) {
-            // put the pager inside the memory region that we find.
-            
-            // first i need to convert unmapped_frames into contiguous memory.
-            let unmapped_frames_data = serde_json::to_string(&unmapped_frames).unwrap().as_bytes().to_owned(); // TODO: This is very dodgy, doubt that this would work.
-            let top_addr = find_free_contiguous_memory(&mr_name_to_frames, pd, elfs, pager_idx, kernel_config, unmapped_frames_data.len() as u64, &mut spec_container).unwrap();
-            let base_addr = (top_addr - (unmapped_frames_data.len() as u64)) as u64;
-            
-            let mut frame_base = round_down(base_addr, PageSize::Small as u64);
-            let num_frames = (top_addr - frame_base + (PageSize::Small as u64) - 1) / (PageSize::Small as u64);
-            let pd_vspace_obj_id =  vspace_ids[pager_idx];
-            let mut dest_offset = 0;
-            for i in 0..num_frames { 
-                let mut frame_fill = Fill {
-                    entries: [].to_vec(),
-                };
-                let end = std::cmp::min(dest_offset + PageSize::Small as usize, unmapped_frames_data.len());
-                let len = end - dest_offset;
-                
-                // fill the frames. 
-                frame_fill.entries.push(FillEntry { // the fillentry content must be elfcontent somehow....
-                    range: Range { start: 0, end: PageSize::Small as u64 }, 
-                    content: FillEntryContent::Data(FrameData::Bytes(
-                        ByteData {
-                            data: unmapped_frames_data[dest_offset..end].into(),
-                        }
-                    )
-                    )
-                });
-                dest_offset += len;
-
-                let frame_obj_id = capdl_util_make_frame_obj(
-                    &mut spec_container,
-                    frame_fill,
-                    &format!("elf_frames_"),
-                    None,
-                    PageSize::Small.fixed_size_bits(kernel_config) as u8,
-                );
-                let frame_cap = capdl_util_make_frame_cap(
-                    frame_obj_id,
-                    true,
-                    true,
-                    true,
-                    true,
-                );
-                match map_page(
-                    &mut spec_container,
-                    kernel_config,
-                    &pd.name,
-                    pd_vspace_obj_id,
-                    frame_cap,
-                    PageSize::Small as u64,
-                    frame_base,
-                ) {
-                    Ok(_) => {
-                        frame_base += i * (PageSize::Small as u64);
-                    }
-                    Err(map_err_reason) => {
-                        // return Err(format!(
-                        //     "\n... {:x} many pages mapped\n\nFailed to map frame for page table data range at vaddr: {:x} because: {:?}",
-                        //     round_down(base_addr, PageSize::Small as u64), frame_base, map_err_reason
-                        // ))
-                        println!("there had ben changewu\n");
-                        return Err(format!("index num is {i}\n"));
-                    }
-                };
-            }
-
-            // let cur_vaddr = find_memory_for_symbol(&mr_name_to_frames, pd, elfs, pager_idx, kernel_config, , &mut spec_container);
-            // JOSHUA TODO: i need to find a way to convert the vec into bytes.
-            // TODO: this symbol should become u64
-            elfs[pager_idx].write_symbol("unmapped_frames_addr", &base_addr.to_ne_bytes());
-            // TODO: this symbol should become u64
-            elfs[pager_idx].write_symbol("num_frames", &unmapped_frames.len().to_ne_bytes());
-            // TODO: I also need to send vspace cap id's over, this should just be an array of size 128...
-            elfs[pager_idx].write_symbol("vspaces", vspace_ids.iter().flat_map(|&f| f.0.to_ne_bytes()).collect::<Vec<_>>().as_slice());
-            // the vspace of the pager.
-            elfs[pager_idx].write_symbol("pager_vspace", &vspace_ids[pager_idx].0.to_ne_bytes());
-        } else {
-            for map in pd.maps.iter() {
+        for map in pd.maps.iter() {
             if unbacked_mrs.contains(&map.mr) {
                 create_page_structure_recursive(
                     top_pt_level_number(kernel_config), 
@@ -1175,7 +1093,9 @@ pub fn build_capdl_spec(
                 }
             }
         }
-        }
+        // Maybe I can move this down to around 1200 and I think the problem might be solved...
+        // add the unmapped frames to the pager's elf 
+            
         ////////////////////////////////////////////////////////////////////////////
         // Step 3-14 Set the TCB parameters and all the various caps that we need to bind to this TCB.
         if let Object::Tcb(pd_tcb) = &mut spec_container
@@ -1221,6 +1141,86 @@ pub fn build_capdl_spec(
                 capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0),
             );
         }
+    }
+
+    if let Some((pager_idx, pd)) = system.protection_domains.iter().enumerate().find(|(_, pd)| pd.name.eq("pager")) {
+        // put the pager inside the memory region that we find.
+        
+        // first i need to convert unmapped_frames into contiguous memory.
+        let unmapped_frames_data = serde_json::to_string(&unmapped_frames).unwrap().as_bytes().to_owned(); // TODO: This is very dodgy, doubt that this would work.
+        let top_addr = find_free_contiguous_memory(&mr_name_to_frames, pd, elfs, pager_idx, kernel_config, unmapped_frames_data.len() as u64, &mut spec_container).unwrap();
+        let base_addr = (top_addr - (unmapped_frames_data.len() as u64)) as u64;
+        // let base_addr = 0x900000000000;
+        let mut frame_base = round_down(base_addr, PageSize::Small as u64);
+        // let num_frames = (top_addr - frame_base + (PageSize::Small as u64) - 1) / (PageSize::Small as u64);
+        let num_frames = unmapped_frames_data.len();
+        let pd_vspace_obj_id =  vspace_ids[pager_idx];
+        let mut dest_offset = 0;
+        for i in 0..num_frames { 
+            let mut frame_fill = Fill {
+                entries: [].to_vec(),
+            };
+            let end = std::cmp::min(dest_offset + PageSize::Small as usize, unmapped_frames_data.len());
+            let len = end - dest_offset;
+            
+            // fill the frames. 
+            let mut data = 
+            frame_fill.entries.push(FillEntry { // the fillentry content must be elfcontent somehow....
+                range: Range { start: 0, end: len as u64 }, 
+                content: FillEntryContent::Data(FrameData::Bytes(
+                    ByteData {
+                        data: unmapped_frames_data[dest_offset..end].into(),
+                    }
+                )
+                )
+            });
+            dest_offset += len;
+
+            let frame_obj_id = capdl_util_make_frame_obj(
+                &mut spec_container,
+                frame_fill,
+                &format!("elf_frames_{}", i),
+                None,
+                PageSize::Small.fixed_size_bits(kernel_config) as u8,
+            );
+            let frame_cap = capdl_util_make_frame_cap(
+                frame_obj_id,
+                true,
+                true,
+                true,
+                true,
+            );
+            match map_page(
+                &mut spec_container,
+                kernel_config,
+                &pd.name,
+                pd_vspace_obj_id,
+                frame_cap,
+                PageSize::Small as u64,
+                frame_base,
+            ) {
+                Ok(_) => {
+                    frame_base += (PageSize::Small as u64);
+                }
+                Err(map_err_reason) => {
+                    return Err(format!(
+                        "\n... {}/{} many pages mapped\n\nFailed to map frame for page table data range at vaddr: {:x} because: {:?}",
+                        i, num_frames, frame_base, map_err_reason
+                    ))
+                }
+            };
+        }
+
+        // let cur_vaddr = find_memory_for_symbol(&mr_name_to_frames, pd, elfs, pager_idx, kernel_config, , &mut spec_container);
+        // JOSHUA TODO: i need to find a way to convert the vec into bytes.
+        // TODO: this symbol should become u64
+        elfs[pager_idx].write_symbol("unmapped_frames_addr", &base_addr.to_ne_bytes());
+        // TODO: this symbol should become u64
+        elfs[pager_idx].write_symbol("num_frames", &unmapped_frames.len().to_ne_bytes());
+        // TODO: I also need to send vspace cap id's over, this should just be an array of size 128...
+        elfs[pager_idx].write_symbol("vspaces", vspace_ids.iter().flat_map(|&f| f.0.to_ne_bytes()).collect::<Vec<_>>().as_slice());
+        // the vspace of the pager.
+        elfs[pager_idx].write_symbol("pager_vspace", &vspace_ids[pager_idx].0.to_ne_bytes());
     }
 
     // *********************************

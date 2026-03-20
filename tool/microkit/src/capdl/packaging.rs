@@ -26,7 +26,7 @@ pub fn pack_spec_into_initial_task(
         |_| embed_frames,
         |d, buf| {
                 match d {
-                FrameData::Elf(elf_content) => {
+                    FrameData::Elf(elf_content) => {
                     buf.copy_from_slice(
                         &system_elfs[elf_content.elf_id].segments[elf_content.elf_seg_idx].data()[elf_content.elf_seg_data_range.clone()],
                     );
@@ -34,7 +34,7 @@ pub fn pack_spec_into_initial_task(
                 FrameData::Bytes(byte_content) => {
                     buf.copy_from_slice(&byte_content.data);
                 }
-            }
+                }
             compress_frames
         },
     );
