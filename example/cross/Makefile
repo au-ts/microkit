@@ -42,7 +42,7 @@ endif
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
 CFLAGS := -nostdlib -ffreestanding -g -O3 -Wall -Werror -Wno-unused-function \
-          -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
+          -I$(BOARD_DIR)/include/pancake-c-interop $(CFLAGS_ARCH)
 
 LDFLAGS := -L$(BOARD_DIR)/lib
 

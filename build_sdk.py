@@ -627,18 +627,25 @@ def build_sel4(
     shutil.copy(invocations_all, dest)
     dest.chmod(0o744)
 
-    include_dir = root_dir / "board" / board.name / config.name / "include"
-    for source in ("kernel_Config", "libsel4", "libsel4/sel4_Config", "libsel4/autoconf"):
+    def copy_kernel_includes(target_dir, source_dir):
         source_dir = sel4_install_dir / source / "include"
         for p in source_dir.rglob("*"):
             if not p.is_file():
                 continue
             rel = p.relative_to(source_dir)
-            dest = include_dir / rel
+            dest = target_dir / rel
             dest.parent.mkdir(exist_ok=True, parents=True)
             dest.unlink(missing_ok=True)
             shutil.copy(p, dest)
             dest.chmod(0o744)
+
+    for source in ("kernel_Config", "libsel4", "libsel4/sel4_Config", "libsel4/autoconf"):
+        source_dir = sel4_install_dir / source / "include"
+        copy_kernel_includes(root_dir / "board" / board.name / config.name / "include", source_dir)
+        copy_kernel_includes(
+            root_dir / "board" / board.name / config.name / "include" / "pancake-c-interop",
+            source_dir
+        )
 
     if not board.arch.is_x86():
         # only non-x86 platforms have this file to describe memory regions
