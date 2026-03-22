@@ -87,6 +87,9 @@ const PD_MONITOR_EP_CAP_IDX: u64 = 5;
 // Valid only in benchmark configuration.
 const PD_TCB_CAP_IDX: u64 = 6;
 const PD_ARM_SMC_CAP_IDX: u64 = 7;
+// Valid only when the bound vCPU has "x86_apicv_guest_access_addr"
+const X86_APIC_ACCESS_FRAME_CAP_IDX: u64 = 8;
+const X86_VIRTUAL_APIC_FRAME_CAP_IDX: u64 = 9;
 
 const PD_BASE_OUTPUT_NOTIFICATION_CAP: u64 = 10;
 const PD_BASE_OUTPUT_ENDPOINT_CAP: u64 = PD_BASE_OUTPUT_NOTIFICATION_CAP + 64;
@@ -103,6 +106,9 @@ const PD_SCHEDCONTEXT_EXTRA_SIZE_BITS: u64 = PD_SCHEDCONTEXT_EXTRA_SIZE.ilog2() 
 
 pub const SLOT_BITS: u64 = 5;
 pub const SLOT_SIZE: u64 = 1 << SLOT_BITS;
+
+pub const X86_APIC_ACCESS_MAP_VADDR: u64 = 0x100000;
+pub const X86_VIRTUAL_APIC_MAP_VADDR: u64 = 0x101000;
 
 pub type FrameFill = Fill<FillContent>;
 pub type CapDLNamedObject = NamedObject<FrameFill>;
@@ -857,6 +863,87 @@ pub fn build_capdl_spec(
                     TcbBoundSlot::X86Eptpml4 as u32,
                     vm_vspace_cap,
                 ));
+
+                // If APICv is enabled then create the 2 pages, map then insert them into the PD CSpace
+                // so that libmicrokit have the correct caps to make the seL4_X86_VCPU_SetAPICvPages call
+                // Then map the access page to guest ram at the address in SDF.
+                if let Some(x86_apicv_gpa) = vcpu.x86_apicv_gpa_maybe {
+                    let apic_access_frame_obj_id = capdl_util_make_frame_obj(
+                        &mut spec_container,
+                        Fill {
+                            entries: [].to_vec(),
+                        },
+                        &format!("{}_{}_apic_access", virtual_machine.name, vcpu.id),
+                        None,
+                        PageSize::Small.fixed_size_bits(kernel_config) as u8,
+                    );
+
+                    let apic_access_frame_cap = capdl_util_make_frame_cap(
+                        apic_access_frame_obj_id,
+                        true,
+                        true,
+                        false,
+                        true,
+                    );
+
+                    map_page(
+                        &mut spec_container,
+                        kernel_config,
+                        &pd.name,
+                        pd_vspace_obj_id,
+                        apic_access_frame_cap.clone(),
+                        PageSize::Small as u64,
+                        X86_APIC_ACCESS_MAP_VADDR,
+                    )?;
+
+                    caps_to_insert_to_pd_cspace.push(capdl_util_make_cte(
+                        X86_APIC_ACCESS_FRAME_CAP_IDX as u32,
+                        apic_access_frame_cap.clone(),
+                    ));
+
+                    let virtual_apic_frame_obj_id = capdl_util_make_frame_obj(
+                        &mut spec_container,
+                        Fill {
+                            entries: [].to_vec(),
+                        },
+                        &format!("{}_{}_virtual_apic", virtual_machine.name, vcpu.id),
+                        None,
+                        PageSize::Small.fixed_size_bits(kernel_config) as u8,
+                    );
+
+                    let virtual_apic_frame_cap = capdl_util_make_frame_cap(
+                        virtual_apic_frame_obj_id,
+                        true,
+                        true,
+                        false,
+                        true,
+                    );
+
+                    map_page(
+                        &mut spec_container,
+                        kernel_config,
+                        &pd.name,
+                        pd_vspace_obj_id,
+                        virtual_apic_frame_cap.clone(),
+                        PageSize::Small as u64,
+                        X86_VIRTUAL_APIC_MAP_VADDR,
+                    )?;
+
+                    caps_to_insert_to_pd_cspace.push(capdl_util_make_cte(
+                        X86_VIRTUAL_APIC_FRAME_CAP_IDX as u32,
+                        virtual_apic_frame_cap,
+                    ));
+
+                    map_page(
+                        &mut spec_container,
+                        kernel_config,
+                        &virtual_machine.name,
+                        vm_vspace_obj_id,
+                        apic_access_frame_cap,
+                        PageSize::Small as u64,
+                        x86_apicv_gpa,
+                    )?;
+                }
             } else {
                 for (vcpu_idx, vcpu) in virtual_machine.vcpus.iter().enumerate() {
                     // All vCPUs get to access the same address space.

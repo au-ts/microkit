@@ -21,6 +21,9 @@ typedef seL4_MessageInfo_t microkit_msginfo;
 #define TCB_CAP 6
 /* Only valid when the PD has been configured to make SMC calls */
 #define ARM_SMC_CAP 7
+/* The following two caps is only valid when the bound vCPU have "x86_apicv" = "true" */
+#define X86_APIC_ACCESS_FRAME_CAP 8
+#define X86_VIRTUAL_APIC_FRAME_CAP 9
 #define BASE_OUTPUT_NOTIFICATION_CAP 10
 #define BASE_ENDPOINT_CAP 74
 #define BASE_IRQ_CAP 138
@@ -52,6 +55,13 @@ extern seL4_Word microkit_irqs;
 extern seL4_Word microkit_notifications;
 extern seL4_Word microkit_pps;
 extern seL4_Word microkit_ioports;
+
+/* x86: Symbols indicating whether APICv is turned on for the bound vCPU and where they are mapped. */
+#ifdef CONFIG_INTEL_APICV
+extern seL4_Word microkit_x86_apicv_on;
+extern void *microkit_x86_apic_access_page_vaddr;
+extern void *microkit_x86_virtual_apic_page_vaddr;
+#endif /* CONFIG_INTEL_APICV */
 
 /*
  * Output a single character on the debug console.

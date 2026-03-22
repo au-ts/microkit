@@ -306,6 +306,7 @@ pub struct VirtualCpu {
     pub id: u64,
     pub setvar_id: Option<String>,
     pub cpu: Option<CpuCore>,
+    pub x86_apicv_gpa_maybe: Option<u64>,
 }
 
 /// To avoid code duplication for handling protection domains
@@ -1221,7 +1222,11 @@ impl VirtualMachine {
             let child_name = child.tag_name().name();
             match child_name {
                 "vcpu" => {
-                    check_attributes(xml_sdf, &child, &["id", "setvar_id", "cpu"])?;
+                    check_attributes(
+                        xml_sdf,
+                        &child,
+                        &["id", "setvar_id", "cpu", "x86_apicv_guest_access_addr"],
+                    )?;
                     let id = checked_lookup(xml_sdf, &child, "id")?
                         .parse::<u64>()
                         .unwrap();
@@ -1230,6 +1235,23 @@ impl VirtualMachine {
                             xml_sdf,
                             &child,
                             format!("id must be < {}", VCPU_MAX_ID + 1),
+                        ));
+                    }
+
+                    let x86_apicv_gpa_maybe = if let Some(xml_x86_apicv_gpa) =
+                        child.attribute("x86_apicv_guest_access_addr")
+                    {
+                        Some(sdf_parse_number(xml_x86_apicv_gpa, &child)?)
+                    } else {
+                        // Default to disabled
+                        None
+                    };
+
+                    if x86_apicv_gpa_maybe.is_some() && config.arch != Arch::X86_64 {
+                        return Err(value_error(
+                            xml_sdf,
+                            &child,
+                            "x86_apicv_guest_access_addr is only supported on x86".to_string(),
                         ));
                     }
 
@@ -1268,7 +1290,12 @@ impl VirtualMachine {
                         None
                     };
 
-                    vcpus.push(VirtualCpu { id, setvar_id, cpu });
+                    vcpus.push(VirtualCpu {
+                        id,
+                        setvar_id,
+                        cpu,
+                        x86_apicv_gpa_maybe,
+                    });
                 }
                 "map" => {
                     // Virtual machines do not have program images and so we do not allow

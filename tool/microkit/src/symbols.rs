@@ -7,6 +7,7 @@
 use std::{cmp::min, collections::HashMap};
 
 use crate::{
+    capdl::{X86_APIC_ACCESS_MAP_VADDR, X86_VIRTUAL_APIC_MAP_VADDR},
     elf::ElfFile,
     sdf::{self, SysMemoryRegion, SystemDescription},
     sel4::{Arch, Config},
@@ -135,7 +136,7 @@ pub fn patch_symbols(
             .write_symbol("microkit_ioports", &pd.ioport_bits().to_le_bytes())
             .unwrap();
 
-        let mut symbols_to_write: Vec<(&String, u64)> = Vec::new();
+        let mut symbols_to_write: Vec<(&str, u64)> = Vec::new();
         for setvar in pd.setvars.iter() {
             // Check that the symbol exists in the ELF
             match elf_obj.find_symbol(&setvar.symbol) {
@@ -173,6 +174,23 @@ pub fn patch_symbols(
                 }
             }
         }
+
+        if let Some(vm) = &pd.virtual_machine {
+            if kernel_config.arch == Arch::X86_64
+                && vm.vcpus.first().unwrap().x86_apicv_gpa_maybe.is_some()
+            {
+                symbols_to_write.push(("microkit_x86_apicv_on", 1));
+                symbols_to_write.push((
+                    "microkit_x86_apic_access_page_vaddr",
+                    X86_APIC_ACCESS_MAP_VADDR,
+                ));
+                symbols_to_write.push((
+                    "microkit_x86_virtual_apic_page_vaddr",
+                    X86_VIRTUAL_APIC_MAP_VADDR,
+                ));
+            }
+        }
+
         let elf_obj = &mut pd_elf_files[pd_global_idx];
         for (sym_name, value) in symbols_to_write.iter() {
             elf_obj
