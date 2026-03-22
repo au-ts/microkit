@@ -425,6 +425,7 @@ SUPPORTED_BOARDS = (
             "KernelSupportPCID": False,
             "KernelVTX": True,
             "KernelX86_64VTX64BitGuests": True,
+            "KernelIntelApicv": True,
         } | DEFAULT_KERNEL_OPTIONS_X86_64,
     ),
 )

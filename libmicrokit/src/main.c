@@ -32,6 +32,12 @@ seL4_Word microkit_notifications;
 seL4_Word microkit_pps;
 seL4_Word microkit_ioports;
 
+#ifdef CONFIG_INTEL_APICV
+seL4_Word microkit_x86_apicv_on;
+void *microkit_x86_apic_access_page_vaddr;
+void *microkit_x86_virtual_apic_page_vaddr;
+#endif /* CONFIG_INTEL_APICV */
+
 extern seL4_IPCBuffer __sel4_ipc_buffer_obj;
 
 seL4_IPCBuffer *__sel4_ipc_buffer = &__sel4_ipc_buffer_obj;
@@ -127,6 +133,13 @@ static void handler_loop(void)
 void main(void)
 {
     run_init_funcs();
+
+#ifdef CONFIG_INTEL_APICV
+    if (microkit_x86_apicv_on) {
+        seL4_X86_VCPU_SetAPICvPages(BASE_VCPU_CAP, X86_APIC_ACCESS_FRAME_CAP, X86_VIRTUAL_APIC_FRAME_CAP);
+    }
+#endif /* CONFIG_INTEL_APICV */
+
     init();
 
     /*
