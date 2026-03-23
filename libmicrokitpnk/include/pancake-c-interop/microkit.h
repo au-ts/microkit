@@ -133,7 +133,7 @@ static inline seL4_Word microkit_mr_get(seL4_Uint8 mr)
     return seL4_GetMR(mr);
 }
 
-seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
+__attribute__((weak)) seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
 {
     microkit_dbg_puts(microkit_name);
     microkit_dbg_puts(" is missing the 'fault' entry point, unsupported for C PDs on Pancake Microkit\n");
@@ -141,3 +141,10 @@ seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo
     return seL4_False;
 }
 
+__attribute__((weak)) microkit_msginfo protected(microkit_channel ch, microkit_msginfo msginfo)
+{
+    microkit_dbg_puts(microkit_name);
+    microkit_dbg_puts(" is missing the 'protected' entry point\n");
+    microkit_internal_crash(0);
+    return seL4_MessageInfo_new(0, 0, 0, 0);
+}
