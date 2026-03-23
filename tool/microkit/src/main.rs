@@ -25,11 +25,12 @@ use microkit_tool::symbols::patch_symbols;
 use microkit_tool::util::{
     human_size_strict, round_down, round_up,
 };
-use microkit_tool::sdkparse::{SdkInfo};
+use microkit_tool::sdkparse::{AvailableConfig, SdkInfo};
 use microkit_tool::argparse::{Args, ArgsError, RequestedImageType};
 use microkit_tool::argparse;
 use microkit_tool::jsonparse;
 use microkit_tool::{DisjointMemoryRegion, MemoryRegion};
+use microkit_tool::sdf::SystemDescription;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -121,6 +122,7 @@ enum MainError {
     MissingArmPaSizeBits,
     Aarch64HypervisorRequired,
     UnsupportedWordSize { word_size: u64 },
+    CannotParseElf { description: String, path: PathBuf, source: String },
 }
 
 impl fmt::Display for MainError {
@@ -150,6 +152,9 @@ impl fmt::Display for MainError {
             }
             Self::UnsupportedWordSize { word_size } => {
                 write!(f, "Microkit requires 64-bit word size, found {}", word_size)
+            }
+            Self::CannotParseElf { description, .. } => {
+                write!(f, "failed to parse {description}")
             }
         }
     }
@@ -286,6 +291,55 @@ fn build_kernel_config(
     Ok(kernel_config)
 }
 
+
+fn load_system_elfs(
+    system: &SystemDescription,
+    config: &AvailableConfig,
+    args: &Args,
+    sdkinfo: &SdkInfo,
+) -> Result<Vec<ElfFile>, MainError> {
+    let search_paths =
+        std::iter::once(sdkinfo.cwd.clone())
+            .chain(args.search_paths.iter().map(PathBuf::from))
+            .collect();
+    let monitor_elf = match ElfFile::from_path(&config.monitor_elf_path()) {
+        Ok(result) => result,
+        Err(source) => return Err(MainError::CannotParseElf {
+            description: "monitor ELF".to_string(),
+            path: config.monitor_elf_path(),
+            source,
+        }),
+    };
+
+    // This list refers to all PD ELFs as well as the Monitor ELF.
+    // The monitor is just a special PD.
+    let mut system_elfs = Vec::with_capacity(system.protection_domains.len() + 1);
+
+    for pd in &system.protection_domains {
+        let path = match get_full_path(&pd.program_image, &search_paths) {
+            Some(result) => result,
+            None => return Err(MainError::MissingPath {
+                description: "program image",
+                path: pd.program_image.clone(),
+            }),
+        };
+        let elf = match ElfFile::from_path(&path) {
+            Ok(result) => result,
+            Err(source) => return Err(MainError::CannotParseElf {
+                description: format!("ELF for PD '{}'", pd.name),
+                path: config.monitor_elf_path(),
+                source,
+            }),
+        };
+        system_elfs.push(elf);
+    }
+
+    system_elfs.push(monitor_elf);
+
+    Ok(system_elfs)
+}
+
+
 fn main() -> Result<(), String> {
     let sdkinfo = match SdkInfo::discover() {
         Ok(discovered_info) => { discovered_info }
@@ -416,7 +470,8 @@ fn main() -> Result<(), String> {
             }
         }
     };
-
+//TODO:HERE
+///////////////////////////////////////////////////////////////////////////////
     let monitor_elf = ElfFile::from_path(&monitor_elf_path).unwrap_or_else(|e| {
         eprintln!(
             "ERROR: failed to parse monitor ELF ({}): {}",
@@ -461,6 +516,7 @@ fn main() -> Result<(), String> {
 
     // The monitor is just a special PD
     system_elfs.push(monitor_elf);
+///////////////////////////////////////////////////////////////////////////////
 
     let mut capdl_initialiser = CapDLInitialiser::new(capdl_initialiser_elf);
 
