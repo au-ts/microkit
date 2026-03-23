@@ -581,6 +581,7 @@ pub fn build_capdl_spec(
     for mr in system.memory_regions.iter() {
         mr_name_to_mr.insert(&mr.name, &mr);
         if (!mr.backed) {
+            println!("HERE111111\n");
             unbacked_mrs.insert(&mr.name);
         }
         let mut frame_ids = Vec::new();
@@ -1217,6 +1218,7 @@ pub fn build_capdl_spec(
         elfs[pager_idx].write_symbol("unmapped_frames_addr", &base_addr.to_ne_bytes());
         // TODO: this symbol should become u64
         elfs[pager_idx].write_symbol("num_frames", &unmapped_frames.len().to_ne_bytes());
+        println!("NUMBER OF FRAMES: {}\n", unmapped_frames.len());
         // TODO: I also need to send vspace cap id's over, this should just be an array of size 128...
         elfs[pager_idx].write_symbol("vspaces", vspace_ids.iter().flat_map(|&f| f.0.to_ne_bytes()).collect::<Vec<_>>().as_slice());
         // the vspace of the pager.
