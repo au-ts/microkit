@@ -257,6 +257,20 @@ fn build_kernel_config(
     Ok(kernel_config)
 }
 
+fn load_elf(
+    path: impl Into<PathBuf>,
+    description: impl Into<String>,
+) -> Result<ElfFile, MainError> {
+    let path = path.into();
+    match ElfFile::from_path(&path) {
+      Ok(result) => Ok(result),
+      Err(source) => Err(MainError::CannotParseElf {
+          description: description.into(),
+          path,
+          source,
+      }),
+    }
+}
 
 fn load_system_elfs(
     system: &SystemDescription,
@@ -268,14 +282,7 @@ fn load_system_elfs(
         std::iter::once(sdkinfo.cwd.clone())
             .chain(args.search_paths.iter().map(PathBuf::from))
             .collect();
-    let monitor_elf = match ElfFile::from_path(&config.monitor_elf_path()) {
-        Ok(result) => result,
-        Err(source) => return Err(MainError::CannotParseElf {
-            description: "monitor ELF".to_string(),
-            path: config.monitor_elf_path(),
-            source,
-        }),
-    };
+    let monitor_elf = load_elf(&config.monitor_elf_path(), "monitor ELF")?;
 
     // This list refers to all PD ELFs as well as the Monitor ELF.
     // The monitor is just a special PD.
@@ -289,14 +296,7 @@ fn load_system_elfs(
                 path: pd.program_image.clone(),
             }),
         };
-        let elf = match ElfFile::from_path(&path) {
-            Ok(result) => result,
-            Err(source) => return Err(MainError::CannotParseElf {
-                description: format!("ELF for PD '{}'", pd.name),
-                path: config.monitor_elf_path(),
-                source,
-            }),
-        };
+        let elf = load_elf(path, format!("ELF for PD '{}'", pd.name))?;
         system_elfs.push(elf);
     }
 
@@ -383,27 +383,11 @@ fn main() -> Result<(), String> {
     let current_config: &AvailableConfig =
         sdkinfo.select(&args.board, &args.config).unwrap();
 
-    // the real work begins here
-    let elf_path = current_config.config_dir.join("elf");
-    let loader_elf_path = elf_path.join("loader.elf");
-    let kernel_elf_path = elf_path.join("sel4.elf");
-    let capdl_init_elf_path = elf_path.join("initialiser.elf");
-    let kernel_config_path =
-        current_config.config_dir.join("include/kernel/gen_config.json");
-    let invocations_all_path =
-        current_config.config_dir.join("invocations_all.json");
-    // bail_if_not_exists("board ELF directory", &elf_path)?;
-    // bail_if_not_exists("kernel ELF", &kernel_elf_path)?;
-    // bail_if_not_exists("monitor ELF", &monitor_elf_path)?;
-    // bail_if_not_exists("CapDL initialiser ELF", &capdl_init_elf_path)?;
-    // bail_if_not_exists("kernel configuration file", &kernel_config_path)?;
-    // bail_if_not_exists("invocations JSON file", &invocations_all_path)?;
-
     let kernel_config: Config = match build_kernel_config(
         &args,
         current_config.config_dir.as_path(),
-        &kernel_config_path,
-        &invocations_all_path,
+        &current_config.kernel_config_path(),
+        &current_config.invocations_all_path(),
     ) {
         Ok(kernel_config) => kernel_config,
         Err(err) => {
@@ -424,13 +408,6 @@ fn main() -> Result<(), String> {
         }
     };
 
-    if kernel_config.arch != Arch::X86_64 {
-        if let Err(err) = bail_if_not_exists("loader ELF", &loader_elf_path) {
-            eprintln!("microkit: error: {err}");
-            std::process::exit(1);
-        }
-    }
-
     let sdf_xml_contents: String = match fs::read_to_string(&args.sdf_path) {
         Ok(result) => result,
         Err(err) => {
@@ -447,26 +424,24 @@ fn main() -> Result<(), String> {
         }
     };
 
-    let capdl_initialiser_elf = ElfFile::from_path(&capdl_init_elf_path).unwrap_or_else(|e| {
-        eprintln!(
-            "ERROR: failed to parse initialiser ELF ({}): {}",
-            capdl_init_elf_path.display(),
-            e
-        );
-        std::process::exit(1);
-    });
+    let capdl_initialiser_elf = match load_elf(current_config.capdl_init_elf_path(), "initialiser ELF") {
+        Ok(result) => result,
+        Err(err) => {
+            eprintln!("microkit: error: {err}");
+            std::process::exit(1);
+        }
+    };
 
     let kernel_boot_type: KernelBootType = match kernel_config.arch {
         Arch::X86_64 => { KernelBootType::X86_64 }
         Arch::Aarch64 | Arch::Riscv64 => {
-            let kernel_elf = ElfFile::from_path(&kernel_elf_path).unwrap_or_else(|e| {
-                eprintln!(
-                    "ERROR: failed to parse kernel ELF ({}): {}",
-                    kernel_elf_path.display(),
-                    e
-                );
-                std::process::exit(1);
-            }); // TODO: improve error handling here
+            let kernel_elf = match load_elf(current_config.sel4_elf_path(), "kernel ELF") {
+                Ok(result) => result,
+                Err(err) => {
+                    eprintln!("microkit: error: {err}");
+                    std::process::exit(1);
+                }
+            };
 
             // Now determine how much memory we have after the kernel boots.
             let (available_memory, kernel_boot_region) =
@@ -490,6 +465,7 @@ fn main() -> Result<(), String> {
 
     let mut capdl_initialiser = CapDLInitialiser::new(capdl_initialiser_elf);
 
+    // The main loop for creating the CapDL spec and the final image.
     // Now build the capDL spec and final image. We may need to do this in >1 iterations on ARM and RISC-V
     // if there are Memory Regions without a paddr but subject to setvar region_paddr.
     let mut iteration = 0;
@@ -738,14 +714,14 @@ fn main() -> Result<(), String> {
                     Ok(size) => {
                         // Copy the kernel to the build directory as well so users doesn't have to dig through the SDK.
                         if let Err(copy_err) = fs::copy(
-                            &kernel_elf_path,
+                            current_config.sel4_elf_path(),
                             image_out_path.parent().unwrap().join(KERNEL_COPY_FILENAME),
                         ) {
                             eprintln!("ERROR: couldn't copy the kernel to image's output directory: {copy_err}");
                             std::process::exit(1);
                         }
                         if let Err(copy_err) = fs::copy(
-                            kernel_elf_path
+                            current_config.sel4_elf_path()
                                 .parent()
                                 .unwrap()
                                 .join(KERNEL32_COPY_FILENAME),
@@ -770,7 +746,7 @@ fn main() -> Result<(), String> {
                 KernelBootType::Static { ref kernel_elf, .. } => {
                     let loader = Loader::new(
                         &kernel_config,
-                        Path::new(&loader_elf_path),
+                        &current_config.loader_elf_path(),
                         kernel_elf,
                         &capdl_initialiser.elf,
                         capdl_initialiser.phys_base.unwrap(),

@@ -37,6 +37,9 @@ impl AvailableConfig {
     pub fn sel4_elf_path(&self) -> PathBuf {
         self.base_elf_path().join("sel4.elf")
     }
+    pub fn capdl_init_elf_path(&self) -> PathBuf {
+        self.base_elf_path().join("initialiser.elf")
+    }
     pub fn kernel_config_path(&self) -> PathBuf {
         self.config_dir.clone().join("include/kernel/gen_config.json")
     }
