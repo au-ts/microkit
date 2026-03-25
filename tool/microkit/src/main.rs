@@ -153,8 +153,8 @@ impl fmt::Display for MainError {
             Self::UnsupportedWordSize { word_size } => {
                 write!(f, "Microkit requires 64-bit word size, found {}", word_size)
             }
-            Self::CannotParseElf { description, .. } => {
-                write!(f, "failed to parse {description}")
+            Self::CannotParseElf { description, path, source } => {
+                write!(f, "failed to parse {description} (at {}, {source})", path.display())
             }
         }
     }
@@ -334,6 +334,7 @@ fn load_system_elfs(
         system_elfs.push(elf);
     }
 
+    // The monitor is just a special PD.
     system_elfs.push(monitor_elf);
 
     Ok(system_elfs)
@@ -372,13 +373,13 @@ fn main() -> Result<(), String> {
 
     // NB safe unwrap: argparse would already have bailed if the config did not
     // exist.
-    let current_config = sdkinfo.select(&args.board, &args.config).unwrap();
+    let current_config: &AvailableConfig =
+        sdkinfo.select(&args.board, &args.config).unwrap();
 
     // the real work begins here
     let elf_path = current_config.config_dir.join("elf");
     let loader_elf_path = elf_path.join("loader.elf");
     let kernel_elf_path = elf_path.join("sel4.elf");
-    let monitor_elf_path = elf_path.join("monitor.elf");
     let capdl_init_elf_path = elf_path.join("initialiser.elf");
     let kernel_config_path =
         current_config.config_dir.join("include/kernel/gen_config.json");
@@ -391,7 +392,7 @@ fn main() -> Result<(), String> {
     // bail_if_not_exists("kernel configuration file", &kernel_config_path)?;
     // bail_if_not_exists("invocations JSON file", &invocations_all_path)?;
 
-    let kernel_config = match build_kernel_config(
+    let kernel_config: Config = match build_kernel_config(
         &args,
         current_config.config_dir.as_path(),
         &kernel_config_path,
@@ -427,14 +428,18 @@ fn main() -> Result<(), String> {
         }
     }
 
-    let system_path = &args.sdf_path;
-    // bail_if_not_exists("system description file", &system_path)?;
-    let xml: String = fs::read_to_string(system_path).unwrap();
+    let sdf_xml_contents: String = match fs::read_to_string(&args.sdf_path) {
+        Ok(result) => result,
+        Err(err) => {
+            eprintln!("microkit: error: {err}");
+            std::process::exit(1);
+        }
+    };
 
-    let mut system = match parse(system_path.as_path(), &xml, &kernel_config) {
+    let mut system = match parse(&args.sdf_path, &sdf_xml_contents, &kernel_config) {
         Ok(system) => system,
         Err(err) => {
-            eprintln!("{err}");
+            eprintln!("microkit: error: {err}");
             std::process::exit(1);
         }
     };
@@ -470,53 +475,15 @@ fn main() -> Result<(), String> {
             }
         }
     };
-//TODO:HERE
-///////////////////////////////////////////////////////////////////////////////
-    let monitor_elf = ElfFile::from_path(&monitor_elf_path).unwrap_or_else(|e| {
-        eprintln!(
-            "ERROR: failed to parse monitor ELF ({}): {}",
-            monitor_elf_path.display(),
-            e
-        );
-        std::process::exit(1);
-    });
 
-    let mut search_paths = vec![std::env::current_dir().unwrap()];
-    for path in args.search_paths {
-        search_paths.push(PathBuf::from(path));
-    }
-
-    // This list refers to all PD ELFs as well as the Monitor ELF.
-    // The monitor is very similar to a PD so it is useful to pass around
-    // a list like this.
-    let mut system_elfs = Vec::with_capacity(system.protection_domains.len());
-    // Get the elf files for each pd:
-    for pd in &system.protection_domains {
-        match get_full_path(&pd.program_image, &search_paths) {
-            Some(path) => match ElfFile::from_path(&path) {
-                Ok(elf) => system_elfs.push(elf),
-                Err(e) => {
-                    eprintln!(
-                        "ERROR: failed to parse ELF '{}' for PD '{}': {}",
-                        path.display(),
-                        pd.name,
-                        e
-                    );
-                    std::process::exit(1);
-                }
+    let mut system_elfs =
+        match load_system_elfs(&system, current_config, &args, &sdkinfo) {
+            Ok(result) => result,
+            Err(err) => {
+                eprintln!("microkit: error: {err}");
+                std::process::exit(1);
             },
-            None => {
-                return Err(format!(
-                    "unable to find program image: '{}'",
-                    pd.program_image.display()
-                ))
-            }
-        }
-    }
-
-    // The monitor is just a special PD
-    system_elfs.push(monitor_elf);
-///////////////////////////////////////////////////////////////////////////////
+        };
 
     let mut capdl_initialiser = CapDLInitialiser::new(capdl_initialiser_elf);
 
