@@ -58,40 +58,6 @@ fn get_full_path(path: &Path, search_paths: &Vec<PathBuf>) -> Option<PathBuf> {
     None
 }
 
-enum ImageOutputType {
-    Binary,
-    Elf,
-    Uimage,
-}
-
-impl ImageOutputType {
-    fn default_from_arch_and_board(arch: &Arch, board_name: &str) -> Self {
-        match board_name {
-            "ariane" | "cheshire" | "serengeti" => ImageOutputType::Elf,
-            _ => match arch {
-                Arch::Aarch64 => ImageOutputType::Binary,
-                Arch::Riscv64 => ImageOutputType::Uimage,
-                Arch::X86_64 => ImageOutputType::Elf,
-            },
-        }
-    }
-
-    fn based_on_requested(requested: &RequestedImageType, arch: &Arch, board_name: &str) -> Option<Self> {
-        match requested {
-            RequestedImageType::Binary => match arch {
-                Arch::Aarch64 | Arch::Riscv64 => Some(Self::Binary),
-                Arch::X86_64 => None,
-            },
-            RequestedImageType::Elf => Some(Self::Elf),
-            RequestedImageType::Uimage => match arch {
-                Arch::Riscv64 => Some(Self::Uimage),
-                Arch::X86_64 | Arch::Aarch64 => None,
-            },
-            RequestedImageType::Unspecified =>
-                Some(Self::default_from_arch_and_board(arch, board_name)),
-        }
-    }
-}
 
 enum KernelBootType {
     // The boot type used for x86_64 systems:
@@ -340,6 +306,47 @@ fn load_system_elfs(
     Ok(system_elfs)
 }
 
+enum ImageOutputType {
+    Binary,
+    Elf,
+    Uimage,
+}
+
+impl ImageOutputType {
+    fn default_from_arch_and_board(arch: &Arch, board_name: &str) -> Self {
+        match board_name {
+            "ariane" | "cheshire" | "serengeti" => ImageOutputType::Elf,
+            _ => match arch {
+                Arch::Aarch64 => ImageOutputType::Binary,
+                Arch::Riscv64 => ImageOutputType::Uimage,
+                Arch::X86_64 => ImageOutputType::Elf,
+            },
+        }
+    }
+
+    fn based_on_requested(requested: &RequestedImageType, arch: &Arch, board_name: &str) -> Result<Self, MainError> {
+        match requested {
+            RequestedImageType::Binary => match arch {
+                Arch::Aarch64 | Arch::Riscv64 => Ok(Self::Binary),
+                Arch::X86_64 => Err(MainError::UnsupportedImageType {
+                        requested: requested.clone(),
+                        arch: arch.clone(),
+                }),
+            },
+            RequestedImageType::Elf => Ok(Self::Elf),
+            RequestedImageType::Uimage => match arch {
+                Arch::Riscv64 => Ok(Self::Uimage),
+                Arch::X86_64 | Arch::Aarch64 => Err(MainError::UnsupportedImageType {
+                        requested: requested.clone(),
+                        arch: arch.clone(),
+                }),
+            },
+            RequestedImageType::Unspecified =>
+                Ok(Self::default_from_arch_and_board(arch, board_name)),
+        }
+    }
+}
+
 
 fn main() -> Result<(), String> {
     let sdkinfo = match SdkInfo::discover() {
@@ -410,12 +417,8 @@ fn main() -> Result<(), String> {
         &kernel_config.arch,
         args.board.as_str(),
     ) {
-        Some(image_output_type) => image_output_type,
-        None => {
-            let err = MainError::UnsupportedImageType {
-                requested: args.requested_image_type.clone(),
-                arch: kernel_config.arch,
-            };
+        Ok(result) => result,
+        Err(err) => {
             eprintln!("microkit: error: {err}");
             std::process::exit(1);
         }
