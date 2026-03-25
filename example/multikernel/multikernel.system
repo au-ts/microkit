@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright 2025, UNSW
+
+ SPDX-License-Identifier: BSD-2-Clause
+-->
+<system>
+    <protection_domain name="core0_A" priority="254" cpu="0" >
+        <program_image path="core0.elf" />
+    </protection_domain>
+
+    <protection_domain name="core0_B" priority="253" cpu="0" >
+        <program_image path="core0.elf" />
+    </protection_domain>
+
+    <channel>
+        <end pd="core0_A" id="5" />
+        <!-- to check ppc are ok on same core -->
+        <end pd="core0_B" id="5" pp="true" />
+    </channel>
+
+    <protection_domain name="core1" priority="254" cpu="1" >
+        <program_image path="core1.elf" />
+
+        <!-- XXX: These should be prevented since taken by core0. -->
+        <!--      Or just at all? Does it ever make sense to SGI IRQs? -->
+        <irq irq="66" id="1" />
+    </protection_domain>
+
+    <channel>
+        <end pd="core0_A" id="0" />
+        <end pd="core1"   id="0" />
+    </channel>
+<!--
+    Used for testing # irqs before crashing
+
+    <channel>
+        <end pd="core0_A" id="10" />
+        <end pd="core1"   id="10" />
+    </channel>
+
+    <channel>
+        <end pd="core0_A" id="11" />
+        <end pd="core1"   id="11" />
+    </channel>
+
+    <channel>
+        <end pd="core0_A" id="12" />
+        <end pd="core1"   id="12" />
+    </channel>
+
+    <channel>
+        <end pd="core0_A" id="13" />
+        <end pd="core1"   id="13" />
+    </channel> -->
+</system>
