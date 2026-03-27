@@ -13,6 +13,7 @@ use microkit_tool::capdl::allocation::{
 use microkit_tool::capdl::build_capdl_spec;
 use microkit_tool::capdl::initialiser::CapDLInitialiser;
 use microkit_tool::capdl::packaging::pack_spec_into_initial_task;
+use microkit_tool::capdl::CapDLSpecContainer;
 use microkit_tool::elf::ElfFile;
 use microkit_tool::loader::Loader;
 use microkit_tool::report::write_report;
@@ -36,16 +37,9 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fs::{self, metadata};
 use std::path::{Path, PathBuf};
+use std::ops::Range;
 
 const MAX_BUILD_ITERATION: usize = 3;
-
-// When building for x86, the kernel is copied from the SDK release package to the same
-// directory as the output boot module image, as Multiboot want them as
-// separate images.
-const KERNEL_COPY_FILENAME: &str = "sel4.elf";
-// The `-kernel` argument of 'qemu-system-x86_64' doesn't accept a 64-bit image, so we
-// also copy the 32-bit version that was prepared by build_sdk.py for convenience.
-const KERNEL32_COPY_FILENAME: &str = "sel4_32.elf";
 
 fn get_full_path(path: &Path, search_paths: &Vec<PathBuf>) -> Option<PathBuf> {
     for search_path in search_paths {
@@ -89,6 +83,11 @@ enum MainError {
     Aarch64HypervisorRequired,
     UnsupportedWordSize { word_size: u64 },
     CannotParseElf { description: String, path: PathBuf, source: String },
+    CannotPatchSymbols { source: String },
+    CannotBuildCapdlSpec { source: String },
+    CannotAllocate { details : String },
+    CannotAllocateKernelObject,
+    IterationsExceeded,
 }
 
 impl fmt::Display for MainError {
@@ -121,6 +120,24 @@ impl fmt::Display for MainError {
             }
             Self::CannotParseElf { description, path, source } => {
                 write!(f, "failed to parse {description} (at {}, {source})", path.display())
+            }
+            Self::CannotPatchSymbols { source } => {
+                write!(f, "{source}")
+            }
+            Self::CannotBuildCapdlSpec { source } => {
+                write!(f, "{source}")
+            }
+            Self::CannotAllocate { details } => {
+                write!(f, "{details}")
+            }
+            Self::CannotAllocateKernelObject => {
+                write!(
+                    f,
+                    "could not allocate all required kernel objects, please see report for more details."
+                )
+            }
+            Self::IterationsExceeded => {
+                write!(f, "fatal, failed to build system in {} iterations", MAX_BUILD_ITERATION)
             }
         }
     }
@@ -347,6 +364,20 @@ impl ImageOutputType {
     }
 }
 
+struct FinishedBuild {
+    capdl_initialiser: CapDLInitialiser,
+    spec_container: CapDLSpecContainer,
+    initialiser_vaddr_range: Range<u64>,
+    image: FinishedImage,
+}
+
+enum FinishedImage {
+    X86BootModule,
+    StaticBootModule {
+        kernel_elf: ElfFile,
+        image_output_type: ImageOutputType,
+    },
+}
 
 fn main() -> Result<(), String> {
     let sdkinfo = match SdkInfo::discover() {
@@ -468,269 +499,310 @@ fn main() -> Result<(), String> {
     // The main loop for creating the CapDL spec and the final image.
     // Now build the capDL spec and final image. We may need to do this in >1 iterations on ARM and RISC-V
     // if there are Memory Regions without a paddr but subject to setvar region_paddr.
-    let mut iteration = 0;
-    let mut spec_need_refinement = true;
-    let mut system_built = false;
-    while spec_need_refinement && iteration < MAX_BUILD_ITERATION {
-        spec_need_refinement = false;
 
-        // Patch all the required symbols in the Monitor and PDs according to the Microkit's requirements
-        if let Err(err) = patch_symbols(&kernel_config, &mut system_elfs, &system) {
-            eprintln!("ERROR: {err}");
-            std::process::exit(1);
-        }
 
-        let mut spec_container = build_capdl_spec(&kernel_config, &mut system_elfs, &system)?;
-        pack_spec_into_initial_task(
-            &kernel_config,
-            args.config.as_str(),
-            &spec_container,
-            &system_elfs,
-            &mut capdl_initialiser,
-        );
+    let finished_build = (|| -> Result<FinishedBuild, MainError> {
+        let mut iteration = 0;
+        let mut spec_need_refinement = true;
 
-        match kernel_boot_type {
-            KernelBootType::X86_64 => {
-                // setvar region_paddr not supported on this architecture nor can we emulate the
-                // kernel boot process to statically check for issues due to unknown memory map, so nothing to do.
-                // Write out the capDL initialiser as an ELF boot module and we are done.
+        while spec_need_refinement && iteration < MAX_BUILD_ITERATION {
+            spec_need_refinement = false;
+
+            // Patch all the required symbols in the Monitor and PDs according to the Microkit's requirements
+            match patch_symbols(&kernel_config, &mut system_elfs, &system) {
+                Ok(_) => {},
+                Err(source) => {
+                    return Err(MainError::CannotPatchSymbols { source: source.to_string() });
+                },
             }
-            KernelBootType::Static { ref kernel_elf, ref available_memory, kernel_boot_region } => {
-                // Now that we have the CapDL initialiser ELF with embedded spec,
-                // we can determine exactly how much memory will be available statically when the kernel
-                // drops to userspace on ARM and RISC-V. This allow us to sanity check that:
-                // 1. We have enough memory to allocate all the objects required in the spec.
-                // 2. All frames with a physical attached reside in legal memory (device or normal).
-                // 3. Objects can be allocated from the free untyped list. For example, we detect
-                //    situations where you might have a few frames with size bit 12 to allocate but
-                //    only have untyped with size bit <12 remaining.
-                // This also allow the tool to automatically pick physical address of Memory Regions with out
-                // an explicit paddr in SDF but are subject to setvar region_paddr.
 
-                // Determine how much memory the CapDL initialiser needs.
-                let initialiser_vaddr_range = capdl_initialiser.image_bound();
-                let initial_task_size = initialiser_vaddr_range.end - initialiser_vaddr_range.start;
+            let mut spec_container = match build_capdl_spec(&kernel_config, &mut system_elfs, &system) {
+                Ok(result) => result,
+                Err(source) => {
+                    return Err(MainError::CannotBuildCapdlSpec { source: source.to_string() });
+                },
+            };
 
-                // Reuse data from the partial kernel boot emulation previously done.
-                // .clone() as we need to mutate this for every iteration.
-                let mut available_memory = available_memory.clone();
-
-                // The kernel relies on the initial task region being allocated above the kernel
-                // boot/ELF region, so we have the end of the kernel boot region as the lower
-                // bound for allocating the reserved region.
-                let initial_task_phys_base_maybe =
-                    available_memory.allocate_from(initial_task_size, kernel_boot_region.end);
-                if initial_task_phys_base_maybe.is_none() {
-                    // Unlikely to happen on Microkit-supported platforms with multi gigabytes memory.
-                    // But printing a helpful error in case we do run into this problem.
-                    eprintln!(
-                        "ERROR: cannot allocate memory for the initialiser, contiguous physical memory region of size {} not found", human_size_strict(initial_task_size)
-                    );
-                    eprintln!("ERROR: physical memory regions the initialiser can be placed at:");
-                    for region in available_memory.regions {
-                        eprintln!(
-                            "       [0x{:0>12x}..0x{:0>12x}), size: {}",
-                            region.base,
-                            region.end,
-                            human_size_strict(region.size())
-                        );
-                    }
-                    std::process::exit(1);
-                }
-
-                let initial_task_phys_base = initial_task_phys_base_maybe.unwrap();
-                capdl_initialiser.set_phys_base(initial_task_phys_base);
-                let initial_task_phys_region = MemoryRegion::new(
-                    initial_task_phys_base,
-                    initial_task_phys_base + initial_task_size,
-                );
-                let user_image_virt_region = MemoryRegion::new(
-                    capdl_initialiser.elf.lowest_vaddr(),
-                    initialiser_vaddr_range.end,
-                );
-
-                // With the initial task region determined the kernel boot can be emulated in full. This provides
-                // the boot info information (containing untyped objects) which is needed for the next steps
-                let kernel_boot_info = emulate_kernel_boot(
-                    &kernel_config,
-                    kernel_elf,
-                    initial_task_phys_region,
-                    user_image_virt_region,
-                );
-
-                if iteration == 0 {
-                    // On the first iteration where the spec have not been refined, simulate the capDL allocation algorithm
-                    // to double check that all kernel objects of the system as described by SDF can be successfully allocated.
-                    if !simulate_capdl_object_alloc_algorithm(
-                        &mut spec_container,
-                        &kernel_boot_info,
-                        &kernel_config,
-                        CapDLAllocEmulationErrorLevel::PrintStderr,
-                    ) {
-                        eprintln!("ERROR: could not allocate all required kernel objects. Please see report for more details.");
-                        std::process::exit(1);
-                    }
-                } else {
-                    // Do the same thing for further iterations, at this point the simulation won't fail *except* for when we have picked a
-                    // bad address for Memory Regions subject to setvar region_paddr. This can happen because after we have
-                    // picked the address, we will update spec and patch it into the program's frame. Which will causes the
-                    // spec to increase in size as the frames' data are compressed. So if the simulation fail, we need to
-                    // pick another address as we now have a better idea of how large the spec is.
-
-                    // This is highly unlikely to happen unless the spec size increase causes the initial task size to cross
-                    // a 4K page boundary.
-                    if !simulate_capdl_object_alloc_algorithm(
-                        &mut spec_container,
-                        &kernel_boot_info,
-                        &kernel_config,
-                        CapDLAllocEmulationErrorLevel::Suppressed,
-                    ) {
-                        // Encountered a problem, pick a better address.
-                        for tool_allocate_mr in system.memory_regions.iter_mut().filter(|mr| {
-                            matches!(mr.phys_addr, SysMemoryRegionPaddr::ToolAllocated(_))
-                        }) {
-                            tool_allocate_mr.phys_addr = SysMemoryRegionPaddr::ToolAllocated(None);
-                        }
-                        spec_container.expected_allocations = HashMap::new();
-                    }
-                }
-
-                // Now pick a physical address for any memory regions that are subject to setvar region_paddr.
-                // Doing something a bit unconventional here: converting the list of untypeds back to a DisjointMemoryRegion
-                // to give us a view of physical memory available after the kernel drops to user space.
-                // I.e. available memory after the initial task have been created.
-                {
-                    let mut available_user_memory = DisjointMemoryRegion::default();
-                    for ut in kernel_boot_info
-                        .untyped_objects
-                        .iter()
-                        .filter(|ut| !ut.is_device)
-                    {
-                        // Only take untypeds that can at least fit a page because some have been used to back the initial task's
-                        // kernel object such as TCB, endpoint etc.
-                        let start = round_up(ut.base(), kernel_config.minimum_page_size);
-                        let end = round_down(ut.end(), kernel_config.minimum_page_size);
-                        if end > start {
-                            // will be automatically merged
-                            available_user_memory.insert_region(ut.base(), ut.end());
-                        }
-                    }
-
-                    // Then take away any memory ranges occupied by Memory Regions with a paddr specified in SDF.
-                    for mr in system.memory_regions.iter() {
-                        if let SysMemoryRegionPaddr::Specified(sdf_paddr) = mr.phys_addr {
-                            let mr_end = sdf_paddr + mr.size;
-
-                            // MR may be device memory, which isn't covered in available_user_memory.
-                            let is_normal_mem =
-                                available_user_memory.regions.iter().any(|region| {
-                                    sdf_paddr >= region.base
-                                        && sdf_paddr < region.end
-                                        && mr_end <= region.end
-                                });
-                            if is_normal_mem {
-                                available_user_memory.remove_region(sdf_paddr, sdf_paddr + mr.size);
-                            }
-                        }
-                    }
-
-                    let mut tool_allocated_mrs = Vec::new();
-                    for (mr_id, tool_allocate_mr) in system
-                        .memory_regions
-                        .iter_mut()
-                        .enumerate()
-                        .filter(|(_, mr)| {
-                            matches!(mr.phys_addr, SysMemoryRegionPaddr::ToolAllocated(None))
-                        })
-                    {
-                        spec_need_refinement = true;
-
-                        let target_paddr = available_user_memory
-                            .allocate(tool_allocate_mr.size, tool_allocate_mr.page_size);
-                        if target_paddr.is_none() {
-                            eprintln!("ERROR: cannot auto-select a physical address for MR {} because there are no contiguous memory region of sufficient size.", tool_allocate_mr.name);
-                            eprintln!("ERROR: MR {} needs to be physically contiguous as it is a subject of a setvar region_paddr.", tool_allocate_mr.name);
-                            if !tool_allocated_mrs.is_empty() {
-                                eprintln!("Previously auto-allocated memory regions:");
-                                for allocated_mr_id in tool_allocated_mrs {
-                                    let allocated_mr: &SysMemoryRegion =
-                                        &system.memory_regions[allocated_mr_id];
-                                    eprintln!(
-                                        "name = '{}', paddr = 0x{:0>12x}, size = 0x{:0>12x}",
-                                        allocated_mr.name,
-                                        allocated_mr.paddr().unwrap(),
-                                        allocated_mr.size
-                                    );
-                                }
-                            }
-                            eprintln!("available physical memory regions:");
-                            for region in available_user_memory.regions {
-                                eprintln!(
-                                    "[0x{:0>12x}..0x{:0>12x}), size: {}",
-                                    region.base,
-                                    region.end,
-                                    human_size_strict(region.size())
-                                );
-                            }
-                            std::process::exit(1);
-                        }
-                        tool_allocated_mrs.push(mr_id);
-                        tool_allocate_mr.phys_addr =
-                            SysMemoryRegionPaddr::ToolAllocated(target_paddr);
-                    }
-                }
-
-                // Patch the list of untypeds we used to simulate object allocation into the initialiser.
-                // At runtime the intialiser will validate what we simulated against what the kernel gives it. If they deviate
-                // we will have problems! For example, if we simulated with more memory than what's actually available, the initialiser
-                // can crash.
-                capdl_initialiser.add_expected_untypeds(&kernel_boot_info.untyped_objects);
-            }
-        };
-
-        if !spec_need_refinement {
-            // All is well in the universe, write the image out.
-            println!(
-                "MICROKIT|CAPDL SPEC: number of root objects = {}, spec footprint = {}",
-                spec_container.spec.objects.len(),
-                human_size_strict(
-                    capdl_initialiser
-                        .spec_metadata()
-                        .as_ref()
-                        .unwrap()
-                        .spec_size
-                ),
+            pack_spec_into_initial_task(
+                &kernel_config,
+                args.config.as_str(),
+                &spec_container,
+                &system_elfs,
+                &mut capdl_initialiser,
             );
-            let initialiser_vaddr_range = capdl_initialiser.image_bound();
-            println!(
-                "MICROKIT|INITIAL TASK: memory size = {}",
-                human_size_strict(initialiser_vaddr_range.end - initialiser_vaddr_range.start),
-            );
-
-            let image_out_path = args.output_path.as_path();
 
             match kernel_boot_type {
-                KernelBootType::X86_64 => match capdl_initialiser.elf.reserialise(image_out_path) {
+                KernelBootType::X86_64 => {
+                    // setvar region_paddr not supported on this architecture nor can we emulate the
+                    // kernel boot process to statically check for issues due to unknown memory map, so nothing to do.
+                    // Write out the capDL initialiser as an ELF boot module and we are done.
+                }
+                KernelBootType::Static { ref kernel_elf, ref available_memory, kernel_boot_region } => {
+                    // Now that we have the CapDL initialiser ELF with embedded spec,
+                    // we can determine exactly how much memory will be available statically when the kernel
+                    // drops to userspace on ARM and RISC-V. This allow us to sanity check that:
+                    // 1. We have enough memory to allocate all the objects required in the spec.
+                    // 2. All frames with a physical attached reside in legal memory (device or normal).
+                    // 3. Objects can be allocated from the free untyped list. For example, we detect
+                    //    situations where you might have a few frames with size bit 12 to allocate but
+                    //    only have untyped with size bit <12 remaining.
+                    // This also allow the tool to automatically pick physical address of Memory Regions with out
+                    // an explicit paddr in SDF but are subject to setvar region_paddr.
+
+                    // Determine how much memory the CapDL initialiser needs.
+                    let initialiser_vaddr_range = capdl_initialiser.image_bound();
+                    let initial_task_size = initialiser_vaddr_range.end - initialiser_vaddr_range.start;
+
+                    // Reuse data from the partial kernel boot emulation previously done.
+                    // .clone() as we need to mutate this for every iteration.
+                    let mut available_memory = available_memory.clone();
+
+                    // The kernel relies on the initial task region being allocated above the kernel
+                    // boot/ELF region, so we have the end of the kernel boot region as the lower
+                    // bound for allocating the reserved region.
+                    let initial_task_phys_base =
+                        match available_memory.allocate_from(initial_task_size, kernel_boot_region.end) {
+                            Some(result) => result,
+                            None => {
+                                // Unlikely to happen on Microkit-supported platforms with multi gigabytes memory.
+                                // But printing a helpful error in case we do run into this problem.
+                                let mut details = "".to_string();
+                                details.push_str(&format!(
+                                    "cannot allocate memory for the initialiser, contiguous physical memory region of size {} not found",
+                                    human_size_strict(initial_task_size)
+                                ));
+                                details.push_str("\nphysical memory regions the initialiser can be placed at:");
+                                for region in available_memory.regions {
+                                    details.push_str(&format!(
+                                        "       [0x{:0>12x}..0x{:0>12x}), size: {}",
+                                        region.base,
+                                        region.end,
+                                        human_size_strict(region.size())
+                                    ));
+                                }
+                                return Err(MainError::CannotAllocate { details });
+                            },
+                        };
+                    capdl_initialiser.set_phys_base(initial_task_phys_base);
+                    let initial_task_phys_region = MemoryRegion::new(
+                        initial_task_phys_base,
+                        initial_task_phys_base + initial_task_size,
+                    );
+                    let user_image_virt_region = MemoryRegion::new(
+                        capdl_initialiser.elf.lowest_vaddr(),
+                        initialiser_vaddr_range.end,
+                    );
+
+                    // With the initial task region determined the kernel boot can be emulated in full. This provides
+                    // the boot info information (containing untyped objects) which is needed for the next steps
+                    let kernel_boot_info = emulate_kernel_boot(
+                        &kernel_config,
+                        kernel_elf,
+                        initial_task_phys_region,
+                        user_image_virt_region,
+                    );
+
+                    if iteration == 0 {
+                        // On the first iteration where the spec have not been refined, simulate the capDL allocation algorithm
+                        // to double check that all kernel objects of the system as described by SDF can be successfully allocated.
+                        if !simulate_capdl_object_alloc_algorithm(
+                            &mut spec_container,
+                            &kernel_boot_info,
+                            &kernel_config,
+                            CapDLAllocEmulationErrorLevel::PrintStderr,
+                        ) {
+                            return Err(MainError::CannotAllocateKernelObject);
+                        }
+                    } else {
+                        // Do the same thing for further iterations, at this point the simulation won't fail *except* for when we have picked a
+                        // bad address for Memory Regions subject to setvar region_paddr. This can happen because after we have
+                        // picked the address, we will update spec and patch it into the program's frame. Which will causes the
+                        // spec to increase in size as the frames' data are compressed. So if the simulation fail, we need to
+                        // pick another address as we now have a better idea of how large the spec is.
+
+                        // This is highly unlikely to happen unless the spec size increase causes the initial task size to cross
+                        // a 4K page boundary.
+                        if !simulate_capdl_object_alloc_algorithm(
+                            &mut spec_container,
+                            &kernel_boot_info,
+                            &kernel_config,
+                            CapDLAllocEmulationErrorLevel::Suppressed,
+                        ) {
+                            // Encountered a problem, pick a better address.
+                            for tool_allocate_mr in system.memory_regions.iter_mut().filter(|mr| {
+                                matches!(mr.phys_addr, SysMemoryRegionPaddr::ToolAllocated(_))
+                            }) {
+                                tool_allocate_mr.phys_addr = SysMemoryRegionPaddr::ToolAllocated(None);
+                            }
+                            spec_container.expected_allocations = HashMap::new();
+                        }
+                    }
+
+                    // Now pick a physical address for any memory regions that are subject to setvar region_paddr.
+                    // Doing something a bit unconventional here: converting the list of untypeds back to a DisjointMemoryRegion
+                    // to give us a view of physical memory available after the kernel drops to user space.
+                    // I.e. available memory after the initial task have been created.
+                    {
+                        let mut available_user_memory = DisjointMemoryRegion::default();
+                        for ut in kernel_boot_info
+                            .untyped_objects
+                            .iter()
+                            .filter(|ut| !ut.is_device)
+                        {
+                            // Only take untypeds that can at least fit a page because some have been used to back the initial task's
+                            // kernel object such as TCB, endpoint etc.
+                            let start = round_up(ut.base(), kernel_config.minimum_page_size);
+                            let end = round_down(ut.end(), kernel_config.minimum_page_size);
+                            if end > start {
+                                // will be automatically merged
+                                available_user_memory.insert_region(ut.base(), ut.end());
+                            }
+                        }
+
+                        // Then take away any memory ranges occupied by Memory Regions with a paddr specified in SDF.
+                        for mr in system.memory_regions.iter() {
+                            if let SysMemoryRegionPaddr::Specified(sdf_paddr) = mr.phys_addr {
+                                let mr_end = sdf_paddr + mr.size;
+
+                                // MR may be device memory, which isn't covered in available_user_memory.
+                                let is_normal_mem =
+                                    available_user_memory.regions.iter().any(|region| {
+                                        sdf_paddr >= region.base
+                                            && sdf_paddr < region.end
+                                            && mr_end <= region.end
+                                    });
+                                if is_normal_mem {
+                                    available_user_memory.remove_region(sdf_paddr, sdf_paddr + mr.size);
+                                }
+                            }
+                        }
+
+                        let mut tool_allocated_mrs = Vec::new();
+                        for (mr_id, tool_allocate_mr) in system
+                            .memory_regions
+                            .iter_mut()
+                            .enumerate()
+                            .filter(|(_, mr)| {
+                                matches!(mr.phys_addr, SysMemoryRegionPaddr::ToolAllocated(None))
+                            })
+                        {
+                            spec_need_refinement = true;
+
+                            let target_paddr = available_user_memory
+                                .allocate(tool_allocate_mr.size, tool_allocate_mr.page_size);
+                            if target_paddr.is_none() {
+                                let mut details = "".to_string();
+                                details.push_str(&format!(
+                                    "cannot auto-select a physical address for MR {} because there are no contiguous memory region of sufficient size.",
+                                    tool_allocate_mr.name
+                                ));
+                                details.push_str(&format!(
+                                    "\nMR {} needs to be physically contiguous as it is a subject of a setvar region_paddr.",
+                                    tool_allocate_mr.name
+                                ));
+                                if !tool_allocated_mrs.is_empty() {
+                                    details.push_str("Previously auto-allocated memory regions:");
+                                    for allocated_mr_id in tool_allocated_mrs {
+                                        let allocated_mr: &SysMemoryRegion =
+                                            &system.memory_regions[allocated_mr_id];
+                                        details.push_str(&format!(
+                                            "name = '{}', paddr = 0x{:0>12x}, size = 0x{:0>12x}",
+                                            allocated_mr.name,
+                                            allocated_mr.paddr().unwrap(),
+                                            allocated_mr.size
+                                        ));
+                                    }
+                                }
+                                details.push_str("available physical memory regions:");
+                                for region in available_user_memory.regions {
+                                    details.push_str(&format!(
+                                        "[0x{:0>12x}..0x{:0>12x}), size: {}",
+                                        region.base,
+                                        region.end,
+                                        human_size_strict(region.size())
+                                    ));
+                                }
+                                return Err(MainError::CannotAllocate { details });
+                            }
+                            tool_allocated_mrs.push(mr_id);
+                            tool_allocate_mr.phys_addr =
+                                SysMemoryRegionPaddr::ToolAllocated(target_paddr);
+                        }
+                    }
+
+                    // Patch the list of untypeds we used to simulate object allocation into the initialiser.
+                    // At runtime the intialiser will validate what we simulated against what the kernel gives it. If they deviate
+                    // we will have problems! For example, if we simulated with more memory than what's actually available, the initialiser
+                    // can crash.
+                    capdl_initialiser.add_expected_untypeds(&kernel_boot_info.untyped_objects);
+                }
+            };
+
+            if !spec_need_refinement {
+                // All is well in the universe, create the image that will be written out.
+                println!(
+                    "MICROKIT|CAPDL SPEC: number of root objects = {}, spec footprint = {}",
+                    spec_container.spec.objects.len(),
+                    human_size_strict(
+                        capdl_initialiser
+                            .spec_metadata()
+                            .as_ref()
+                            .unwrap()
+                            .spec_size
+                    ),
+                );
+                let initialiser_vaddr_range = capdl_initialiser.image_bound();
+                println!(
+                    "MICROKIT|INITIAL TASK: memory size = {}",
+                    human_size_strict(initialiser_vaddr_range.end - initialiser_vaddr_range.start),
+                );
+
+                let image = match kernel_boot_type {
+                    KernelBootType::X86_64 => FinishedImage::X86BootModule,
+                    KernelBootType::Static { kernel_elf, .. } => FinishedImage::StaticBootModule {
+                        kernel_elf,
+                        image_output_type,
+                    },
+                };
+
+                return Ok(FinishedBuild {
+                    capdl_initialiser,
+                    spec_container,
+                    initialiser_vaddr_range,
+                    image
+                });
+            }
+            iteration += 1;
+        }
+
+        Err(MainError::IterationsExceeded)
+    })();
+
+    match finished_build {
+        Ok(FinishedBuild {
+            capdl_initialiser,
+            spec_container,
+            initialiser_vaddr_range,
+            image,
+        }) => {
+            let image_out_path = args.output_path.as_path();
+
+            match image {
+                FinishedImage::X86BootModule => match capdl_initialiser.elf.reserialise(image_out_path) {
                     Ok(size) => {
                         // Copy the kernel to the build directory as well so users doesn't have to dig through the SDK.
                         if let Err(copy_err) = fs::copy(
                             current_config.sel4_elf_path(),
-                            image_out_path.parent().unwrap().join(KERNEL_COPY_FILENAME),
+                            image_out_path.parent().unwrap().join("sel4.elf"),
                         ) {
-                            eprintln!("ERROR: couldn't copy the kernel to image's output directory: {copy_err}");
+                            eprintln!("microkit: error: couldn't copy the kernel to image's output directory: {copy_err}");
                             std::process::exit(1);
                         }
                         if let Err(copy_err) = fs::copy(
-                            current_config.sel4_elf_path()
-                                .parent()
-                                .unwrap()
-                                .join(KERNEL32_COPY_FILENAME),
-                            image_out_path
-                                .parent()
-                                .unwrap()
-                                .join(KERNEL32_COPY_FILENAME),
+                            current_config.sel4_32_elf_path(),
+                            image_out_path.parent().unwrap().join("sel4_32.elf"),
                         ) {
-                            eprintln!("ERROR: couldn't copy the 32-bit kernel to image's output directory: {copy_err}");
+                            eprintln!("microkit: error: couldn't copy the 32-bit kernel to image's output directory: {copy_err}");
                             std::process::exit(1);
                         }
                         println!(
@@ -739,15 +811,18 @@ fn main() -> Result<(), String> {
                         );
                     }
                     Err(err) => {
-                        eprintln!("ERROR: couldn't write the boot module to filesystem: {err}");
+                        eprintln!("microkit: error: couldn't write the boot module to filesystem: {err}");
                         std::process::exit(1);
                     }
                 },
-                KernelBootType::Static { ref kernel_elf, .. } => {
+                FinishedImage::StaticBootModule {
+                    kernel_elf,
+                    image_output_type,
+                } => {
                     let loader = Loader::new(
                         &kernel_config,
                         &current_config.loader_elf_path(),
-                        kernel_elf,
+                        &kernel_elf,
                         &capdl_initialiser.elf,
                         capdl_initialiser.phys_base.unwrap(),
                         &initialiser_vaddr_range,
@@ -772,19 +847,13 @@ fn main() -> Result<(), String> {
             };
 
             write_report(&spec_container, &kernel_config, &args.report_path);
-            system_built = true;
-            break;
-        } else {
-            // Some memory regions have had their physical address updated, rebuild the spec.
-            iteration += 1;
+        }
+        Err(err) => {
+            eprintln!("microkit: error: {err}");
+            std::process::exit(1);
         }
     }
 
-    if !system_built {
-        // Cannot build a reasonable spec, absurd.
-        // Only reachable when there are setvar region_paddr that we keep selecting the wrong address.
-        panic!("ERROR: fatal, failed to build system in {iteration} iterations");
-    }
 
     Ok(())
 }

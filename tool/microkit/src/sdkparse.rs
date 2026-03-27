@@ -37,6 +37,11 @@ impl AvailableConfig {
     pub fn sel4_elf_path(&self) -> PathBuf {
         self.base_elf_path().join("sel4.elf")
     }
+    pub fn sel4_32_elf_path(&self) -> PathBuf {
+        // The `-kernel` argument of 'qemu-system-x86_64' doesn't accept a 64-bit image, so we
+        // also copy the 32-bit version that was prepared by build_sdk.py for convenience.
+        self.base_elf_path().join("sel4_32.elf")
+    }
     pub fn capdl_init_elf_path(&self) -> PathBuf {
         self.base_elf_path().join("initialiser.elf")
     }
