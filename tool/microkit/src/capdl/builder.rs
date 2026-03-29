@@ -119,6 +119,29 @@ pub struct CapDLSpecContainer {
     pub expected_allocations: HashMap<ObjectId, ExpectedAllocation>,
 }
 
+// Define to match C struct layout exactly
+#[repr(C)]
+struct FrameInfoRaw {
+    cap: u64,           // match Cap's actual size/type
+    pd_idx: i32,        // C `int` = i32
+}
+
+impl FrameInfoRaw {
+    fn to_bytes(&self) -> Vec<u8> {
+        let ptr = self as *const Self as *const u8;
+        unsafe { std::slice::from_raw_parts(ptr, std::mem::size_of::<Self>()) }.to_vec()
+    }
+}
+
+// Serialize all frames into a contiguous byte buffer
+fn serialize_frame_infos(frames: &[FrameInfoRaw]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(frames.len() * std::mem::size_of::<FrameInfoRaw>());
+    for frame in frames {
+        buf.extend_from_slice(&frame.to_bytes());
+    }
+    buf
+}
+
 fn find_free_contiguous_memory(
     mr_name_to_frames: &HashMap<&String, Vec<ObjectId>>, 
     pd: &ProtectionDomain, 
@@ -1055,10 +1078,11 @@ pub fn build_capdl_spec(
         pd_id_to_cspace_id.insert(pd_global_idx, pd_cnode_obj_id);
 ///////////////////////////////////////////////////////////////////// TODO: insert here....
 /// 
-
+        // TODO: the thing is I push to unmapped frames here which is not correct
+        // i only need to push once per region, but need to make structures for each mapping.
         ///////////////////////////////////////////////////////////////////////////////////////////////
         for map in pd.maps.iter() {
-            if unbacked_mrs.contains(&map.mr) {
+            if unbacked_mrs.contains(&map.mr) && pd.name != "pager" {
                 create_page_structure_recursive(
                     top_pt_level_number(kernel_config), 
                     kernel_config, 
@@ -1148,13 +1172,24 @@ pub fn build_capdl_spec(
         // put the pager inside the memory region that we find.
         
         // first i need to convert unmapped_frames into contiguous memory.
-        let unmapped_frames_data = serde_json::to_string(&unmapped_frames).unwrap().as_bytes().to_owned(); // TODO: This is very dodgy, doubt that this would work.
+        // TODO: I am currently mapping each entry per frame, which should instead just fill up the frames.
+        // also I need to actually map the frames not just hold metadata...
+        let unmapped_frames_data: Vec<u8> = unmapped_frames.iter().flat_map(|x| {
+            FrameInfoRaw {
+                cap: x.0,
+                pd_idx: x.2 as i32,
+            }.to_bytes()
+        }).collect();
+        // serde_json::to_string(&unmapped_frames).unwrap().as_bytes().to_owned(); // TODO: This is very dodgy, doubt that this would work.
         let top_addr = find_free_contiguous_memory(&mr_name_to_frames, pd, elfs, pager_idx, kernel_config, unmapped_frames_data.len() as u64, &mut spec_container).unwrap();
-        let base_addr = (top_addr - (unmapped_frames_data.len() as u64)) as u64;
-        // let base_addr = 0x900000000000;
-        let mut frame_base = round_down(base_addr, PageSize::Small as u64);
+        // let base_addr = (top_addr - (unmapped_frames_data.len() as u64)) as u64;
+        let base_addr: u64 = 0x90000000000;
+        // let mut frame_base = base_addr & !4095; // TODO: change this to be 4k rounded down.
+        // TODO: basically the find free contiguous memory function is broken.
+        let mut frame_base = 0x90000000000; // i can use this temporarily.
         // let num_frames = (top_addr - frame_base + (PageSize::Small as u64) - 1) / (PageSize::Small as u64);
-        let num_frames = unmapped_frames_data.len();
+        let num_frames = unmapped_frames.len();
+        println!("unmapped frames here is {num_frames}\n");
         let pd_vspace_obj_id =  vspace_ids[pager_idx];
         let mut dest_offset = 0;
         for i in 0..num_frames { 
@@ -1201,7 +1236,9 @@ pub fn build_capdl_spec(
                 frame_base,
             ) {
                 Ok(_) => {
+                    println!("{:x} {}", frame_base, PageSize::Small as u64);
                     frame_base += (PageSize::Small as u64);
+                    println!("a frame has been sucessfully mapped to the pager\n");
                 }
                 Err(map_err_reason) => {
                     return Err(format!(
@@ -1214,15 +1251,14 @@ pub fn build_capdl_spec(
 
         // let cur_vaddr = find_memory_for_symbol(&mr_name_to_frames, pd, elfs, pager_idx, kernel_config, , &mut spec_container);
         // JOSHUA TODO: i need to find a way to convert the vec into bytes.
-        // TODO: this symbol should become u64
-        elfs[pager_idx].write_symbol("unmapped_frames_addr", &base_addr.to_ne_bytes());
-        // TODO: this symbol should become u64
+        elfs[pager_idx].write_symbol("unmapped_frames_addr", &frame_base.to_ne_bytes());
         elfs[pager_idx].write_symbol("num_frames", &unmapped_frames.len().to_ne_bytes());
         println!("NUMBER OF FRAMES: {}\n", unmapped_frames.len());
         // TODO: I also need to send vspace cap id's over, this should just be an array of size 128...
         elfs[pager_idx].write_symbol("vspaces", vspace_ids.iter().flat_map(|&f| f.0.to_ne_bytes()).collect::<Vec<_>>().as_slice());
         // the vspace of the pager.
         elfs[pager_idx].write_symbol("pager_vspace", &vspace_ids[pager_idx].0.to_ne_bytes());
+        println!("Rust struct size: {}", std::mem::size_of::<FrameInfoRaw>());
     }
 
     // *********************************

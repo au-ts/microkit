@@ -1221,7 +1221,7 @@ impl SysMemoryRegion {
         xml_sdf: &XmlSystemDescription,
         node: &roxmltree::Node,
     ) -> Result<SysMemoryRegion, String> {
-        check_attributes(xml_sdf, node, &["name", "size", "page_size", "phys_addr"])?;
+        check_attributes(xml_sdf, node, &["name", "size", "page_size", "phys_addr", "backed"])?;
 
         let name = checked_lookup(xml_sdf, node, "name")?;
         let size = sdf_parse_number(checked_lookup(xml_sdf, node, "size")?, node)?;
