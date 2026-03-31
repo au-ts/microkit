@@ -119,6 +119,9 @@ pub struct CapDLSpecContainer {
     pub expected_allocations: HashMap<ObjectId, ExpectedAllocation>,
 }
 
+pub const FRAME_BASE: u64 = 0x8000000000;
+pub const FRAME_METADATA_BASE: u64 = 0x2000000000; 
+                                    //    90000080000
 // Define to match C struct layout exactly
 #[repr(C)]
 struct FrameInfoRaw {
@@ -654,11 +657,12 @@ pub fn build_capdl_spec(
 
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
-    let mut vspace_ids = vec![ObjectId(0); 128];
+    let mut vspace_ids = vec![ObjectId(0); 64];
     let mut unmapped_frames: Vec<(u64, ObjectId, usize)> = Vec::new(); // vector of tuple of frame cap, frame id and index of pd which owns frame.
+    let mut frame_cap_counter = 0;
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
         
-        let mut frame_cap_counter = 0;
+        
         let elf_obj = &elfs[pd_global_idx];
 
         let mut caps_to_bind_to_tcb: Vec<CapTableEntry> = Vec::new();
@@ -668,6 +672,7 @@ pub fn build_capdl_spec(
             .add_elf_to_spec(kernel_config, &pd.name, pd.cpu, pd_global_idx, elf_obj)
             .unwrap();
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec_container, pd_tcb_obj_id);
+        // println!("pd name: {}, index= {} vspace id = {}\n", pd.name, pd_global_idx, pd_vspace_obj_id.0);
         vspace_ids[pd_global_idx] = pd_vspace_obj_id;
         // In the benchmark configuration, we allow PDs to access their own TCB.
         // This is necessary for accessing kernel's benchmark API.
@@ -1082,17 +1087,25 @@ pub fn build_capdl_spec(
         // i only need to push once per region, but need to make structures for each mapping.
         ///////////////////////////////////////////////////////////////////////////////////////////////
         for map in pd.maps.iter() {
+            
             if unbacked_mrs.contains(&map.mr) && pd.name != "pager" {
-                create_page_structure_recursive(
-                    top_pt_level_number(kernel_config), 
-                    kernel_config, 
-                    map.vaddr,
-                    mr_name_to_mr.get(&map.mr).unwrap().page_size_bytes(),
-                    &mut spec_container,
-                    &pd.name,
-                    pd_vspace_obj_id,
-                    pd_vspace_obj_id
-                );
+                
+                let mut vaddr = map.vaddr;
+                for i in 0..mr_name_to_mr.get(&map.mr).unwrap().page_count {
+                    // println!("making paging structure for pd {} vaddr {:x} with size {:x}\n", pd.name, vaddr, mr_name_to_mr.get(&map.mr).unwrap().page_size_bytes());
+                    create_page_structure_recursive(
+                        top_pt_level_number(kernel_config), 
+                        kernel_config, 
+                        vaddr,
+                        mr_name_to_mr.get(&map.mr).unwrap().page_size_bytes(),
+                        &mut spec_container,
+                        &pd.name,
+                        pd_vspace_obj_id,
+                        pd_vspace_obj_id
+                    );
+                    vaddr += PageSize::Small as u64;
+                }
+                
                 let frames = mr_name_to_frames.get(&map.mr).unwrap();
                 for frame in frames {
                     let mut cur_vaddr = map.vaddr;
@@ -1101,10 +1114,10 @@ pub fn build_capdl_spec(
                     let execute = map.perms & SysMapPerms::Execute as u8 != 0;
                     let cached = map.cached;
 
-                    // JOSHUA TODO: i need to make this properly...
+
                     capdl_util_insert_cap_into_cspace(
                         &mut spec_container, 
-                        pd_cnode_obj_id, // TODO this needs to be elsewhere...
+                        pd_cnode_obj_id, 
                         (BASE_FRAME_CAP + (frame_cap_counter as u64)) as u32, 
                         capdl_util_make_frame_cap(frame.clone(), read, write, execute, cached));
 
@@ -1169,6 +1182,18 @@ pub fn build_capdl_spec(
     }
 
     if let Some((pager_idx, pd)) = system.protection_domains.iter().enumerate().find(|(_, pd)| pd.name.eq("pager")) {
+        let mut vspace_slots = Vec::new();
+        for (pd_idx, pd_obj) in system.protection_domains.iter().enumerate() {
+            capdl_util_insert_cap_into_cspace(
+                &mut spec_container, 
+                pd_id_to_cspace_id[&pager_idx], 
+                (BASE_FRAME_CAP + (frame_cap_counter as u64)) as u32, 
+                capdl_util_make_page_table_cap(vspace_ids[pd_idx])
+            );
+            vspace_slots.push((BASE_FRAME_CAP + (frame_cap_counter as u64)) as u32);
+            frame_cap_counter += 1;
+        }
+        
         // put the pager inside the memory region that we find.
         
         // first i need to convert unmapped_frames into contiguous memory.
@@ -1183,25 +1208,51 @@ pub fn build_capdl_spec(
         // serde_json::to_string(&unmapped_frames).unwrap().as_bytes().to_owned(); // TODO: This is very dodgy, doubt that this would work.
         let top_addr = find_free_contiguous_memory(&mr_name_to_frames, pd, elfs, pager_idx, kernel_config, unmapped_frames_data.len() as u64, &mut spec_container).unwrap();
         // let base_addr = (top_addr - (unmapped_frames_data.len() as u64)) as u64;
-        let base_addr: u64 = 0x90000000000;
+        let base_addr: u64 = FRAME_BASE;
         // let mut frame_base = base_addr & !4095; // TODO: change this to be 4k rounded down.
         // TODO: basically the find free contiguous memory function is broken.
-        let mut frame_base = 0x90000000000; // i can use this temporarily.
+        let mut frame_base = FRAME_BASE; // i can use this temporarily.
         // let num_frames = (top_addr - frame_base + (PageSize::Small as u64) - 1) / (PageSize::Small as u64);
         let num_frames = unmapped_frames.len();
         println!("unmapped frames here is {num_frames}\n");
         let pd_vspace_obj_id =  vspace_ids[pager_idx];
         let mut dest_offset = 0;
-        for i in 0..num_frames { 
+        // vector of tuple of frame cap, frame id and index of pd which owns frame.aaaaa
+        for i in &unmapped_frames {
+            let current_frame_cap = capdl_util_make_frame_cap(i.1, true, true, true, false);
+            capdl_util_insert_cap_into_cspace(&mut spec_container, pd_id_to_cspace_id[&pager_idx], i.0 as u32, current_frame_cap.clone());
+            match map_page(
+                &mut spec_container,
+                kernel_config,
+                &pd.name,
+                pd_vspace_obj_id,
+                current_frame_cap.clone(),
+                PageSize::Small as u64,
+                frame_base,
+            ) {
+                Ok(_) => {
+                    println!("{:x} {}", frame_base, PageSize::Small as u64);
+                    frame_base += (PageSize::Small as u64);
+                    println!("a frame has been sucessfully mapped to the pager\n");
+                }
+                Err(map_err_reason) => {
+                    return Err(format!(
+                        "\n... {}/{} many pages mapped\n\nFailed to map frame for page table data range at vaddr: {:x} because: {:?}",
+                        0, num_frames, frame_base, map_err_reason
+                    ))
+                }
+            };
+        }
+        let mut frame_metadata_addr = FRAME_METADATA_BASE;
+        // insert the metadata for the frames.
+        let mut i = 0;
+        loop {
             let mut frame_fill = Fill {
                 entries: [].to_vec(),
             };
             let end = std::cmp::min(dest_offset + PageSize::Small as usize, unmapped_frames_data.len());
             let len = end - dest_offset;
-            
-            // fill the frames. 
-            let mut data = 
-            frame_fill.entries.push(FillEntry { // the fillentry content must be elfcontent somehow....
+            let mut data = frame_fill.entries.push(FillEntry { // the fillentry content must be elfcontent somehow....
                 range: Range { start: 0, end: len as u64 }, 
                 content: FillEntryContent::Data(FrameData::Bytes(
                     ByteData {
@@ -1210,8 +1261,6 @@ pub fn build_capdl_spec(
                 )
                 )
             });
-            dest_offset += len;
-
             let frame_obj_id = capdl_util_make_frame_obj(
                 &mut spec_container,
                 frame_fill,
@@ -1224,40 +1273,46 @@ pub fn build_capdl_spec(
                 true,
                 true,
                 true,
-                true,
+                false,
             );
+            capdl_util_insert_cap_into_cspace(&mut spec_container, pd_id_to_cspace_id[&pager_idx], (BASE_FRAME_CAP + (frame_cap_counter as u64)) as u32, frame_cap.clone());
             match map_page(
                 &mut spec_container,
                 kernel_config,
                 &pd.name,
                 pd_vspace_obj_id,
-                frame_cap,
+                frame_cap.clone(),
                 PageSize::Small as u64,
-                frame_base,
+                frame_metadata_addr,
             ) {
                 Ok(_) => {
-                    println!("{:x} {}", frame_base, PageSize::Small as u64);
-                    frame_base += (PageSize::Small as u64);
+                    println!("{:x} {}", frame_metadata_addr, PageSize::Small as u64);
+                    frame_metadata_addr += (PageSize::Small as u64);
                     println!("a frame has been sucessfully mapped to the pager\n");
                 }
                 Err(map_err_reason) => {
                     return Err(format!(
                         "\n... {}/{} many pages mapped\n\nFailed to map frame for page table data range at vaddr: {:x} because: {:?}",
-                        i, num_frames, frame_base, map_err_reason
+                        i, num_frames, frame_metadata_addr, map_err_reason
                     ))
                 }
             };
+            i += 1;
+            dest_offset += PageSize::Small as usize;
+            if (len < 4096) {break};
         }
+        
 
         // let cur_vaddr = find_memory_for_symbol(&mr_name_to_frames, pd, elfs, pager_idx, kernel_config, , &mut spec_container);
         // JOSHUA TODO: i need to find a way to convert the vec into bytes.
-        elfs[pager_idx].write_symbol("unmapped_frames_addr", &frame_base.to_ne_bytes());
+        elfs[pager_idx].write_symbol("unmapped_frames_addr", &FRAME_METADATA_BASE.to_ne_bytes());
+        // elfs[pager_idx].write_symbol("unmapped_frames_addr", &unmapped_frames.len().to_ne_bytes());
         elfs[pager_idx].write_symbol("num_frames", &unmapped_frames.len().to_ne_bytes());
         println!("NUMBER OF FRAMES: {}\n", unmapped_frames.len());
         // TODO: I also need to send vspace cap id's over, this should just be an array of size 128...
-        elfs[pager_idx].write_symbol("vspaces", vspace_ids.iter().flat_map(|&f| f.0.to_ne_bytes()).collect::<Vec<_>>().as_slice());
+        elfs[pager_idx].write_symbol("vspaces", vspace_slots.iter().flat_map(|&f| f.to_ne_bytes()).collect::<Vec<_>>().as_slice());
         // the vspace of the pager.
-        elfs[pager_idx].write_symbol("pager_vspace", &vspace_ids[pager_idx].0.to_ne_bytes());
+        elfs[pager_idx].write_symbol("pager_vspace", &vspace_slots[*&pager_idx].to_ne_bytes());
         println!("Rust struct size: {}", std::mem::size_of::<FrameInfoRaw>());
     }
 
