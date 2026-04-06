@@ -33,6 +33,10 @@ use microkit_tool::jsonparse;
 use microkit_tool::{DisjointMemoryRegion, MemoryRegion};
 use microkit_tool::sdf::SystemDescription;
 
+
+//use microkit_tool::viper::{CapView, SdfView, get_cap_view, get_sdf_view};
+use microkit_tool::viper;
+
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::{self, metadata};
@@ -778,6 +782,8 @@ fn main() -> Result<(), String> {
         Err(MainError::IterationsExceeded)
     })();
 
+
+
     match finished_build {
         Ok(FinishedBuild {
             capdl_initialiser,
@@ -785,6 +791,18 @@ fn main() -> Result<(), String> {
             initialiser_vaddr_range,
             image,
         }) => {
+
+            // TODO: this is a debug print block, factor it out of here
+            println!("{:#?}", system.protection_domains);
+            for (ipd, pd) in system.protection_domains.iter().enumerate() {
+                let mut output: String = format!("{}.vpr\n", pd.name).to_string();
+                let vsb = viper::get_sdf_view(&system, ipd).unwrap();
+                vsb.export(&mut output);
+                let vcb = viper::get_cap_view(&spec_container, &system, ipd).unwrap();
+                vcb.export(&mut output);
+                println!("{}", output);
+            }
+
             let image_out_path = args.output_path.as_path();
 
             match image {
