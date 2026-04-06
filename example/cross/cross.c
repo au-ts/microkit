@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include <panmicrokit.h>
+#include <microkit.h>
 
 void init(void)
 {

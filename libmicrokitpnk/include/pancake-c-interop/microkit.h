@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <stdint.h>
 #define __thread
 #include <sel4/sel4.h>
 
@@ -139,4 +140,3 @@ seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo
     microkit_internal_crash(0);
     return seL4_False;
 }
-
