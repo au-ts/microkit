@@ -121,12 +121,13 @@ pub struct CapDLSpecContainer {
 
 pub const FRAME_BASE: u64 = 0x8000000000;
 pub const FRAME_METADATA_BASE: u64 = 0x2000000000; 
+pub const MAX_PDS: usize = 64;
                                     //    90000080000
 // Define to match C struct layout exactly
 #[repr(C)]
 struct FrameInfoRaw {
     cap: u64,           // match Cap's actual size/type
-    pd_idx: i32,        // C `int` = i32
+    pd_id: i32,        // C `int` = i32
 }
 
 impl FrameInfoRaw {
@@ -1124,7 +1125,7 @@ pub fn build_capdl_spec(
                     unmapped_frames.push((
                         BASE_FRAME_CAP + (frame_cap_counter as u64),
                         frame.clone(),
-                        pd_global_idx, // index of the child pd.
+                        pd.id.unwrap() as usize, // index of the child pd.
                     ));
                     frame_cap_counter += 1;
 
@@ -1182,17 +1183,31 @@ pub fn build_capdl_spec(
     }
 
     if let Some((pager_idx, pd)) = system.protection_domains.iter().enumerate().find(|(_, pd)| pd.name.eq("pager")) {
-        let mut vspace_slots = Vec::new();
+        let mut vspace_slots: [u32; MAX_PDS] = [0; MAX_PDS];
+        let pager_vspace = (BASE_FRAME_CAP + (frame_cap_counter as u64)) as u32;
+        capdl_util_insert_cap_into_cspace(
+                    &mut spec_container, 
+                    pd_id_to_cspace_id[&pager_idx], 
+                    (BASE_FRAME_CAP + (frame_cap_counter as u64)) as u32, 
+                    capdl_util_make_page_table_cap(vspace_ids[pager_idx])
+                );
+        frame_cap_counter += 1;
         for (pd_idx, pd_obj) in system.protection_domains.iter().enumerate() {
-            capdl_util_insert_cap_into_cspace(
-                &mut spec_container, 
-                pd_id_to_cspace_id[&pager_idx], 
-                (BASE_FRAME_CAP + (frame_cap_counter as u64)) as u32, 
-                capdl_util_make_page_table_cap(vspace_ids[pd_idx])
-            );
-            vspace_slots.push((BASE_FRAME_CAP + (frame_cap_counter as u64)) as u32);
-            frame_cap_counter += 1;
+            if let Some(parent) = pd_obj.parent {
+                if (parent == pager_idx) {
+                    capdl_util_insert_cap_into_cspace(
+                        &mut spec_container, 
+                        pd_id_to_cspace_id[&pager_idx], 
+                        (BASE_FRAME_CAP + (frame_cap_counter as u64)) as u32, 
+                        capdl_util_make_page_table_cap(vspace_ids[pd_idx])
+                    );
+                    vspace_slots[pd_obj.id.unwrap() as usize] = (BASE_FRAME_CAP + (frame_cap_counter as u64)) as u32;
+                    frame_cap_counter += 1;
+                }
+                
+            }
         }
+
         
         // put the pager inside the memory region that we find.
         
@@ -1202,7 +1217,7 @@ pub fn build_capdl_spec(
         let unmapped_frames_data: Vec<u8> = unmapped_frames.iter().flat_map(|x| {
             FrameInfoRaw {
                 cap: x.0,
-                pd_idx: x.2 as i32,
+                pd_id: x.2 as i32, // this is actually the id
             }.to_bytes()
         }).collect();
         // serde_json::to_string(&unmapped_frames).unwrap().as_bytes().to_owned(); // TODO: This is very dodgy, doubt that this would work.
@@ -1220,7 +1235,9 @@ pub fn build_capdl_spec(
         // vector of tuple of frame cap, frame id and index of pd which owns frame.aaaaa
         for i in &unmapped_frames {
             let current_frame_cap = capdl_util_make_frame_cap(i.1, true, true, true, false);
+            // capdl_util_insert_cap_into_cspace(&mut spec_container, pd_id_to_cspace_id[&pager_idx], i.0 as u32, current_frame_cap.clone());
             capdl_util_insert_cap_into_cspace(&mut spec_container, pd_id_to_cspace_id[&pager_idx], i.0 as u32, current_frame_cap.clone());
+            // frame_cap_counter += 1;
             match map_page(
                 &mut spec_container,
                 kernel_config,
@@ -1276,6 +1293,7 @@ pub fn build_capdl_spec(
                 false,
             );
             capdl_util_insert_cap_into_cspace(&mut spec_container, pd_id_to_cspace_id[&pager_idx], (BASE_FRAME_CAP + (frame_cap_counter as u64)) as u32, frame_cap.clone());
+            frame_cap_counter += 1;
             match map_page(
                 &mut spec_container,
                 kernel_config,
@@ -1312,7 +1330,7 @@ pub fn build_capdl_spec(
         // TODO: I also need to send vspace cap id's over, this should just be an array of size 128...
         elfs[pager_idx].write_symbol("vspaces", vspace_slots.iter().flat_map(|&f| f.to_ne_bytes()).collect::<Vec<_>>().as_slice());
         // the vspace of the pager.
-        elfs[pager_idx].write_symbol("pager_vspace", &vspace_slots[*&pager_idx].to_ne_bytes());
+        elfs[pager_idx].write_symbol("pager_vspace", &pager_vspace.to_ne_bytes());
         println!("Rust struct size: {}", std::mem::size_of::<FrameInfoRaw>());
     }
 
@@ -1376,6 +1394,16 @@ pub fn build_capdl_spec(
                 pd_b_ep_cap_idx as u32,
                 pd_b_ep_cap,
             );
+        }
+
+        // create the elf symbol for memory manager ep.
+        if let Some((mm_idx, mm_pd)) = system.protection_domains.iter().enumerate().find(|p| p.1.name.eq("memory_manager")) {
+            if channel.end_b.pd == mm_idx {
+                elfs[channel.end_a.pd as usize].write_symbol("memory_manager_ep", &channel.end_a.id.to_ne_bytes());
+            }
+            if (channel.end_a.pd == mm_idx) {
+                elfs[channel.end_b.pd as usize].write_symbol("memory_manager_ep", &channel.end_b.id.to_ne_bytes());
+            }
         }
     }
 
