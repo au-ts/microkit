@@ -820,6 +820,8 @@ def build_initialiser(
     component_build_dir = build_dir / board.name / config.name / component_name
     component_build_dir.mkdir(exist_ok=True, parents=True)
 
+    print("config.name: ", config.name)
+    print("sel4: ", sel4_src_dir)
     capdl_init_elf = rust_target_dir / cargo_target / "release" / "initialiser.elf"
     r = system(f"""
         RUSTC_BOOTSTRAP=1 \

@@ -64,3 +64,13 @@ $(BUILD_DIR)/timer.elf: $(addprefix $(BUILD_DIR)/, $(TIMER_OBJS))
 
 $(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) timer.system
 	$(MICROKIT_TOOL) timer.system --search-path $(BUILD_DIR) --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE)
+
+qemu: $(IMAGE_FILE)
+	qemu-system-aarch64
+		-machine virt,virtualization=on -cpu cortex-a53 \
+		-m size=2G \
+		-serial mon:stdio \
+		-global virtio-mmio.force-legacy=false \
+		-device loader,file=$(IMAGE_FILE),addr=0x70000000,cpu-num=0 \
+		-nographic \
+		-d guest_errors

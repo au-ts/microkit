@@ -1,0 +1,76 @@
+diff --git a/build_sdk.py b/build_sdk.py
+index 26ca553..751d763 100644
+--- a/build_sdk.py
++++ b/build_sdk.py
+@@ -303,6 +303,7 @@ SUPPORTED_CONFIGS = (
+         kernel_options={
+             "KernelArmExportPMUUser": True,
+             "KernelDebugBuild": False,
++            "KernelPrinting": False,
+             "KernelVerificationBuild": False,
+             "KernelBenchmarks": "track_utilisation"
+         },
+diff --git a/monitor/src/main.c b/monitor/src/main.c
+index ab8d57c..116a41c 100644
+--- a/monitor/src/main.c
++++ b/monitor/src/main.c
+@@ -66,7 +66,7 @@
+ #include "debug.h"
+ 
+ #define MAX_VMS 64
+-#define MAX_PDS 64
++#define MAX_PDS 80
+ #define MAX_NAME_LEN 64
+ 
+ #define MAX_UNTYPED_REGIONS 256
+diff --git a/tool/microkit/src/lib.rs b/tool/microkit/src/lib.rs
+index cfc228d..1e12386 100644
+--- a/tool/microkit/src/lib.rs
++++ b/tool/microkit/src/lib.rs
+@@ -16,7 +16,7 @@ use std::fmt;
+ 
+ // Note that these values are used in the monitor so should also be changed there
+ // if any of these were to change.
+-pub const MAX_PDS: usize = 63;
++pub const MAX_PDS: usize = 79;
+ pub const MAX_VMS: usize = 63;
+ // It should be noted that if you were to change the value of
+ // the maximum PD/VM name length, you would also have to change
+diff --git a/tool/microkit/tests/sdf/sys_too_many_pds.system b/tool/microkit/tests/sdf/sys_too_many_pds.system
+index 2892e0f..3cd0563 100644
+--- a/tool/microkit/tests/sdf/sys_too_many_pds.system
++++ b/tool/microkit/tests/sdf/sys_too_many_pds.system
+@@ -69,4 +69,20 @@
+   <protection_domain name="test61"><program_image path="foo" /></protection_domain>
+   <protection_domain name="test62"><program_image path="foo" /></protection_domain>
+   <protection_domain name="test63"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test64"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test65"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test66"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test67"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test68"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test69"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test70"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test71"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test72"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test73"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test74"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test75"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test76"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test77"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test78"><program_image path="foo" /></protection_domain>
++  <protection_domain name="test79"><program_image path="foo" /></protection_domain>
+ </system>
+diff --git a/tool/microkit/tests/test.rs b/tool/microkit/tests/test.rs
+index 24be4fb..cbc4004 100644
+--- a/tool/microkit/tests/test.rs
++++ b/tool/microkit/tests/test.rs
+@@ -540,7 +540,7 @@ mod system {
+     fn test_too_many_pds() {
+         check_error(
+             "sys_too_many_pds.system",
+-            "Error: too many protection domains (64) defined. Maximum is 63.",
++            "Error: too many protection domains (80) defined. Maximum is 79.",
+         )
+     }
+ }

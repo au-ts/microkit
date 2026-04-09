@@ -287,7 +287,7 @@ enum UBSAN_CHECKS {
     UBSAN_VLA_BOUND_NOT_POSITIVE,
 };
 
-#ifdef CONFIG_ARM_HYPERVISOR_SUPPORT
+/* #ifdef CONFIG_ARM_HYPERVISOR_SUPPORT */
 static char *usban_code_to_string(seL4_Word code)
 {
     switch (code) {
@@ -345,7 +345,7 @@ static char *usban_code_to_string(seL4_Word code)
         return "unknown reason";
     }
 }
-#endif
+/* #endif */
 
 static void print_tcb_registers(seL4_UserContext *regs)
 {
@@ -831,6 +831,9 @@ static void monitor(void)
         }
         case seL4_Fault_UserException: {
             puts("MON|ERROR: UserException\n");
+            puts("MON|ERROR: potential undefined behaviour detected by UBSAN for: '");
+            puts(usban_code_to_string(regs.rax));
+            puts("'\n");
             break;
         }
         case seL4_Fault_VMFault: {

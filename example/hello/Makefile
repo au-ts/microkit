@@ -60,7 +60,10 @@ REPORT_FILE = $(BUILD_DIR)/report.txt
 
 all: $(IMAGE_FILE)
 
-$(BUILD_DIR)/%.o: %.c Makefile
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+$(BUILD_DIR)/%.o: %.c Makefile $(BUILD_DIR)
 	$(CC) -c $(CFLAGS) $< -o $@
 
 $(BUILD_DIR)/hello.elf: $(addprefix $(BUILD_DIR)/, $(HELLO_OBJS))
@@ -68,3 +71,13 @@ $(BUILD_DIR)/hello.elf: $(addprefix $(BUILD_DIR)/, $(HELLO_OBJS))
 
 $(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) hello.system
 	$(MICROKIT_TOOL) hello.system --search-path $(BUILD_DIR) --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE)
+
+qemu: $(IMAGE_FILE)
+	qemu-system-aarch64 \
+		-machine virt,virtualization=on -cpu cortex-a53 \
+		-m size=2G \
+		-serial mon:stdio \
+		-global virtio-mmio.force-legacy=false \
+		-device loader,file=$(IMAGE_FILE),addr=0x70000000,cpu-num=0 \
+		-nographic \
+		-d guest_errors
