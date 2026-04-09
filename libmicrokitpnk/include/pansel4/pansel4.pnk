@@ -33,6 +33,7 @@
 /@ extern function capsUnwrapped_of(x: Int): Int @/
 /@ extern function extraCaps_of(x: Int): Int @/
 /@ extern function length_of(x: Int): Int @/
+/@ extern function AbsMsgInfo_IRQAckIRQ(): Int @/
 
 // the following come from the Microkit tool's CapDL export
 /@ extern function pansel4_has_cap(x: Int): Bool @/
@@ -96,12 +97,12 @@ fun panseL4_MessageInfo_t panseL4_MessageInfo_new(1 label, 1 capsUnwrapped, 1 ex
 /@ method ffiouter_seL4_MessageInfo_IRQAckIRQ(c: Int, c2: Int, a: Int, a2: Int)
    requires acc(heap[LIBSEL4_FFI_OFFSET])
    ensures acc(heap[LIBSEL4_FFI_OFFSET])
-   ensures IsAbsMsgInfo(heap[LIBSEL4_FFI_OFFSET])
+   ensures heap[LIBSEL4_FFI_OFFSET] == AbsMsgInfo_IRQAckIRQ()
 @/
 fun panseL4_MessageInfo_t panseL4_MessageInfo_IRQAckIRQ() {
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
     /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
-    /@ ensures IsAbsMsgInfo(retval) @/
+    /@ ensures retval == AbsMsgInfo_IRQAckIRQ() @/
     @outer_seL4_MessageInfo_IRQAckIRQ(0, 0, LIBSEL4_FFI_OFFSET, 0);
     var ret = lds 1 LIBSEL4_FFI_OFFSET;
     return ret;
