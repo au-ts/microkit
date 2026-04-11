@@ -12,6 +12,14 @@
 #define PD_MASK 255
 #define CHANNEL_MASK 63
 
+
+/@ extern field pending_protected_call: Int @/ 
+/@ extern field pending_fault_call: Int @/ 
+/@ extern field pending_notified: Set[Int] @/ 
+
+/@ extern function mkGhost(): Ref @/ 
+/@ extern function mk_state_wf(pp: Int, pf: Int, ns: Set[Int]): Bool @/ 
+
 var panseL4_Bool microkit_have_signal = false;
 var panseL4_CPtr microkit_signal_cap = 0;
 var panseL4_MessageInfo_t microkit_signal_msg = 0;
@@ -21,8 +29,8 @@ var panseL4_Word patched_microkit_notifications = 0;
 var panseL4_Word patched_microkit_pps = 0;
 var panseL4_Word patched_microkit_ioports = 0;
 
-fun 1 handler_loop()
-{
+fun handler_loop() {
+    /@ requires acc(gv.patched_microkit_irqs) @/
     var 1 irq_index = 0;
     var panseL4_Word irqs_to_ack = patched_microkit_irqs;
     while (irqs_to_ack != 0) {
@@ -36,6 +44,12 @@ fun 1 handler_loop()
     var panseL4_Bool have_reply = false;
     var panseL4_MessageInfo_t reply_tag = 0;
     while (true) {
+        /@ invariant acc(gv.microkit_have_signal) @/
+
+        /@ inhale acc(mkGhost().pending_protected_call) @/
+        /@ inhale acc(mkGhost().pending_fault_call) @/
+        /@ inhale acc(mkGhost().pending_notified) @/
+        /@ assume mk_state_wf(mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified) @/
         var panseL4_Response response = <0,0>;
         if (have_reply) {
             response = panseL4_ReplyRecv(INPUT_CAP, reply_tag, REPLY_CAP);
@@ -79,13 +93,14 @@ fun 1 handler_loop()
     return 0;
 }
 
+/@ method ffimicrokit_get_constant(c: Int, c2: Int, a: Int, a2: Int) @/
 fun 1 microkit_get_constant(1 constant) {
     @microkit_get_constant(0, 0, LIBMICROKIT_FFI_OFFSET, constant);
     var ret = lds 1 LIBMICROKIT_FFI_OFFSET;
     return ret;
 }
 
-fun 1 main() {
+fun main() {
     patched_microkit_irqs = microkit_get_constant(0);
     patched_microkit_notifications = microkit_get_constant(1);
     patched_microkit_pps = microkit_get_constant(2);

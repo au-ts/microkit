@@ -78,7 +78,6 @@ export fun microkit_deferred_notify(microkit_channel ch) {
 
 export fun microkit_deferred_irq_ack(microkit_channel ch) {
     microkit_have_signal = true;
-    //microkit_signal_msg = panseL4_MessageInfo_new(IRQAckIRQ, 0, 0, 0);
     microkit_signal_msg = panseL4_MessageInfo_IRQAckIRQ();
     microkit_signal_cap = BASE_IRQ_CAP + ch;
     return 0;
