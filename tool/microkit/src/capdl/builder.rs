@@ -1100,7 +1100,9 @@ pub fn build_capdl_spec(
                 pd_root_cnode_cap,
             ));
             // XXX: change this to root? or is this fine
-            pd_id_to_cspace_id.insert(pd_global_idx, pd_cnode_obj_id);
+            // pd_id_to_cspace_id.insert(pd_global_idx, pd_cnode_obj_id);
+            // Change this to root so can insert other sub-CNodes
+            pd_id_to_cspace_id.insert(pd_global_idx, pd_root_cnode_obj_id);
         } else {
             let pd_cnode_obj_id = capdl_util_make_cnode_obj(
                 &mut spec_container,
@@ -1162,6 +1164,29 @@ pub fn build_capdl_spec(
                 (MON_BASE_NOTIFICATION_CAP as usize + pd_global_idx) as u32,
                 capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0),
             );
+        }
+    }
+
+
+    // // *********************************
+    // // Step 4. Insert shared sub-cnode for ACPI and PCI driver
+    // // *********************************
+    for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
+        println!("pd name: {:?}", pd.name);
+        if pd.name == "hello" {
+            let pci_resources_cnode_size_bits = 8; // TODO:
+            let pci_resources_cnode_obj_id = capdl_util_make_cnode_obj(
+                &mut spec_container,
+                &(pd.name.clone() + "_pci_resources"),
+                pci_resources_cnode_size_bits,
+                Vec::new(),
+                false,
+            );
+            let pd_cspace_id = *pd_id_to_cspace_id.get(&pd_global_idx).unwrap();
+
+            let pd_guard_size = 50;
+            let pci_resources_cnode_cap = capdl_util_make_cnode_cap(pci_resources_cnode_obj_id, 0, pd_guard_size as u8);
+            capdl_util_insert_cap_into_cspace(&mut spec_container, pd_cspace_id, 2, pci_resources_cnode_cap);
         }
     }
 
