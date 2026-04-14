@@ -50,26 +50,39 @@ jobs:
         march: ${{ matrix.march }}
         compiler: ${{ matrix.compiler }}
 
-  hw-build:
-    name: HW Build
+  sdk-build:
+    name: SDK Build
     needs: code
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        march: [aarch64, x86_64, riscv64]
-        compiler: [gcc]
     steps:
     - name: Build
       uses: au-ts/seL4-ci-actions/microkit-hw@julia/microkit
       with:
         xml: ${{ needs.code.outputs.xml }}
-        march: ${{ matrix.march }}
-        compiler: ${{ matrix.compiler }}
-    - name: Upload images
+        manifest_repo: au-ts/microkit-manifest
+        manifest_branch: main
+        manifest: main.xml
+
+    - name: Upload SDK (macos-aarch64)
       uses: actions/upload-artifact@v4
       with:
-        name: images-${{ matrix.march }}-${{ matrix.compiler }}
-        path: '*-images.tar.gz'
+        name: microkit-sdk-${{ env.SDK_VERSION }}-macos-aarch64
+        path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-macos-aarch64.tar.gz
+    - name: Upload SDK (macos-x86-64)
+      uses: actions/upload-artifact@v4
+      with:
+        name: microkit-sdk-${{ env.SDK_VERSION }}-macos-x86-64
+        path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-macos-x86-64.tar.gz
+    - name: Upload SDK (linux-aarch64)
+      uses: actions/upload-artifact@v4
+      with:
+        name: microkit-sdk-${{ env.SDK_VERSION }}-linux-aarch64
+        path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-linux-aarch64.tar.gz
+    - name: Upload SDK (linux-x86-64)
+      uses: actions/upload-artifact@v4
+      with:
+        name: microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64
+        path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64.tar.gz
 
   the_matrix:
     name: Matrix
