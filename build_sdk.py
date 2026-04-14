@@ -886,7 +886,7 @@ def github_actions_matrix(
 
     matrix = {
         "include": [
-            {"platform": board.name, "march": board.arch.to_str(), "compiler": compiler}
+            {"platform": board.name, "march": board.arch.to_str()}
             for (board, _) in build_goals
         ],
     }

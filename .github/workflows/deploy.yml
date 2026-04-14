@@ -158,16 +158,14 @@ jobs:
         with:
           repository: seL4/machine_queue
           path: machine_queue
-      - name: Download image
+      - name: Download microkit SDK
         uses: actions/download-artifact@v4
         with:
-          name: images-${{ matrix.march }}-${{ matrix.compiler }}
+          name: microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64
       - name: Run
         uses: au-ts/seL4-ci-actions/microkit-hw-run@julia/microkit
         with:
           platform: ${{ matrix.platform }}
-          compiler: ${{ matrix.compiler }}
-          mode: ${{ matrix.mode }}
           index: $${{ strategy.job-index }}
         env:
           HW_SSH: ${{ secrets.HW_SSH }}
