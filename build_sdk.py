@@ -891,7 +891,14 @@ def github_actions_matrix(
         ],
     }
 
-    gh_output("matrix=" + json.dumps(matrix))
+    test_cases = [
+        { "platform": board.name, "march": board.arch.to_str(), "config": config.name }
+        for (board, configs) in build_goals
+        for config in configs
+    ]
+
+    gh_output("gh_matrix=" + json.dumps(matrix))
+    gh_output("test_cases=" + json.dumps(test_cases))
 
 
 def main() -> None:

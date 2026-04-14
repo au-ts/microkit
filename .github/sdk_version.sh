@@ -18,3 +18,4 @@ else
 fi
 
 echo "SDK_VERSION=${VERSION}" >> "${GITHUB_ENV}"
+echo "SDK_VERSION=${VERSION}" >> "${GITHUB_OUTPUT}"
