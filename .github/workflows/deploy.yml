@@ -56,9 +56,13 @@ jobs:
     runs-on: [self-hosted, macos, ARM64]
     steps:
       - name: Checkout code
-        uses: au-ts/seL4-ci-actions/repo-checkout-xml@julia/microkit
+        uses: au-ts/seL4-ci-actions/repo-checkout@julia/microkit
         with:
           xml: ${{ needs.code.outputs.xml }}
+          # needed for reasons...
+          manifest_repo: au-ts/microkit-manifest
+          manifest_branch: main
+          manifest: main.xml
       - name: Get Nix dependencies
         run: nix develop -c bash -c 'echo Hello World'
         working-directory: ./microkit/
