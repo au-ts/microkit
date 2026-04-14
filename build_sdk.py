@@ -18,7 +18,7 @@ from os import popen, system, environ
 import shutil
 from pathlib import Path
 from dataclasses import dataclass
-from sys import executable
+from sys import executable, stderr
 from tarfile import open as tar_open, TarInfo
 import platform as host_platform
 from enum import IntEnum
@@ -870,6 +870,26 @@ def build_initialiser(
     dest.chmod(0o744)
 
 
+def github_actions_matrix(compiler: str) -> None:
+    def gh_output(assgn: str) -> None:
+        """Set a GitHub action output variable"""
+        fname = environ.get("GITHUB_OUTPUT")
+        if not fname:
+            print("Warning: GITHUB_OUTPUT not set, wrote to github.output", file=stderr)
+            fname = "github.output"
+        with open(fname, "a") as file:
+            print(assgn, file=file)
+
+    matrix = {
+        "include": [
+            { "platform": board.name, "march": board.arch.to_str(), "compiler": compiler }
+            for board in SUPPORTED_BOARDS
+        ],
+    }
+
+    gh_output("matrix=" + json.dumps(matrix))
+
+
 def main() -> None:
     parser = ArgumentParser()
     parser.add_argument("--sel4", type=Path, required=True)
@@ -884,6 +904,7 @@ def main() -> None:
     parser.add_argument("--skip-docs", action="store_true", help="Docs will not be built")
     parser.add_argument("--skip-tar", action="store_true", help="SDK and source tarballs will not be built")
     parser.add_argument("--release-packaging", action="store_true", help="All SDKs for distribution will be produced")
+    parser.add_argument("--matrix", action="store_true", help="Print out GitHub actions HW run matrix")
     # Read from the version file as unless someone has specified
     # a version, that is the source of truth
     with open("VERSION", "r") as f:
@@ -894,6 +915,10 @@ def main() -> None:
         parser.add_argument(f"--gcc-toolchain-prefix-{arch_str}", default=arch.target_triple(), help=f"GCC toolchain prefix when compiling for {arch_str}, e.g {arch_str}-none-elf")
 
     args = parser.parse_args()
+
+    if args.matrix:
+        github_actions_matrix("llvm" if args.llvm else "gcc")
+        return
 
     global TRIPLE_AARCH64
     global TRIPLE_RISCV

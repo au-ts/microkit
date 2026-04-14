@@ -28,12 +28,12 @@ jobs:
     outputs:
       xml: ${{ steps.repo.outputs.xml }}
     steps:
-    - id: repo
-      uses: au-ts/seL4-ci-actions/repo-checkout@julia/microkit
-      with:
-        manifest_repo: au-ts/microkit-manifest
-        manifest_branch: main
-        manifest: main.xml
+      - id: repo
+        uses: au-ts/seL4-ci-actions/repo-checkout@julia/microkit
+        with:
+          manifest_repo: au-ts/microkit-manifest
+          manifest_branch: main
+          manifest: main.xml
 
   sim:
     name: Simulation
@@ -44,45 +44,50 @@ jobs:
         march: [aarch64, x86_64, riscv64]
         compiler: [gcc]
     steps:
-    - uses: au-ts/seL4-ci-actions/microkit-sim@julia/microkit
-      with:
-        xml: ${{ needs.code.outputs.xml }}
-        march: ${{ matrix.march }}
-        compiler: ${{ matrix.compiler }}
+      - uses: au-ts/seL4-ci-actions/microkit-sim@julia/microkit
+        with:
+          xml: ${{ needs.code.outputs.xml }}
+          march: ${{ matrix.march }}
+          compiler: ${{ matrix.compiler }}
 
   sdk-build:
     name: SDK Build
     needs: code
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macos, ARM64]
     steps:
-    - name: Build
-      uses: au-ts/seL4-ci-actions/microkit-hw@julia/microkit
-      with:
-        xml: ${{ needs.code.outputs.xml }}
-        manifest_repo: au-ts/microkit-manifest
-        manifest_branch: main
-        manifest: main.xml
-
-    - name: Upload SDK (macos-aarch64)
-      uses: actions/upload-artifact@v4
-      with:
-        name: microkit-sdk-${{ env.SDK_VERSION }}-macos-aarch64
-        path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-macos-aarch64.tar.gz
-    - name: Upload SDK (macos-x86-64)
-      uses: actions/upload-artifact@v4
-      with:
-        name: microkit-sdk-${{ env.SDK_VERSION }}-macos-x86-64
-        path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-macos-x86-64.tar.gz
-    - name: Upload SDK (linux-aarch64)
-      uses: actions/upload-artifact@v4
-      with:
-        name: microkit-sdk-${{ env.SDK_VERSION }}-linux-aarch64
-        path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-linux-aarch64.tar.gz
-    - name: Upload SDK (linux-x86-64)
-      uses: actions/upload-artifact@v4
-      with:
-        name: microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64
-        path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64.tar.gz
+      - name: Checkout code
+        uses: au-ts/seL4-ci-actions/repo-checkout-xml@julia/microkit
+        with:
+          xml: ${{ needs.code.outputs.xml }}
+      - name: Get Nix dependencies
+        run: nix develop -c bash -c 'echo Hello World'
+        working-directory: ./microkit/
+      - name: Set version
+        run: echo "SDK_VERSION=$(./ci/sdk_version.sh)" >> $GITHUB_ENV
+        working-directory: ./microkit/
+      - name: Build SDK
+        run: nix develop --ignore-environment -c bash -c "python3 build_sdk.py --sel4=../seL4 --version ${{ env.SDK_VERSION }} --gcc-toolchain-prefix-x86_64 x86_64-elf --gcc-toolchain-prefix-riscv64 riscv64-none-elf --release-packaging"
+        working-directory: ./microkit/
+      - name: Upload SDK (macos-aarch64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: microkit-sdk-${{ env.SDK_VERSION }}-macos-aarch64
+          path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-macos-aarch64.tar.gz
+      - name: Upload SDK (macos-x86-64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: microkit-sdk-${{ env.SDK_VERSION }}-macos-x86-64
+          path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-macos-x86-64.tar.gz
+      - name: Upload SDK (linux-aarch64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: microkit-sdk-${{ env.SDK_VERSION }}-linux-aarch64
+          path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-linux-aarch64.tar.gz
+      - name: Upload SDK (linux-x86-64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64
+          path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64.tar.gz
 
   the_matrix:
     name: Matrix
@@ -91,8 +96,14 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
-    - id: matrix
-      uses: au-ts/seL4-ci-actions/microkit-hw-matrix@julia/microkit
+      - name: Checkout code
+        uses: au-ts/seL4-ci-actions/repo-checkout-xml@julia/microkit
+        with:
+          xml: ${{ needs.code.outputs.xml }}
+      - id: matrix
+        working-directory: ./microkit/
+        run: |
+          python3 build_sdk.py --sel4=../seL4 --matrix
 
   hw-run:
     name: HW Run
@@ -124,11 +135,28 @@ jobs:
         env:
           HW_SSH: ${{ secrets.HW_SSH }}
 
+  # Not used for HW Run, just to confirm it builds on Linux outside of Nix.
+  sdk-build-linux:
+    name: Build SDK (Linux x86_64)
+    runs-on: ubuntu-24.04
+    needs: code
+    steps:
+      - name: Checkout code
+        uses: au-ts/seL4-ci-actions/repo-checkout-xml@julia/microkit
+        with:
+          xml: ${{ needs.code.outputs.xml }}
+      - name: Install SDK dependencies
+        run: ./.github/install_ubuntu_deps.sh
+      - name: Set version
+        run: echo "SDK_VERSION=$(./ci/sdk_version.sh)" >> $GITHUB_ENV
+      - name: Build SDK (x86-64)
+        run: ./pyenv/bin/python build_sdk.py --sel4=seL4 --version ${{ env.SDK_VERSION }}-linux-x86-64 --tool-target-triple="x86_64-unknown-linux-musl"
+
   deploy:
     name: Deploy manifest
     if: ${{ github.repository_owner == 'au-ts' }}
     runs-on: ubuntu-22.04
-    needs: [code, hw-run]
+    needs: [code, hw-run, sdk-build-linux]
     steps:
     - name: Deploy
       uses: au-ts/seL4-ci-actions/manifest-deploy@julia/microkit
