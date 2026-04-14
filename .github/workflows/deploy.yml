@@ -34,6 +34,7 @@ jobs:
           manifest_repo: au-ts/microkit-manifest
           manifest_branch: main
           manifest: main.xml
+          use_venv: true
 
   sim:
     name: Simulation
@@ -55,6 +56,8 @@ jobs:
     needs: code
     runs-on: [self-hosted, macos, ARM64]
     steps:
+      - name: clean work dir (because self hosted)
+        run: rm -rf ./*
       - name: Checkout code
         uses: au-ts/seL4-ci-actions/repo-checkout@julia/microkit
         with:
@@ -63,6 +66,7 @@ jobs:
           manifest_repo: au-ts/microkit-manifest
           manifest_branch: main
           manifest: main.xml
+          use_venv: true
       - name: Set version
         run: |
           git fetch --tags --unshallow
@@ -110,6 +114,7 @@ jobs:
           manifest_repo: au-ts/microkit-manifest
           manifest_branch: main
           manifest: main.xml
+          use_venv: true
       - name: Set version
         run: |
           git fetch --tags --unshallow
@@ -137,6 +142,7 @@ jobs:
           manifest_repo: au-ts/microkit-manifest
           manifest_branch: main
           manifest: main.xml
+          use_venv: true
       - id: matrix
         working-directory: ./microkit/
         run: |
