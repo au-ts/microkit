@@ -32,6 +32,7 @@ jobs:
       uses: au-ts/seL4-ci-actions/repo-checkout@julia/microkit
       with:
         manifest_repo: au-ts/microkit-manifest
+        manifest_branch: main
         manifest: main.xml
 
   sim:
@@ -121,5 +122,6 @@ jobs:
       with:
         xml: ${{ needs.code.outputs.xml }}
         manifest_repo: au-ts/microkit-manifest
+        manifest_branch: main
       env:
         GH_SSH: ${{ secrets.CI_SSH }}
