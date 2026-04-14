@@ -116,7 +116,7 @@ jobs:
         working-directory: ./microkit/
       - name: Build SDK (x86-64)
       # TODO: remove maaxboard
-        run: ./pyenv/bin/python build_sdk.py --boards maaxboard --sel4=seL4 --version ${{ env.SDK_VERSION }}-linux-x86-64 --tool-target-triple="x86_64-unknown-linux-musl" --release-packaging
+        run: ./pyenv/bin/python build_sdk.py --boards maaxboard --sel4=../seL4 --version ${{ env.SDK_VERSION }}-linux-x86-64 --tool-target-triple="x86_64-unknown-linux-musl" --release-packaging
         working-directory: ./microkit/
 
       # TODO: go back to that ^^
