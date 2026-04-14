@@ -98,20 +98,26 @@ jobs:
     needs: code
     steps:
       - name: Checkout code
-        uses: au-ts/seL4-ci-actions/repo-checkout-xml@julia/microkit
+        uses: au-ts/seL4-ci-actions/repo-checkout@julia/microkit
         with:
           xml: ${{ needs.code.outputs.xml }}
-      - name: Install SDK dependencies
-        run: ./.github/install_ubuntu_deps.sh
+          # needed for reasons...
+          manifest_repo: au-ts/microkit-manifest
+          manifest_branch: main
+          manifest: main.xml
+      - name: Fetch tags
+        run: git fetch --tags
         working-directory: ./microkit/
       - name: Set version
         run: echo "SDK_VERSION=$(./ci/sdk_version.sh)" >> $GITHUB_ENV
+        working-directory: ./microkit/
+      - name: Install SDK dependencies
+        run: ./.github/install_ubuntu_deps.sh
         working-directory: ./microkit/
       - name: Build SDK (x86-64)
       # TODO: remove maaxboard
         run: ./pyenv/bin/python build_sdk.py --boards maaxboard --sel4=seL4 --version ${{ env.SDK_VERSION }}-linux-x86-64 --tool-target-triple="x86_64-unknown-linux-musl" --release-packaging
         working-directory: ./microkit/
-
 
       # TODO: go back to that ^^
       - name: Upload SDK (macos-aarch64)
@@ -147,6 +153,10 @@ jobs:
         uses: au-ts/seL4-ci-actions/repo-checkout-xml@julia/microkit
         with:
           xml: ${{ needs.code.outputs.xml }}
+          # needed for reasons...
+          manifest_repo: au-ts/microkit-manifest
+          manifest_branch: main
+          manifest: main.xml
       - id: matrix
         working-directory: ./microkit/
         run: |
