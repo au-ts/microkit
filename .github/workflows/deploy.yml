@@ -186,7 +186,8 @@ jobs:
     name: Deploy manifest
     if: ${{ github.repository_owner == 'au-ts' }}
     runs-on: ubuntu-22.04
-    needs: [code, hw-run, sdk-build-linux]
+    needs: [code, hw-run]
+    # needs: [code, hw-run, sdk-build-linux]
     steps:
     - name: Deploy
       uses: au-ts/seL4-ci-actions/manifest-deploy@julia/microkit
