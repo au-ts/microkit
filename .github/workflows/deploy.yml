@@ -105,6 +105,8 @@ jobs:
           manifest_repo: au-ts/microkit-manifest
           manifest_branch: main
           manifest: main.xml
+        env:
+          REPO_DEPTH: 0
       - name: Fetch tags
         run: git fetch --tags
         working-directory: ./microkit/
