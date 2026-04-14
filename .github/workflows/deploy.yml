@@ -63,11 +63,13 @@ jobs:
           manifest_repo: au-ts/microkit-manifest
           manifest_branch: main
           manifest: main.xml
+      - name: Set version
+        run: |
+          git fetch --tags --unshallow
+          ./.github/sdk_version.sh
+        working-directory: ./microkit/
       - name: Get Nix dependencies
         run: nix develop -c bash -c 'echo Hello World'
-        working-directory: ./microkit/
-      - name: Set version
-        run: echo "SDK_VERSION=$(./ci/sdk_version.sh)" >> $GITHUB_ENV
         working-directory: ./microkit/
       - name: Build SDK
         run: nix develop --ignore-environment -c bash -c "python3 build_sdk.py --sel4=../seL4 --version ${{ env.SDK_VERSION }} --gcc-toolchain-prefix-x86_64 x86_64-elf --gcc-toolchain-prefix-riscv64 riscv64-none-elf --release-packaging"
@@ -107,11 +109,10 @@ jobs:
           manifest_repo: au-ts/microkit-manifest
           manifest_branch: main
           manifest: main.xml
-      - name: Fetch tags
-        run: git fetch --tags --unshallow
-        working-directory: ./microkit/
       - name: Set version
-        run: ./.github/sdk_version.sh
+        run: |
+          git fetch --tags --unshallow
+          ./.github/sdk_version.sh
         working-directory: ./microkit/
       - name: Install SDK dependencies
         run: ./.github/install_ubuntu_deps.sh
