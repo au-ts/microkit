@@ -124,7 +124,7 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - name: Checkout code
-        uses: au-ts/seL4-ci-actions/repo-checkout-xml@julia/microkit
+        uses: au-ts/seL4-ci-actions/repo-checkout@julia/microkit
         with:
           xml: ${{ needs.code.outputs.xml }}
           # needed for reasons...
