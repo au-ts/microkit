@@ -3,7 +3,7 @@
 # Copyright 2024, UNSW
 # SPDX-License-Identifier: BSD-2-Clause
 
-set -e
+set -ex
 
 VERSION=`cat VERSION`
 LATEST_TAG=`git describe --tags --abbrev=0`
@@ -17,4 +17,4 @@ else
     VERSION="$VERSION.$NUM_COMMITS+$HEAD"
 fi
 
-echo "SDK_VERSION=${VERSION}" >> $GITHUB_ENV
+echo "SDK_VERSION=${VERSION}" >> "${GITHUB_ENV}"
