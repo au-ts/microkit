@@ -72,7 +72,8 @@ jobs:
         run: nix develop -c bash -c 'echo Hello World'
         working-directory: ./microkit/
       - name: Build SDK
-        run: nix develop --ignore-environment -c bash -c "python3 build_sdk.py --sel4=../seL4 --version ${{ env.SDK_VERSION }} --gcc-toolchain-prefix-x86_64 x86_64-elf --gcc-toolchain-prefix-riscv64 riscv64-none-elf --release-packaging"
+        # TODO: remove boards
+        run: nix develop --ignore-environment -c bash -c "python3 build_sdk.py --boards maaxboard --sel4=../seL4 --version ${{ env.SDK_VERSION }} --gcc-toolchain-prefix-x86_64 x86_64-elf --gcc-toolchain-prefix-riscv64 riscv64-none-elf --release-packaging"
         working-directory: ./microkit/
       - name: Upload SDK (macos-aarch64)
         uses: actions/upload-artifact@v4
