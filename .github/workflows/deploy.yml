@@ -50,8 +50,9 @@ jobs:
           march: ${{ matrix.march }}
           compiler: ${{ matrix.compiler }}
 
-  sdk-build:
-    name: SDK Build
+  # TODO: go back to that ^^
+  sdk-build-macos:
+    name: Build SDK (macOS, all targets)
     needs: code
     runs-on: [self-hosted, macos, ARM64]
     steps:
@@ -68,6 +69,51 @@ jobs:
       - name: Build SDK
         run: nix develop --ignore-environment -c bash -c "python3 build_sdk.py --sel4=../seL4 --version ${{ env.SDK_VERSION }} --gcc-toolchain-prefix-x86_64 x86_64-elf --gcc-toolchain-prefix-riscv64 riscv64-none-elf --release-packaging"
         working-directory: ./microkit/
+      # - name: Upload SDK (macos-aarch64)
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: microkit-sdk-${{ env.SDK_VERSION }}-macos-aarch64
+      #     path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-macos-aarch64.tar.gz
+      # - name: Upload SDK (macos-x86-64)
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: microkit-sdk-${{ env.SDK_VERSION }}-macos-x86-64
+      #     path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-macos-x86-64.tar.gz
+      # - name: Upload SDK (linux-aarch64)
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: microkit-sdk-${{ env.SDK_VERSION }}-linux-aarch64
+      #     path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-linux-aarch64.tar.gz
+      # - name: Upload SDK (linux-x86-64)
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64
+      #     path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64.tar.gz
+
+  # Not used for HW Run, just to confirm it builds on Linux outside of Nix.
+  # TODO: go back to that ^^
+  sdk-build:
+    name: Build SDK (Linux x86_64)
+    runs-on: ubuntu-24.04
+    needs: code
+    steps:
+      - name: Checkout code
+        uses: au-ts/seL4-ci-actions/repo-checkout-xml@julia/microkit
+        with:
+          xml: ${{ needs.code.outputs.xml }}
+      - name: Install SDK dependencies
+        run: ./.github/install_ubuntu_deps.sh
+        working-directory: ./microkit/
+      - name: Set version
+        run: echo "SDK_VERSION=$(./ci/sdk_version.sh)" >> $GITHUB_ENV
+        working-directory: ./microkit/
+      - name: Build SDK (x86-64)
+      # TODO: remove maaxboard
+        run: ./pyenv/bin/python build_sdk.py --boards maaxboard --sel4=seL4 --version ${{ env.SDK_VERSION }}-linux-x86-64 --tool-target-triple="x86_64-unknown-linux-musl" --release-packaging
+        working-directory: ./microkit/
+
+
+      # TODO: go back to that ^^
       - name: Upload SDK (macos-aarch64)
         uses: actions/upload-artifact@v4
         with:
@@ -89,6 +135,7 @@ jobs:
           name: microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64
           path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64.tar.gz
 
+
   the_matrix:
     name: Matrix
     needs: sdk-build
@@ -103,7 +150,7 @@ jobs:
       - id: matrix
         working-directory: ./microkit/
         run: |
-          python3 build_sdk.py --sel4=../seL4 --matrix
+          python3 build_sdk.py --sel4=../seL4 --matrix --boards maaxboard
 
   hw-run:
     name: HW Run
@@ -134,23 +181,6 @@ jobs:
           index: $${{ strategy.job-index }}
         env:
           HW_SSH: ${{ secrets.HW_SSH }}
-
-  # Not used for HW Run, just to confirm it builds on Linux outside of Nix.
-  sdk-build-linux:
-    name: Build SDK (Linux x86_64)
-    runs-on: ubuntu-24.04
-    needs: code
-    steps:
-      - name: Checkout code
-        uses: au-ts/seL4-ci-actions/repo-checkout-xml@julia/microkit
-        with:
-          xml: ${{ needs.code.outputs.xml }}
-      - name: Install SDK dependencies
-        run: ./.github/install_ubuntu_deps.sh
-      - name: Set version
-        run: echo "SDK_VERSION=$(./ci/sdk_version.sh)" >> $GITHUB_ENV
-      - name: Build SDK (x86-64)
-        run: ./pyenv/bin/python build_sdk.py --sel4=seL4 --version ${{ env.SDK_VERSION }}-linux-x86-64 --tool-target-triple="x86_64-unknown-linux-musl"
 
   deploy:
     name: Deploy manifest

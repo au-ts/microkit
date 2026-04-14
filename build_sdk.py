@@ -870,20 +870,24 @@ def build_initialiser(
     dest.chmod(0o744)
 
 
-def github_actions_matrix(compiler: str) -> None:
-    def gh_output(assgn: str) -> None:
-        """Set a GitHub action output variable"""
-        fname = environ.get("GITHUB_OUTPUT")
-        if not fname:
-            print("Warning: GITHUB_OUTPUT not set, wrote to github.output", file=stderr)
-            fname = "github.output"
-        with open(fname, "a") as file:
-            print(assgn, file=file)
+def gh_output(assgn: str) -> None:
+    """Set a GitHub action output variable"""
+    fname = environ.get("GITHUB_OUTPUT")
+    if not fname:
+        print("Warning: GITHUB_OUTPUT not set, wrote to github.output", file=stderr)
+        fname = "github.output"
+    with open(fname, "a") as file:
+        print(assgn, file=file)
+
+
+def github_actions_matrix(
+    compiler: str, build_goals: list[tuple[BoardInfo, list[ConfigInfo]]]
+) -> None:
 
     matrix = {
         "include": [
-            { "platform": board.name, "march": board.arch.to_str(), "compiler": compiler }
-            for board in SUPPORTED_BOARDS
+            {"platform": board.name, "march": board.arch.to_str(), "compiler": compiler}
+            for (board, _) in build_goals
         ],
     }
 
@@ -916,9 +920,6 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.matrix:
-        github_actions_matrix("llvm" if args.llvm else "gcc")
-        return
 
     global TRIPLE_AARCH64
     global TRIPLE_RISCV
@@ -956,6 +957,10 @@ def main() -> None:
             elaborated_configs = [config for config in elaborated_configs if config.name in selected_config_names]
 
         build_goals.append((board, elaborated_configs))
+
+    if args.matrix:
+        github_actions_matrix("llvm" if args.llvm else "gcc", build_goals)
+        return
 
     sel4_dir = args.sel4.expanduser()
     if not sel4_dir.exists():
