@@ -51,24 +51,24 @@ jobs:
           compiler: ${{ matrix.compiler }}
 
   # TODO: go back to that ^^
-  sdk-build-macos:
-    name: Build SDK (macOS, all targets)
-    needs: code
-    runs-on: [self-hosted, macos, ARM64]
-    steps:
-      - name: Checkout code
-        uses: au-ts/seL4-ci-actions/repo-checkout-xml@julia/microkit
-        with:
-          xml: ${{ needs.code.outputs.xml }}
-      - name: Get Nix dependencies
-        run: nix develop -c bash -c 'echo Hello World'
-        working-directory: ./microkit/
-      - name: Set version
-        run: echo "SDK_VERSION=$(./ci/sdk_version.sh)" >> $GITHUB_ENV
-        working-directory: ./microkit/
-      - name: Build SDK
-        run: nix develop --ignore-environment -c bash -c "python3 build_sdk.py --sel4=../seL4 --version ${{ env.SDK_VERSION }} --gcc-toolchain-prefix-x86_64 x86_64-elf --gcc-toolchain-prefix-riscv64 riscv64-none-elf --release-packaging"
-        working-directory: ./microkit/
+  # sdk-build-macos:
+  #   name: Build SDK (macOS, all targets)
+  #   needs: code
+  #   runs-on: [self-hosted, macos, ARM64]
+  #   steps:
+  #     - name: Checkout code
+  #       uses: au-ts/seL4-ci-actions/repo-checkout-xml@julia/microkit
+  #       with:
+  #         xml: ${{ needs.code.outputs.xml }}
+  #     - name: Get Nix dependencies
+  #       run: nix develop -c bash -c 'echo Hello World'
+  #       working-directory: ./microkit/
+  #     - name: Set version
+  #       run: echo "SDK_VERSION=$(./ci/sdk_version.sh)" >> $GITHUB_ENV
+  #       working-directory: ./microkit/
+  #     - name: Build SDK
+  #       run: nix develop --ignore-environment -c bash -c "python3 build_sdk.py --sel4=../seL4 --version ${{ env.SDK_VERSION }} --gcc-toolchain-prefix-x86_64 x86_64-elf --gcc-toolchain-prefix-riscv64 riscv64-none-elf --release-packaging"
+  #       working-directory: ./microkit/
       # - name: Upload SDK (macos-aarch64)
       #   uses: actions/upload-artifact@v4
       #   with:
