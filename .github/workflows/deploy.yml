@@ -86,7 +86,7 @@ jobs:
 
   the_matrix:
     name: Matrix
-    needs: hw-build
+    needs: sdk-build
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
