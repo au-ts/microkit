@@ -109,7 +109,7 @@ jobs:
         run: git fetch --tags
         working-directory: ./microkit/
       - name: Set version
-        run: echo "SDK_VERSION=$(./ci/sdk_version.sh)" >> $GITHUB_ENV
+        run: ./.github/sdk_version.sh
         working-directory: ./microkit/
       - name: Install SDK dependencies
         run: ./.github/install_ubuntu_deps.sh

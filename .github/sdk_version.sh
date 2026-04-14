@@ -14,5 +14,7 @@ if [[ $NUM_COMMITS -eq 0 ]];
 then
     echo "$VERSION"
 else
-    echo "$VERSION.$NUM_COMMITS+$HEAD"
+    VERSION="$VERSION.$NUM_COMMITS+$HEAD"
 fi
+
+echo "SDK_VERSION=${VERSION}" >> $GITHUB_ENV
