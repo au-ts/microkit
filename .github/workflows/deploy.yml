@@ -183,6 +183,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64
+      - name: Extract microkit SDK
+        run: |
+          tar xzvf ./microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64.tar.gz
+          tree ./
+          echo "MICROKIT_SDK=$(pwd)" >> "${GITHUB_ENV}"
       - name: Run
         uses: au-ts/seL4-ci-actions/microkit-hw-run@julia/microkit
         with:
