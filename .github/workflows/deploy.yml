@@ -152,8 +152,8 @@ jobs:
         run: |
           python3 build_sdk.py --sel4=../seL4 --matrix --boards maaxboard
 
-  hw-run:
-    name: HW Run
+  hw-build:
+    name: HW Test Builds
     if: ${{ github.repository_owner == 'au-ts' }}
     runs-on: ubuntu-latest
     needs: [sim, the_matrix, sdk-build]
@@ -161,7 +161,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.the_matrix.outputs.gh_matrix) }}
     # do not run concurrently with other workflows, but do run concurrently in the build matrix
-    concurrency: hw-run-${{ strategy.job-index }}
+    concurrency: hw-build-${{ strategy.job-index }}
     env:
       SDK_VERSION: ${{ needs.sdk-build.outputs.SDK_VERSION }}
     steps:
@@ -174,11 +174,6 @@ jobs:
           manifest_branch: main
           manifest: main.xml
           use_venv: true
-      - name: Get machine queue
-        uses: actions/checkout@v4
-        with:
-          repository: seL4/machine_queue
-          path: machine_queue
       - name: Download microkit SDK
         uses: actions/download-artifact@v4
         with:
@@ -189,6 +184,41 @@ jobs:
           export "MICROKIT_SDK=$(realpath ./microkit-sdk-${{ env.SDK_VERSION }}/)"
           stat "${MICROKIT_SDK}"
           echo "MICROKIT_SDK=${MICROKIT_SDK}" >> "${GITHUB_ENV}"
+      - name: Install SDK dependencies
+        run: ./.github/install_ubuntu_deps.sh
+      - name: Build
+        uses: au-ts/seL4-ci-actions/microkit-hw-build@julia/microkit
+        with:
+          platform: ${{ matrix.platform }}
+          index: $${{ strategy.job-index }}
+        env:
+          TEST_CASES: ${{ needs.the_matrix.outputs.test_cases }}
+      - name: Upload test case builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: loader-img-${{ matrix.platform }}
+          path: '*.loader.img'
+
+  hw-run:
+    name: HW Run
+    if: ${{ github.repository_owner == 'au-ts' }}
+    runs-on: ubuntu-latest
+    needs: [sim, the_matrix, hw-build]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.the_matrix.outputs.gh_matrix) }}
+    # do not run concurrently with other workflows, but do run concurrently in the build matrix
+    concurrency: hw-run-${{ strategy.job-index }}
+    steps:
+      - name: Get machine queue
+        uses: actions/checkout@v4
+        with:
+          repository: seL4/machine_queue
+          path: machine_queue
+      - name: Download test cases builds
+        uses: actions/download-artifact@v4
+        with:
+          name: loader-img-${{ matrix.platform }}
       - name: Run
         uses: au-ts/seL4-ci-actions/microkit-hw-run@julia/microkit
         with:
