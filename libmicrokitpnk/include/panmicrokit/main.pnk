@@ -17,6 +17,9 @@
 /@ extern field pending_fault_call: Int @/ 
 /@ extern field pending_notified: Set[Int] @/ 
 
+
+/@ extern function mk_pow2(x: Int): Int @/ 
+
 /@ extern function mkGhost(): Ref @/ 
 /@ extern function mk_state_wf(pp: Int, pf: Int, ns: Set[Int]): Bool @/ 
 
@@ -29,15 +32,39 @@ var panseL4_Word patched_microkit_notifications = 0;
 var panseL4_Word patched_microkit_pps = 0;
 var panseL4_Word patched_microkit_ioports = 0;
 
+
+#ifdef LIBMICROKIT_VERIFICATION_BW
+
+    fun panseL4_Word bwand1(panseL4_Word the_word) {
+        /@ ensures retval == the_word % 2 @/
+        var 1 ret = 0;
+        /@ assume ret == the_word % 2 @/
+        return ret;
+    }
+
+    fun panseL4_Word bwrshift1(panseL4_Word the_word) {
+        /@ ensures retval == the_word / 2 @/
+        var 1 ret = 0;
+        /@ assume ret == the_word / 2 @/
+        return ret;
+    }
+#else
+#define bwand1(the_word) (the_word & 1)
+#define bwrshift1(the_word) (the_word >>> 1)
+#endif
+
 fun handler_loop() {
     /@ requires acc(gv.patched_microkit_irqs) @/
+    /@ requires bounded64(gv.patched_microkit_irqs) @/
     var 1 irq_index = 0;
     var panseL4_Word irqs_to_ack = patched_microkit_irqs;
     while (irqs_to_ack != 0) {
-        if (irqs_to_ack & 1) {
+        /@ invariant (0 <= irq_index) && irq_index <= 64 && bounded64(irqs_to_ack) @/
+        var 1 cond = bwand1(irqs_to_ack);
+        if (cond) {
             microkit_irq_ack(irq_index);
         }
-        irqs_to_ack = irqs_to_ack >>> 1;
+        irqs_to_ack = bwrshift1(irqs_to_ack);
         irq_index = irq_index + 1;
     }
 

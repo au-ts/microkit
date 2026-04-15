@@ -143,6 +143,8 @@ field pending_protected_call: Int
 field pending_fault_call: Int
 field pending_notified: Set[Int]
 
+define f_mk_pow2(heap,gv,x) (mk_pow2(x))
+
 define f_mkGhost(heap,gv) (mkGhost())
 
 define f_mk_valid_pending_protected(heap,gv,pp)

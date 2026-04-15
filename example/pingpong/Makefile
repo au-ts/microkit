@@ -51,6 +51,9 @@ PINGSTAGE2 := $(BUILD_DIR)/stage2_processed.pnk
 PINGSTAGE3 := $(BUILD_DIR)/stage3_assembly.S
 PINGSTAGE4 := $(BUILD_DIR)/stage4_object.o
 
+
+PINGVSTAGE1 := $(BUILD_DIR)/vstage1_processed.pnk
+
 PINGELF := $(BUILD_DIR)/ping.elf
 PONGELF := $(BUILD_DIR)/pong.elf
 IMAGE   := $(BUILD_DIR)/loader.img
@@ -72,13 +75,17 @@ $(PINGSTAGE1): ping.pnk | $(BUILD_DIR)
 $(PINGSTAGE2): $(PINGSTAGE1) | $(BUILD_DIR)
 	$(CPP) -P -I$(BOARD_DIR)/include $< > $@
 
+$(PINGVSTAGE1): $(PINGSTAGE1) | $(BUILD_DIR)
+	$(CPP) -DLIBMICROKIT_VERIFICATION_BW -P -I$(BOARD_DIR)/include $< > $@
+
 # Stage3: compile all Pancake code into asm / machine code
-$(PINGSTAGE3): $(PINGSTAGE2) | $(BUILD_DIR)
+$(PINGSTAGE3): $(PINGSTAGE2) $(PINGVSTAGE1) | $(BUILD_DIR)
 	cat $< | cake --target=riscv --pancake --main_return=true > $@
 
 # Stage4: create object file from Stage3 asm
 $(PINGSTAGE4): $(PINGSTAGE3) | $(BUILD_DIR)
 	$(CC) -c -x assembler-with-cpp $(CFLAGS) $< -o $@
+
 
 # C pd (pong)
 $(BUILD_DIR)/pong.o: pong.c | $(BUILD_DIR)
