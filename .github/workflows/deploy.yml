@@ -185,7 +185,7 @@ jobs:
           name: microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64
       - name: Extract microkit SDK
         run: |
-          tar xzvf ./microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64.tar.gz
+          tar xzf ./microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64.tar.gz
           export "MICROKIT_SDK=$(realpath ./microkit-sdk-${{ env.SDK_VERSION }}/)"
           stat "${MICROKIT_SDK}"
           echo "MICROKIT_SDK=${MICROKIT_SDK}" >> "${GITHUB_ENV}"
