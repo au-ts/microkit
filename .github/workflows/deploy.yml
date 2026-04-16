@@ -186,8 +186,7 @@ jobs:
           stat "${MICROKIT_SDK}"
           echo "MICROKIT_SDK=${MICROKIT_SDK}" >> "${GITHUB_ENV}"
       - name: Install SDK dependencies
-        # TODO: install only the required build deps for platform based on march
-        run: ./.github/install_ubuntu_deps.sh
+        run: ./.github/install_march_build_deps.sh ${{ matrix.march }}
         working-directory: ./microkit/
       - name: Build
         uses: au-ts/seL4-ci-actions/microkit-hw-build@julia/microkit
