@@ -161,8 +161,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.the_matrix.outputs.gh_matrix) }}
-    # do not run concurrently with other workflows, but do run concurrently in the build matrix
-    concurrency: hw-build-${{ strategy.job-index }}
     env:
       SDK_VERSION: ${{ needs.sdk-build.outputs.SDK_VERSION }}
     steps:
