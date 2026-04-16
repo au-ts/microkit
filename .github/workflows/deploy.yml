@@ -59,8 +59,8 @@ jobs:
     outputs:
       SDK_VERSION: ${{ steps.version.outputs.SDK_VERSION }}
     steps:
-      - name: clean work dir (because self hosted) (this doesn't actually work)
-        run: rm -rf ./*
+      - name: Clean build
+        run: rm -rf .
       - name: Checkout code
         uses: au-ts/seL4-ci-actions/repo-checkout@julia/microkit
         with:
@@ -73,7 +73,6 @@ jobs:
       - name: Set version
         id: version
         run: |
-          git fetch --tags --unshallow
           ./.github/sdk_version.sh
         working-directory: ./microkit/
       - name: Get Nix dependencies
@@ -121,7 +120,6 @@ jobs:
           use_venv: true
       - name: Set version
         run: |
-          git fetch --tags --unshallow
           ./.github/sdk_version.sh
         working-directory: ./microkit/
       - name: Install SDK dependencies

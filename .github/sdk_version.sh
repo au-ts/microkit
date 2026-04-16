@@ -6,16 +6,20 @@
 set -ex
 
 VERSION=`cat VERSION`
-LATEST_TAG=`git describe --tags --abbrev=0`
-NUM_COMMITS=`git rev-list --count $LATEST_TAG..HEAD`
+
 HEAD=`git rev-parse --short HEAD`
 
-if [[ $NUM_COMMITS -eq 0 ]];
-then
+if ! LATEST_TAG=`git describe --tags --abbrev=0`; then
+    VERSION="$VERSION.unknown+$HEAD"
+elif ! NUM_COMMITS=`git rev-list --count $LATEST_TAG..HEAD`; then
+    VERSION="$VERSION.unknown+$HEAD"
+elif [[ $NUM_COMMITS -eq 0 ]]; then
     echo "$VERSION"
 else
     VERSION="$VERSION.$NUM_COMMITS+$HEAD"
 fi
+
+echo "SDK Version is '${VERSION}'"
 
 echo "SDK_VERSION=${VERSION}" >> "${GITHUB_ENV}"
 echo "SDK_VERSION=${VERSION}" >> "${GITHUB_OUTPUT}"
