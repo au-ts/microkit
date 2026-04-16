@@ -85,22 +85,22 @@ jobs:
         run: nix develop --ignore-environment -c bash -c "python3 build_sdk.py --boards maaxboard --sel4=../seL4 --version ${{ env.SDK_VERSION }} --gcc-toolchain-prefix-x86_64 x86_64-elf --gcc-toolchain-prefix-riscv64 riscv64-none-elf --release-packaging"
         working-directory: ./microkit/
       - name: Upload SDK (macos-aarch64)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: microkit-sdk-${{ env.SDK_VERSION }}-macos-aarch64
           path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-macos-aarch64.tar.gz
       - name: Upload SDK (macos-x86-64)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: microkit-sdk-${{ env.SDK_VERSION }}-macos-x86-64
           path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-macos-x86-64.tar.gz
       - name: Upload SDK (linux-aarch64)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: microkit-sdk-${{ env.SDK_VERSION }}-linux-aarch64
           path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-linux-aarch64.tar.gz
       - name: Upload SDK (linux-x86-64)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64
           path: microkit/release/microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64.tar.gz
@@ -174,7 +174,7 @@ jobs:
           manifest: main.xml
           use_venv: true
       - name: Download microkit SDK
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: microkit-sdk-${{ env.SDK_VERSION }}-linux-x86-64
       - name: Extract microkit SDK
@@ -194,7 +194,7 @@ jobs:
         env:
           TEST_CASES: ${{ needs.the_matrix.outputs.test_cases }}
       - name: Upload test case builds
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: loader-img-${{ matrix.platform }}
           path: '*.loader.img'
@@ -211,12 +211,12 @@ jobs:
     concurrency: hw-run-${{ strategy.job-index }}
     steps:
       - name: Get machine queue
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: seL4/machine_queue
           path: machine_queue
       - name: Download test cases builds
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: loader-img-${{ matrix.platform }}
       - name: Run
