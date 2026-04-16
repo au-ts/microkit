@@ -36,6 +36,7 @@ jobs:
           manifest: main.xml
           use_venv: true
 
+  # TODO: This is a noop that vacuuously succeeds. We should fix that.
   sim:
     name: Simulation
     needs: code
