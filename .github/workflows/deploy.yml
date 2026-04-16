@@ -60,7 +60,9 @@ jobs:
       SDK_VERSION: ${{ steps.version.outputs.SDK_VERSION }}
     steps:
       - name: Clean build
-        run: rm -rf .
+        run: |
+          rm -rf "$GITHUB_WORKSPACE"
+          mkdir -p "$GITHUB_WORKSPACE"
       - name: Checkout code
         uses: au-ts/seL4-ci-actions/repo-checkout@julia/microkit
         with:
