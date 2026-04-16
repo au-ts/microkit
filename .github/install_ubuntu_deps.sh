@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
 rustup install 1.94.0
 rustup default 1.94.0
 rustup target add x86_64-unknown-linux-musl
@@ -10,9 +12,9 @@ rustup target add x86_64-unknown-none
 
 sudo apt-get update
 
-NO_APT_UPDATE=1 ./install_march_build_deps.sh aarch64
-NO_APT_UPDATE=1 ./install_march_build_deps.sh riscv64
-NO_APT_UPDATE=1 ./install_march_build_deps.sh x86_64
+NO_APT_UPDATE=1 $SCRIPT_DIR/install_march_build_deps.sh aarch64
+NO_APT_UPDATE=1 $SCRIPT_DIR/install_march_build_deps.sh riscv64
+NO_APT_UPDATE=1 $SCRIPT_DIR/install_march_build_deps.sh x86_64
 
 # sel4-only dependencies
 sudo apt-get install -qq software-properties-common
