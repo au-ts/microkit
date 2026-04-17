@@ -148,10 +148,16 @@ jobs:
           manifest_branch: main
           manifest: main.xml
           use_venv: true
-      - id: matrix
+      - name: Get board matrix from microkit build_sdk
         working-directory: ./microkit/
         run: |
-          python3 build_sdk.py --sel4=../seL4 --matrix
+          python3 build_sdk.py --sel4=../seL4 --matrix=../build_sdk_matrix.json
+          TEST_CASES+$(cat ../build_sdk_matrix.json)
+          echo "test_cases=${TEST_CASES}" >> "${GITHUB_OUTPUT}"
+          echo "TEST_CASES=${TEST_CASES}" >> "${GITHUB_ENV}"
+      # uses test cases env var
+      - id: matrix
+        uses: au-ts/seL4-ci-actions/microkit-hw-matrix@julia/microkit
 
   hw-build:
     name: HW Test Builds
@@ -189,14 +195,14 @@ jobs:
       - name: Build
         uses: au-ts/seL4-ci-actions/microkit-hw-build@julia/microkit
         with:
-          platform: ${{ matrix.platform }}
+          board: ${{ matrix.board }}
           index: $${{ strategy.job-index }}
         env:
           TEST_CASES: ${{ needs.the_matrix.outputs.test_cases }}
       - name: Upload test case builds
         uses: actions/upload-artifact@v7
         with:
-          name: loader-img-${{ matrix.platform }}
+          name: loader-img-${{ matrix.board }}
           path: '*.loader.img'
 
   hw-run:
@@ -218,11 +224,11 @@ jobs:
       - name: Download test cases builds
         uses: actions/download-artifact@v8
         with:
-          name: loader-img-${{ matrix.platform }}
+          name: loader-img-${{ matrix.board }}
       - name: Run
         uses: au-ts/seL4-ci-actions/microkit-hw-run@julia/microkit
         with:
-          platform: ${{ matrix.platform }}
+          board: ${{ matrix.board }}
           index: $${{ strategy.job-index }}
         env:
           TEST_CASES: ${{ needs.the_matrix.outputs.test_cases }}

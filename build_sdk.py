@@ -870,35 +870,18 @@ def build_initialiser(
     dest.chmod(0o744)
 
 
-def gh_output(assgn: str) -> None:
-    """Set a GitHub action output variable"""
-    fname = environ.get("GITHUB_OUTPUT")
-    if not fname:
-        print("Warning: GITHUB_OUTPUT not set, wrote to github.output", file=stderr)
-        fname = "github.output"
-    with open(fname, "a") as file:
-        print(assgn, file=file)
-
-
-def github_actions_matrix(
-    compiler: str, build_goals: list[tuple[BoardInfo, list[ConfigInfo]]]
+def github_actions_board_matrix(
+    matrix_file: Path, build_goals: list[tuple[BoardInfo, list[ConfigInfo]]]
 ) -> None:
 
-    matrix = {
-        "include": [
-            {"platform": board.name, "march": board.arch.to_str()}
-            for (board, _) in build_goals
-        ],
-    }
-
-    test_cases = [
-        { "platform": board.name, "march": board.arch.to_str(), "config": config.name }
+    board_matrix = [
+        { "board": board.name, "march": board.arch.to_str(), "config": config.name }
         for (board, configs) in build_goals
         for config in configs
     ]
 
-    gh_output("gh_matrix=" + json.dumps(matrix))
-    gh_output("test_cases=" + json.dumps(test_cases))
+    with open(matrix_file, "w") as f:
+        json.dump(board_matrix, f)
 
 
 def main() -> None:
@@ -915,7 +898,7 @@ def main() -> None:
     parser.add_argument("--skip-docs", action="store_true", help="Docs will not be built")
     parser.add_argument("--skip-tar", action="store_true", help="SDK and source tarballs will not be built")
     parser.add_argument("--release-packaging", action="store_true", help="All SDKs for distribution will be produced")
-    parser.add_argument("--matrix", action="store_true", help="Print out GitHub actions HW run matrix")
+    parser.add_argument("--matrix", type=Path, help="Print out elaborated configs to a matrix for GitHub actions")
     # Read from the version file as unless someone has specified
     # a version, that is the source of truth
     with open("VERSION", "r") as f:
@@ -965,8 +948,8 @@ def main() -> None:
 
         build_goals.append((board, elaborated_configs))
 
-    if args.matrix:
-        github_actions_matrix("llvm" if args.llvm else "gcc", build_goals)
+    if args.matrix is not None:
+        github_actions_board_matrix(args.matrix, build_goals)
         return
 
     sel4_dir = args.sel4.expanduser()
