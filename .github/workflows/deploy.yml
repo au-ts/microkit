@@ -152,7 +152,7 @@ jobs:
         working-directory: ./microkit/
         run: |
           python3 build_sdk.py --sel4=../seL4 --matrix=../build_sdk_matrix.json
-          TEST_CASES+$(cat ../build_sdk_matrix.json)
+          TEST_CASES=$(cat ../build_sdk_matrix.json)
           echo "test_cases=${TEST_CASES}" >> "${GITHUB_OUTPUT}"
           echo "TEST_CASES=${TEST_CASES}" >> "${GITHUB_ENV}"
       # uses test cases env var
