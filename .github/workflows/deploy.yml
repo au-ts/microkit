@@ -204,12 +204,14 @@ jobs:
     name: HW Run
     if: ${{ github.repository_owner == 'au-ts' }}
     runs-on: ubuntu-latest
-    needs: [sim, the_matrix, hw-build]
+    needs: [sim, the_matrix, hw-build, sdk-build]
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.the_matrix.outputs.gh_matrix) }}
     # do not run concurrently with other workflows, but do run concurrently in the build matrix
     concurrency: hw-run-${{ strategy.job-index }}
+    env:
+      SDK_VERSION: ${{ needs.sdk-build.outputs.SDK_VERSION }}
     steps:
       - name: Get machine queue
         uses: actions/checkout@v6
