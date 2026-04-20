@@ -1,72 +1,4 @@
-define mk_pow2(arg)
-(
-  arg == 0  ? 1 :
-  arg == 1  ? 2 :
-  arg == 2  ? 4 :
-  arg == 3  ? 8 :
-  arg == 4  ? 16 :
-  arg == 5  ? 32 :
-  arg == 6  ? 64 :
-  arg == 7  ? 128 :
-  arg == 8  ? 256 :
-  arg == 9  ? 512 :
-  arg == 10 ? 1024 :
-  arg == 11 ? 2048 :
-  arg == 12 ? 4096 :
-  arg == 13 ? 8192 :
-  arg == 14 ? 16384 :
-  arg == 15 ? 32768 :
-  arg == 16 ? 65536 :
-  arg == 17 ? 131072 :
-  arg == 18 ? 262144 :
-  arg == 19 ? 524288 :
-  arg == 20 ? 1048576 :
-  arg == 21 ? 2097152 :
-  arg == 22 ? 4194304 :
-  arg == 23 ? 8388608 :
-  arg == 24 ? 16777216 :
-  arg == 25 ? 33554432 :
-  arg == 26 ? 67108864 :
-  arg == 27 ? 134217728 :
-  arg == 28 ? 268435456 :
-  arg == 29 ? 536870912 :
-  arg == 30 ? 1073741824 :
-  arg == 31 ? 2147483648 :
-  arg == 32 ? 4294967296 :
-  arg == 33 ? 8589934592 :
-  arg == 34 ? 17179869184 :
-  arg == 35 ? 34359738368 :
-  arg == 36 ? 68719476736 :
-  arg == 37 ? 137438953472 :
-  arg == 38 ? 274877906944 :
-  arg == 39 ? 549755813888 :
-  arg == 40 ? 1099511627776 :
-  arg == 41 ? 2199023255552 :
-  arg == 42 ? 4398046511104 :
-  arg == 43 ? 8796093022208 :
-  arg == 44 ? 17592186044416 :
-  arg == 45 ? 35184372088832 :
-  arg == 46 ? 70368744177664 :
-  arg == 47 ? 140737488355328 :
-  arg == 48 ? 281474976710656 :
-  arg == 49 ? 562949953421312 :
-  arg == 50 ? 1125899906842624 :
-  arg == 51 ? 2251799813685248 :
-  arg == 52 ? 4503599627370496 :
-  arg == 53 ? 9007199254740992 :
-  arg == 54 ? 18014398509481984 :
-  arg == 55 ? 36028797018963968 :
-  arg == 56 ? 72057594037927936 :
-  arg == 57 ? 144115188075855872 :
-  arg == 58 ? 288230376151711744 :
-  arg == 59 ? 576460752303423488 :
-  arg == 60 ? 1152921504606846976 :
-  arg == 61 ? 2305843009213693952 :
-  arg == 62 ? 4611686018427387904 :
-  arg == 63 ? 9223372036854775808 :
-  0
-)
-  
+
 define mk_valid_pending_protected(pp)
   (pp == -1 || (0 <= pp && pp < 63))
 
@@ -75,7 +7,7 @@ define mk_valid_pending_fault(pf)
 
 define mk_valid_pending_notified(ns)
   (forall ch: Int :: { ch in ns }
-    ch in ns ==> 0 <= ch && ch < 62) /* use microkit_notified_source */
+    ch in ns ==> mk_is_notified_source(ch))
 
 define mk_state_wf(pp, pf, ns)
 (
@@ -87,23 +19,27 @@ define mk_state_wf(pp, pf, ns)
   (ns != Set[Int]() ==> pp == -1 && pf == -1)
 )
 
+define mk_response_bit_set(response, ch)
+  (builtin_lshr(response,ch) % 2 == 1)
+
 define mk_is_notification_response(response)
-  (0 <= response && response < 4611686018427387904)
+(
+  !mk_response_bit_set(response, 62) &&
+  !mk_response_bit_set(response, 63) &&
+  bounded64(response)
+)
 
 define mk_is_protected_response(response)
-  (9223372036854775808 <= response && response < 9223372036854775871)
+  (mk_response_bit_set(response,63))
 
 define mk_is_fault_response(response)
-  (4611686018427387904 <= response && response < 4611686018427388160)
+  (mk_response_bit_set(response,62))
 
 define mk_protected_channel_of_response(response)
-  (response - 9223372036854775808)
+  (response % 64)
 
 define mk_fault_pd_of_response(response)
-  (response - 4611686018427387904)
-
-define mk_notification_bit_set(response, ch)
-  (0 <= ch && ch < 62 && (response / mk_pow2(ch)) % 2 == 1)
+  (response % 256)
 
 define mk_oracle_correspondence(response,pp,pf,ns)
 (
@@ -129,8 +65,8 @@ define mk_oracle_correspondence(response,pp,pf,ns)
       pf == -1 &&
       (
         forall ch: Int :: { ch in ns }
-        0 <= ch && ch < 62 ==>
-          (ch in ns <==> mk_notification_bit_set(response, ch))
+        0 <= ch && ch < 64 ==>
+          (ch in ns <==> mk_response_bit_set(response, ch))
       )
     )
   )
@@ -180,8 +116,8 @@ define f_mk_protected_channel_of_response(heap,gv,response)
 define f_mk_fault_pd_of_response(heap,gv,response)
   (mk_fault_pd_of_response(response))
 
-define f_mk_notification_bit_set(heap,gv,response,ch)
-  (mk_notification_bit_set(response,ch))
+define f_mk_response_bit_set(heap,gv,response,ch)
+  (mk_response_bit_set(response,ch))
 
 define f_mk_oracle_correspondence(heap,gv,response,pp,pf,ns)
   (mk_oracle_correspondence(response,pp,pf,ns))
