@@ -150,6 +150,10 @@ jobs:
           use_venv: true
       - id: matrix
         uses: au-ts/seL4-ci-actions/microkit-hw-matrix@julia/microkit
+        env:
+          # We don't actually care what this is set to, but for the files for
+          # each platform it expects this path to exist, so we set it up.
+          MICROKIT_SDK: /dummy-microkit-sdk-for-matrix
 
   hw-build:
     name: HW Test Builds
