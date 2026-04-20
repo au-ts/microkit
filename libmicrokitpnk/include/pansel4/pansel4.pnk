@@ -56,7 +56,7 @@
    requires 0 <= heap[LIBSEL4_FFI_OFFSET+1] && heap[LIBSEL4_FFI_OFFSET+1] < 8
    requires 0 <= heap[LIBSEL4_FFI_OFFSET+2] && heap[LIBSEL4_FFI_OFFSET+2] < 4
    requires 0 <= heap[LIBSEL4_FFI_OFFSET+3] && heap[LIBSEL4_FFI_OFFSET+3] < 128
-   ensures acc(heap[LIBSEL4_FFI_OFFSET]) && bounded64(heap[LIBSEL4_FFI_OFFSET])
+   ensures acc(heap[LIBSEL4_FFI_OFFSET])
    ensures acc(heap[LIBSEL4_FFI_OFFSET+1])
    ensures acc(heap[LIBSEL4_FFI_OFFSET+2])
    ensures acc(heap[LIBSEL4_FFI_OFFSET+3])

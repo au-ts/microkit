@@ -33,12 +33,21 @@
 /@ method ffimicrokit_report_debug(c: Int, c2: Int, a: Int, a2: Int) @/
 /@ method ffimicrokit_report_error(c: Int, c2: Int, a: Int, a2: Int) @/
 
+/@ extern function mk_is_protected_source(x: Int): Bool @/
+/@ extern function mk_is_ppcall_target(x: Int): Bool @/
+/@ extern function mk_is_notified_source(x: Int): Bool @/
+/@ extern function mk_is_notify_target(x: Int): Bool @/
+/@ extern function mk_is_irq_channel(x: Int): Bool @/
+
+
 export fun microkit_notify(microkit_channel ch) {
+    /@ requires mk_is_notify_target(ch) @/
     panseL4_Signal(BASE_OUTPUT_NOTIFICATION_CAP + ch);
     return 0;
 }
 
 export fun microkit_irq_ack(microkit_channel ch) {
+    /@ requires mk_is_irq_channel(ch) @/
     panseL4_IRQHandler_Ack(BASE_IRQ_CAP + ch);
     return 0;
 }
@@ -60,16 +69,51 @@ export fun panseL4_Error microkit_pd_restart(microkit_child pd, 1 entry_point) {
 }
 
 export fun microkit_msginfo microkit_ppcall(microkit_channel ch, microkit_msginfo msginfo) {
+    /@ requires mk_is_ppcall_target(ch) @/
+    /@ requires IsAbsMsgInfo(msginfo) @/
     var microkit_msginfo tag = panseL4_Call(BASE_ENDPOINT_CAP + ch, msginfo);
     return tag;
 }
 
 export fun microkit_msginfo microkit_msginfo_new(1 label, 1 count) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
+    /@ requires 0 <= label && label < 4503599627370496 @/
+    /@ requires 0 <= count && count < 128 @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
+    /@ ensures IsAbsMsgInfo(retval) @/
+    /@ ensures label_of(retval) == label @/
+    /@ ensures length_of(retval) == count @/
     var microkit_msginfo tag = panseL4_MessageInfo_new(label, 0, 0, count);
     return tag;
 }
 
 export fun microkit_deferred_notify(microkit_channel ch) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
+    /@ requires acc(gv.microkit_have_signal) @/
+    /@ requires acc(gv.microkit_signal_msg) @/
+    /@ requires acc(gv.microkit_signal_cap) @/
+    /@ requires !gv.microkit_have_signal @/
+    /@ requires mk_is_notify_target(ch) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
+    /@ ensures acc(gv.microkit_have_signal) @/
+    /@ ensures acc(gv.microkit_signal_msg) @/
+    /@ ensures acc(gv.microkit_signal_cap) @/
+    /@ ensures gv.microkit_have_signal @/
+    /@ ensures IsAbsMsgInfo(gv.microkit_signal_msg) @/
+    /@ ensures pansel4_has_cap(gv.microkit_signal_cap) @/
+    /@ ensures pansel4_has_notification_cap(gv.microkit_signal_cap) @/ 
     microkit_have_signal = true;
     microkit_signal_msg = panseL4_MessageInfo_new(0, 0, 0, 0);
     microkit_signal_cap = BASE_OUTPUT_NOTIFICATION_CAP + ch;
@@ -77,6 +121,20 @@ export fun microkit_deferred_notify(microkit_channel ch) {
 }
 
 export fun microkit_deferred_irq_ack(microkit_channel ch) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires acc(gv.microkit_have_signal) @/
+    /@ requires acc(gv.microkit_signal_msg) @/
+    /@ requires acc(gv.microkit_signal_cap) @/
+    /@ requires !gv.microkit_have_signal @/
+    /@ requires mk_is_irq_channel(ch) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures acc(gv.microkit_have_signal) @/
+    /@ ensures acc(gv.microkit_signal_msg) @/
+    /@ ensures acc(gv.microkit_signal_cap) @/
+    /@ ensures gv.microkit_have_signal @/
+    /@ ensures IsAbsMsgInfo(gv.microkit_signal_msg) @/
+    /@ ensures pansel4_has_cap(gv.microkit_signal_cap) @/
+    /@ ensures pansel4_has_irq_handler_cap(gv.microkit_signal_cap) @/
     microkit_have_signal = true;
     microkit_signal_msg = panseL4_MessageInfo_IRQAckIRQ();
     microkit_signal_cap = BASE_IRQ_CAP + ch;

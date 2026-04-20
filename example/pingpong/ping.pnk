@@ -11,11 +11,14 @@ fun uep_notified(microkit_channel ch) {
 }
 
 fun microkit_fault_reply_option uep_fault(microkit_child child, microkit_msginfo msginfo) {
+    /@ ensures retval.0 == 0 @/
     @microkit_report_debug(0, 0, 0, 4);
     return microkit_fault_reply_nothing;
 }
 
 fun uep_protected(microkit_channel ch, microkit_msginfo msginfo) {
+    /@ ensures IsAbsMsgInfo(retval) @/
     @microkit_report_debug(0, 0, 0, 3);
-    return 0;
+    var 1 res = panseL4_MessageInfo_new(0,0,0,0);
+    return res;
 }
