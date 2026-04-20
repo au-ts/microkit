@@ -110,6 +110,8 @@ define f_apply_bv64_lshr_closed(heap, gv, i) (apply_bv64_lshr_closed(i))
 define f_apply_bv64_lshr_compose(heap, gv, i, n, m) (apply_bv64_lshr_compose(i,n,m))
 define f_apply_bv64_lshr64_zero(heap, gv, i) (apply_bv64_lshr64_zero(i))
 
+
+define builtin_lshr(x,y) (bv64_to_int(bv64_lshr(bv64_from_int(x), bv64_from_int(y))))
 define f_builtin_lshr(heap,gv,x,y) (bv64_to_int(bv64_lshr(bv64_from_int(x), bv64_from_int(y))))
 
 field local_mem: Int

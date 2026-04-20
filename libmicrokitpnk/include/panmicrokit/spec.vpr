@@ -128,12 +128,18 @@ define mk_oracle_correspondence(response,pp,pf,ns)
       pp == -1 &&
       pf == -1 &&
       (
-        forall ch: Int :: { ch in ns } { mk_notification_bit_set(response, ch) }
+        forall ch: Int :: { ch in ns }
         0 <= ch && ch < 62 ==>
           (ch in ns <==> mk_notification_bit_set(response, ch))
       )
     )
   )
+)
+
+define mk_is_patched_irqs(badge) (
+  forall ch: Int ::
+  (0 <= ch && ch < 64) ==>
+  (mk_is_irq_channel(ch) <==> (builtin_lshr(badge, ch) % 2 == 1))
 )
 
 domain MicrokitLoop {
@@ -178,7 +184,10 @@ define f_mk_notification_bit_set(heap,gv,response,ch)
   (mk_notification_bit_set(response,ch))
 
 define f_mk_oracle_correspondence(heap,gv,response,pp,pf,ns)
-  (mk_oracle_correspondence(pp,pf,ns))
+  (mk_oracle_correspondence(response,pp,pf,ns))
+
+define f_mk_is_patched_irqs(heap,gv,badge)
+  (mk_is_patched_irqs(badge))
 
 /*
 predicate mk_loop_state(ctx: Ref) {

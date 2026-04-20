@@ -47,7 +47,9 @@ export fun microkit_notify(microkit_channel ch) {
 }
 
 export fun microkit_irq_ack(microkit_channel ch) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
     /@ requires mk_is_irq_channel(ch) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
     panseL4_IRQHandler_Ack(BASE_IRQ_CAP + ch);
     return 0;
 }
