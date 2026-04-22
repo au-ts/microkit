@@ -103,6 +103,8 @@ const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
 // index. We are bounding this to 128 slots for now.
 const PD_BASE_USER_CAPS: u64 = PD_BASE_IOPORT_CAP + 64;
 
+const PD_ROOT_CAP_SIZE: u32 = 64;
+const PD_ROOT_CAP_BITS: u8 = PD_ROOT_CAP_SIZE.ilog2() as u8;
 pub const PD_CAP_SIZE: u32 = 1024;
 const PD_CAP_BITS: u8 = PD_CAP_SIZE.ilog2() as u8;
 const PD_SCHEDCONTEXT_EXTRA_SIZE: u64 = 256;
@@ -1028,12 +1030,24 @@ pub fn build_capdl_spec(
             PD_CAP_BITS,
             caps_to_insert_to_pd_cspace,
         );
-        let pd_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS as u64;
+        let pd_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS as u64 - PD_ROOT_CAP_BITS as u64;
         let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, pd_guard_size as u8);
         pd_shadow_cspace_inner.insert(CapMapType::Cnode, pd_cnode_cap.clone());
+
+        let pd_root_cnode_obj_id = capdl_util_make_cnode_obj(
+            &mut spec_container,
+            &(pd.name.clone() + "_root"),
+            PD_ROOT_CAP_BITS,
+            Vec::new(),
+        );
+        // leave the guard size root cnode as 0
+        let pd_root_cnode_cap = capdl_util_make_cnode_cap(pd_root_cnode_obj_id, 0, 0);
+        // place microkit managed cnode at slot 0
+        capdl_util_insert_cap_into_cspace(&mut spec_container, pd_root_cnode_obj_id, 0, pd_cnode_cap);
+
         caps_to_bind_to_tcb.push(capdl_util_make_cte(
             TcbBoundSlot::CSpace as u32,
-            pd_cnode_cap,
+            pd_root_cnode_cap,
         ));
         pd_id_to_cspace_id.insert(pd_global_idx, pd_cnode_obj_id);
 
