@@ -1779,13 +1779,13 @@ fn io_check_maps(
         let pos = io_map.text_pos.unwrap();
         match maybe_mr {
             Some(mr) => {
-                // Page size check
-                if mr.page_size_bytes() != PageSize::Small as u64 {
-                    return Err(format!(
-                        "Error: invalid page size specified on 'iomap' @ {}, only 4 KB page size is supported for x86 IOMMU",
-                        loc_string(xml_sdf, pos)
-                    ));
-                }
+                // // Page size check
+                // if mr.page_size_bytes() != PageSize::Small as u64 {
+                //     return Err(format!(
+                //         "Error: invalid page size specified on 'iomap' @ {}, only 4 KB page size is supported for x86 IOMMU",
+                //         loc_string(xml_sdf, pos)
+                //     ));
+                // }
                 // Alignment check
                 if !io_map.ioaddr.is_multiple_of(mr.page_size_bytes()) {
                     return Err(format!(

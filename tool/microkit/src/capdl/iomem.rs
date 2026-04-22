@@ -68,6 +68,7 @@ pub fn map_io_page(
     pd_name: &str,
     iospace_obj_id: ObjectId,
     frame_cap: Cap,
+    frame_size_bytes: u64,
     ioaddr: u64,
 ) -> Result<(), String> {
     map_recursive(
@@ -77,6 +78,7 @@ pub fn map_io_page(
         iospace_obj_id,
         VTD_PML4_LEVEL,
         frame_cap,
+        frame_size_bytes,
         ioaddr,
     )
 }
@@ -202,6 +204,7 @@ fn map_recursive(
     pt_obj_id: ObjectId,
     cur_level: u8,
     frame_cap: Cap,
+    frame_size_bytes: u64,
     ioaddr: u64,
 ) -> Result<(), String> {
     if cur_level >= VTD_PAGE_TABLE_LEVEL {
@@ -210,7 +213,13 @@ fn map_recursive(
 
     let this_level_index = get_io_pt_level_index(sel4_config, cur_level, ioaddr);
 
-    if cur_level == VTD_PAGE_TABLE_LEVEL - 1 {
+    let insert_level = if frame_size_bytes == 0x1000 {
+        VTD_PAGE_TABLE_LEVEL - 1
+    } else {
+        VTD_PAGE_TABLE_LEVEL - 2
+    };
+
+    if cur_level == insert_level {
         // Base case: we got to the target level to insert the frame cap.
         insert_cap_into_io_page_table_level(
             spec_container,
@@ -239,6 +248,7 @@ fn map_recursive(
                 next_level_pt_obj_id,
                 cur_level + 1,
                 frame_cap,
+                frame_size_bytes,
                 ioaddr,
             ),
             Err(err_reason) => Err(err_reason),

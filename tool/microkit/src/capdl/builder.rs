@@ -399,6 +399,7 @@ fn map_io_memory_region(
     sel4_config: &Config,
     pd_name: &str,
     map: &IOMemMap,
+    page_sz: u64,
     target_iospace: ObjectId,
     frames: &[ObjectId],
 ) {
@@ -416,10 +417,11 @@ fn map_io_memory_region(
             pd_name,
             target_iospace,
             frame_cap,
+            page_sz,
             cur_vaddr,
         )
         .unwrap();
-        cur_vaddr += PageSize::Small as u64;
+        cur_vaddr += page_sz;
     }
 }
 
@@ -740,12 +742,16 @@ pub fn build_capdl_spec(
                     };
 
                 let frames = mr_name_to_frames.get(&iomap.name).unwrap();
+                let page_size_bytes =
+                    1 << capdl_util_get_frame_size_bits(&spec_container, *frames.first().unwrap());
+
 
                 map_io_memory_region(
                     &mut spec_container,
                     kernel_config,
                     &pd.name,
                     iomap,
+                    page_size_bytes,
                     iospace_id,
                     frames,
                 );
