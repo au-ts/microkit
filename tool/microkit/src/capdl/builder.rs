@@ -1080,6 +1080,7 @@ pub fn build_capdl_spec(
             let pd_receiving_untyped_cnode_cap_self_ref = capdl_util_make_cnode_cap(pd_receiving_untyped_cnode_obj_id, 0, pd_guard_size as u8);
             capdl_util_insert_cap_into_cspace(&mut spec_container, pd_receiving_untyped_cnode_obj_id, 0, pd_receiving_untyped_cnode_cap_self_ref);
 
+            println!("pd name: {}", pd.name);
             let pd_root_cnode_obj_id = capdl_util_make_cnode_obj(
                 &mut spec_container,
                 &(pd.name.clone() + "_root"),
