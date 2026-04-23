@@ -567,6 +567,23 @@ pub fn build_capdl_spec(
     }
 
     // *********************************
+    // Step 3. Create the CNodes' spec
+    // *********************************
+    let mut cnodes: HashMap<&String, ObjectId> = HashMap::new();
+    for cnode in system.cnodes.iter() {
+
+        let cnode_obj_id = capdl_util_make_cnode_obj(
+            &mut spec_container,
+            &(cnode.cnode_name.clone()),
+            cnode.cnode_size_bits,
+            Vec::new(),
+        );
+
+        cnodes.insert(&cnode.cnode_name, cnode_obj_id);
+    }
+
+
+    // *********************************
     // Step 3. Create the PDs' spec
     // *********************************
     // On ARM, check if we need to create the SMC object
@@ -1165,28 +1182,45 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 5. Handle extra cap mappings
     // *********************************
-
     for (pd_dest_idx, pd) in system.protection_domains.iter().enumerate() {
         let pd_dest_cspace_id = pd_id_to_cspace_id[&pd_dest_idx];
         for cap_map in pd.cap_maps.iter() {
-            let pd_src_idx = pd_name_to_id.get(&cap_map.pd_name).ok_or(format!(
-                "PD: '{}', does not exist when trying to map extra TCB cap into PD: '{}'",
-                cap_map.pd_name, pd.name
-            ))?;
+            if let Some(cap_pd_name) = &cap_map.pd_name {
+                let pd_src_idx = pd_name_to_id.get(&cap_pd_name).ok_or(format!(
+                    "PD: '{}', does not exist when trying to map extra TCB cap into PD: '{}'",
+                    cap_pd_name, pd.name
+                ))?;
 
-            let pd_shadow_cspace_inner = pd_shadow_cspace.get(pd_src_idx).unwrap();
+                let pd_shadow_cspace_inner = pd_shadow_cspace.get(pd_src_idx).unwrap();
 
-            let pd_obj = pd_shadow_cspace_inner
-                .get(&cap_map.cap_type)
-                .unwrap()
-                .clone();
-            // Map this into the destination pd's cspace and the specified slot.
-            capdl_util_insert_cap_into_cspace(
-                &mut spec_container,
-                pd_dest_cspace_id,
-                (PD_BASE_USER_CAPS + cap_map.dest_cspace_slot) as u32,
-                pd_obj,
-            );
+                let pd_obj = pd_shadow_cspace_inner
+                    .get(&cap_map.cap_type)
+                    .unwrap()
+                    .clone();
+                // Map this into the destination pd's cspace and the specified slot.
+                capdl_util_insert_cap_into_cspace(
+                    &mut spec_container,
+                    pd_dest_cspace_id,
+                    (PD_BASE_USER_CAPS + cap_map.dest_cspace_slot) as u32,
+                    pd_obj,
+                );
+            }
+
+            if let Some(cap_cnode_name) = &cap_map.cnode_name {
+                // TODO: get cnode cap
+                let cnode_obj_id = cnodes.get(cap_cnode_name).unwrap().clone();
+                // let pd_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS as u64 - PD_ROOT_CAP_BITS as u64;
+                let cnode_cap = capdl_util_make_cnode_cap(cnode_obj_id, 0, 0);
+
+                // Map this into the destination pd's cspace and the specified slot.
+                capdl_util_insert_cap_into_cspace(
+                    &mut spec_container,
+                    pd_dest_cspace_id,
+                    (PD_BASE_USER_CAPS + cap_map.dest_cspace_slot) as u32,
+                    cnode_cap,
+                );
+            }
+
         }
     }
 

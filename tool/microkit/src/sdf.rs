@@ -335,7 +335,8 @@ pub enum CapMapType {
 #[derive(Debug, PartialEq, Eq)]
 pub struct CapMap {
     pub cap_type: CapMapType,
-    pub pd_name: String,
+    pub cnode_name: Option<String>,
+    pub pd_name: Option<String>,
     pub dest_cspace_slot: u64,
 }
 
@@ -1310,7 +1311,7 @@ impl VirtualMachine {
 
 impl CapMap {
     fn from_xml(xml_sdf: &XmlSystemDescription, node: &roxmltree::Node) -> Result<CapMap, String> {
-        check_attributes(xml_sdf, node, &["type", "pd", "dest_cspace_slot"])?;
+        check_attributes(xml_sdf, node, &["type", "name", "pd", "dest_cspace_slot"])?;
 
         let xml_cap_type = checked_lookup(xml_sdf, node, "type")?;
         let cap_type = match xml_cap_type {
@@ -1321,7 +1322,23 @@ impl CapMap {
             _ => return Err(format!("Cap type: '{xml_cap_type}' is not supported.")),
         };
 
-        let pd_name = checked_lookup(xml_sdf, node, "pd")?.to_string();
+        let cnode_name: Option<String> = if let Some(_xml_cnode_name) = node.attribute("name") {
+            if cap_type != CapMapType::Cnode {
+                return Err(format!("Cap name: not supported for type '{xml_cap_type}'. "));
+            }
+            Some(checked_lookup(xml_sdf, node, "name")?.to_string())
+        } else {
+            None
+        };
+        let pd_name: Option<String> = if let Some(_xml_pd_name) = node.attribute("pd") {
+            if cnode_name.is_some() {
+                return Err(format!("Cap: attribute 'pd' and 'name' cannot be specified at the same time."));
+            }
+            Some(checked_lookup(xml_sdf, node, "pd")?.to_string())
+        } else {
+            None
+        };
+
         let dest_cspace_slot =
             sdf_parse_number(checked_lookup(xml_sdf, node, "dest_cspace_slot")?, node)?;
 
@@ -1336,6 +1353,7 @@ impl CapMap {
 
         Ok(CapMap {
             cap_type,
+            cnode_name,
             pd_name,
             dest_cspace_slot,
         })
@@ -1965,6 +1983,15 @@ pub fn parse(
         }
     }
 
+    for cnode in &cnodes {
+        if cnodes.iter().filter(|x| cnode.cnode_name == x.cnode_name).count() > 1 {
+            return Err(format!(
+                "Error: duplicate cnode name '{}'.",
+                cnode.cnode_name
+            ));
+        }
+    }
+
     let mut vms: Vec<&String> = vec![];
     for pd in &pds {
         if let Some(vm) = &pd.virtual_machine {
@@ -2123,6 +2150,7 @@ pub fn parse(
     for pd in &pds {
         let mut user_cap_slots = Vec::new();
         let mut seen_pd_cap_maps: Vec<(CapMapType, String)> = Vec::new();
+        let mut seen_extra_cnode_maps: Vec<String> = Vec::new();
 
         for cap_map in &pd.cap_maps {
             if user_cap_slots.contains(&cap_map.dest_cspace_slot) {
@@ -2134,13 +2162,26 @@ pub fn parse(
                 user_cap_slots.push(cap_map.dest_cspace_slot);
             }
 
-            if seen_pd_cap_maps.contains(&(cap_map.cap_type, cap_map.pd_name.clone())) {
-                return Err(format!(
-                    "Error: Duplicate cap mapping of type '{:?}'. Src PD: '{}', dest PD: '{}'.",
-                    cap_map.cap_type, cap_map.pd_name, pd.name
-                ));
-            } else {
-                seen_pd_cap_maps.push((cap_map.cap_type, cap_map.pd_name.clone()))
+            if let Some(cap_pd_name) = &cap_map.pd_name {
+                if seen_pd_cap_maps.contains(&(cap_map.cap_type, cap_pd_name.clone())) {
+                    return Err(format!(
+                        "Error: Duplicate cap mapping of type '{:?}'. Src PD: '{}', dest PD: '{}'.",
+                        cap_map.cap_type, cap_pd_name, pd.name
+                    ));
+                } else {
+                    seen_pd_cap_maps.push((cap_map.cap_type, cap_pd_name.clone()))
+                }
+            }
+
+            if let Some(cap_cnode_name) = &cap_map.cnode_name {
+                if seen_extra_cnode_maps.contains(&(cap_cnode_name.clone())) {
+                    return Err(format!(
+                        "Error: Duplicate cap mapping of type '{:?}'. Src CNode: '{}', dest PD: '{}'.",
+                        cap_map.cap_type, cap_cnode_name, pd.name
+                    ));
+                } else {
+                    seen_extra_cnode_maps.push(cap_cnode_name.clone())
+                }
             }
         }
     }
