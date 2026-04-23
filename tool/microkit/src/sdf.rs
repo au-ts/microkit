@@ -160,6 +160,44 @@ impl SysMemoryRegion {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
+pub enum CNodeType {
+    Normal = 0,
+    RemainingUntypeds,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct CNode {
+    pub cnode_type: CNodeType,
+    pub cnode_name: String,
+    pub cnode_size_bits: u8,
+}
+
+impl CNode {
+    fn from_xml(xml_sdf: &XmlSystemDescription, node: &roxmltree::Node) -> Result<CNode, String> {
+        check_attributes(xml_sdf, node, &["name", "type", "size_bits"])?;
+
+        let cnode_name = checked_lookup(xml_sdf, node, "name")?.to_string();
+        let xml_cnode_type = if let Some(_xml_type_param) = node.attribute("type") {
+            checked_lookup(xml_sdf, node, "type")?
+        } else {
+            "normal"
+        };
+        let cnode_type = match xml_cnode_type {
+            "remaining_untypeds" => CNodeType::RemainingUntypeds,
+            "normal" => CNodeType::Normal,
+            _ => return Err(format!("CNode type: '{xml_cnode_type}' is not supported.")),
+        };
+        let cnode_size_bits = sdf_parse_number(checked_lookup(xml_sdf, node, "size_bits")?, node)? as u8;
+
+        Ok(CNode {
+            cnode_type,
+            cnode_name,
+            cnode_size_bits,
+        })
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum SysIrqKind {
     Conventional {
@@ -1579,6 +1617,7 @@ struct XmlSystemDescription<'a> {
 pub struct SystemDescription {
     pub protection_domains: Vec<ProtectionDomain>,
     pub memory_regions: Vec<SysMemoryRegion>,
+    pub cnodes: Vec<CNode>,
     pub channels: Vec<Channel>,
 }
 
@@ -1812,6 +1851,7 @@ pub fn parse(
 
     let mut root_pds = vec![];
     let mut mrs = vec![];
+    let mut cnodes = vec![];
     let mut channels = vec![];
     let system = doc
         .root()
@@ -1851,6 +1891,7 @@ pub fn parse(
                     loc_string(&xml_sdf, pos)
                 ));
             }
+            "cnode" => cnodes.push(CNode::from_xml(&xml_sdf, &child)?),
             _ => {
                 let pos = xml_sdf.doc.text_pos_at(child.range().start);
                 return Err(format!(
@@ -2250,6 +2291,7 @@ pub fn parse(
     Ok(SystemDescription {
         protection_domains: pds,
         memory_regions: mrs,
+        cnodes,
         channels,
     })
 }
