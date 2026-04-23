@@ -47,6 +47,8 @@ use util::*;
 // Internal re-exports
 pub(crate) use consts::*;
 pub(crate) use cspace::CapMapType;
+pub(crate) use cspace::CNode;
+pub(crate) use cspace::CapMapSource;
 pub(crate) use iommu::IommuDeviceIdentifier;
 pub(crate) use irq::{SysIrq, SysIrqKind};
 pub(crate) use memory_region::{Map, SysMapPerms};
@@ -135,6 +137,7 @@ pub struct SystemDescription {
     pub protection_domains: Vec<ProtectionDomain>,
     pub memory_regions: Vec<SysMemoryRegion>,
     pub iomaps: Vec<SysIOMap>,
+    pub cnodes: Vec<CNode>,
     pub channels: Vec<Channel>,
     pub domains: Domains,
 }
@@ -161,6 +164,7 @@ pub fn parse(
     let mut io_address_space_names = HashSet::new();
     let mut iommu_domain_ids = HashSet::new();
     let mut iommu_device_identifiers = Vec::new();
+    let mut cnodes = vec![];
     let mut channels = vec![];
     let mut domains = Domains::default();
     let system = doc
@@ -223,6 +227,7 @@ pub fn parse(
 
                 domains = Domains::from_xml(config, &xml_sdf, &*child)?;
             }
+            "cnode" => cnodes.push(CNode::from_xml(&xml_sdf, &*child)?),
             _ => {
                 let pos = child.range().start;
                 return Err(format!(
@@ -258,24 +263,30 @@ pub fn parse(
         channels.push(ch);
     }
 
-    // FIXME: Now we post-fill the PD ids in the capmap elements, which is
-    //        ugly, and we should rework this to be less so.
-    let pd_names_to_id: HashMap<_, _> = pds
-        .iter()
-        .enumerate()
-        .map(|(idx, pd)| (pd.name.clone(), idx))
-        .collect();
-    for pd in pds.iter_mut() {
-        for cap_map in pd.cap_maps.iter_mut() {
-            let Some(&pd) = pd_names_to_id.get(&cap_map.pd_name) else {
-                return Err(format!(
-                    "Error: unknown PD name '{}': {}",
-                    cap_map.pd_name,
-                    loc_string(&xml_sdf, cap_map.text_pos)
-                ));
-            };
-
-            cap_map.pd = Some(pd);
+    let pd_names: Vec<String> = pds.iter().map(|pd| pd.name.clone()).collect();
+    let cnode_names: Vec<String> = cnodes.iter().map(|cnode| cnode.name.clone()).collect();
+    for pd in pds.iter() {
+        for cap_map in pd.cap_maps.iter() {
+            match &cap_map.source {
+                CapMapSource::Pd(source_name) => {
+                    if !pd_names.contains(&source_name) {
+                        return Err(format!(
+                            "Error: unknown PD name '{}': {}",
+                            source_name,
+                            loc_string(&xml_sdf, cap_map.text_pos)
+                        ));
+                    }
+                }
+                CapMapSource::CNode(source_name) => {
+                    if !cnode_names.contains(&source_name) {
+                        return Err(format!(
+                            "Error: unknown CNode name '{}': {}",
+                            source_name,
+                            loc_string(&xml_sdf, cap_map.text_pos)
+                        ));
+                    }
+                }
+            }
         }
     }
 
@@ -533,12 +544,24 @@ pub fn parse(
             if cap_maps.len() > 1 {
                 let mut lines = String::new();
                 for mapping in cap_maps {
-                    lines.push_str(&format!(
-                        "\n  type {:?} from '{}' at '{}'",
-                        mapping.cap_type,
-                        mapping.pd_name,
-                        loc_string(&xml_sdf, mapping.text_pos)
-                    ));
+                    match &mapping.source {
+                        CapMapSource::Pd(source_name) => {
+                            lines.push_str(&format!(
+                                "\n  type {:?} from PD '{}' at '{}'",
+                                mapping.cap_type,
+                                source_name,
+                                loc_string(&xml_sdf, mapping.text_pos)
+                            ));
+                        }
+                        CapMapSource::CNode(source_name) => {
+                            lines.push_str(&format!(
+                                "\n  type {:?} from CNode '{}' at '{}'",
+                                mapping.cap_type,
+                                source_name,
+                                loc_string(&xml_sdf, mapping.text_pos)
+                            ));
+                        }
+                    }
                 }
                 return Err(format!(
                     "Error: overlapping user caps in slot {slot} of protection domain '{}':{}",
@@ -695,6 +718,7 @@ pub fn parse(
         protection_domains: pds,
         memory_regions: mrs,
         iomaps,
+        cnodes,
         channels,
         domains,
     })

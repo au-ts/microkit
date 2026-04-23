@@ -528,6 +528,7 @@ impl SysMemoryRegion {
                 "x86_framebuffer" => Ok(FillEntryContentBootInfoId::X86FrameBuffer),
                 "x86_tsc_freq" => Ok(FillEntryContentBootInfoId::X86TscFreq),
                 "fdt" => Ok(FillEntryContentBootInfoId::Fdt),
+                "post_capdl_untypeds" => Ok(FillEntryContentBootInfoId::PostCapDLUntypeds),
                 _ => Err(value_error(
                     xml_sdf,
                     node,

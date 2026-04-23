@@ -1466,8 +1466,35 @@ mod system {
             &DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_cap_mappings_overlapping.system",
             r#"Error: overlapping user caps in slot 3 of protection domain 'pd_b':
-  type VSpace from 'pd_a' at 'pd_cap_mappings_overlapping.system:23:13'
-  type VSpace from 'pd_a' at 'pd_cap_mappings_overlapping.system:25:13'"#,
+  type VSpace from PD 'pd_a' at 'pd_cap_mappings_overlapping.system:23:13'
+  type VSpace from PD 'pd_a' at 'pd_cap_mappings_overlapping.system:25:13'"#,
+        )
+    }
+
+    #[test]
+    fn test_cap_mappings_invalid_parameter() {
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_cap_mappings_invalid_parameter.system",
+            "Error: invalid attribute 'cnode' on element 'cap_sc'",
+        )
+    }
+
+    #[test]
+    fn test_cap_mappings_pd_cnode_both_specified() {
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_cap_mappings_pd_cnode_both_specified.system",
+            "Error: 'pd' and 'cnode_name' cannot be both specified on element 'cap_cspace'",
+        )
+    }
+
+    #[test]
+    fn test_cap_mappings_src_not_specified() {
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_cap_mappings_src_not_specified.system",
+            "Error: Either 'pd' or 'cnode_name' should be specified on element 'cap_cspace'"
         )
     }
 
@@ -1495,6 +1522,15 @@ mod system {
             &DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_cap_mappings_invalid_pd_ref.system",
             "Error: unknown PD name 'invalid': pd_cap_mappings_invalid_pd_ref.system:12:13",
+        )
+    }
+
+    #[test]
+    fn test_cap_mappings_invalid_cnode_ref() {
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_cap_mappings_invalid_cnode_ref.system",
+            "Error: unknown CNode name 'invalid': pd_cap_mappings_invalid_cnode_ref.system:12:13"
         )
     }
 }

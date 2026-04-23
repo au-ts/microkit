@@ -219,8 +219,9 @@ pub fn capdl_util_make_cnode_obj(
     pd_name: &str,
     size_bits: u8,
     slots: Vec<CapTableEntry>,
+    receive_all_untypeds: bool,
 ) -> ObjectId {
-    let cnode_inner_obj = Object::CNode(object::CNode { size_bits, slots });
+    let cnode_inner_obj = Object::CNode(object::CNode { size_bits, slots, receive_all_untypeds });
     let cnode_obj = CapDLNamedObject {
         name: format!("cnode_{pd_name}").into(),
         object: cnode_inner_obj,
