@@ -14,6 +14,9 @@ fn export_define_set(name: &'static str, vector: &Vec<u64>, target: &mut String)
         target.push_str(&format!(
             "define {name}(x) (false)\n"
         ));
+        target.push_str(&format!(
+            "define f_{name}(heap,gv,x) (false)\n"
+        ));
         return;
     }
 
@@ -25,6 +28,9 @@ fn export_define_set(name: &'static str, vector: &Vec<u64>, target: &mut String)
 
     target.push_str(&format!(
         "define {name}(x) (x in Set({items}))\n"
+    ));
+    target.push_str(&format!(
+        "define f_{name}(heap,gv,x) (x in Set({items}))\n"
     ));
 }
 
@@ -133,7 +139,6 @@ pub fn get_cap_view(
         return None;
     };
 
-    println!("{:#?}", cnode);
     let mut view = CapView::default();
 
     for cte in &cnode.slots {
@@ -272,3 +277,37 @@ pub fn get_sdf_view(system: &SystemDescription, current_pd: usize) -> Option<Sdf
     Some(view)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CombinedView {
+    pub pd_name: String,
+    pub sdf: SdfView,
+    pub cap: CapView,
+}
+
+impl CombinedView {
+    pub fn export(&self, target: &mut String) {
+        self.sdf.export(target);
+        self.cap.export(target);
+    }
+}
+
+pub fn get_combined_views(
+    capdl_spec: &CapDLSpecContainer,
+    system: &SystemDescription,
+) -> Vec<CombinedView> {
+    system
+        .protection_domains
+        .iter()
+        .enumerate()
+        .filter_map(|(current_pd, pd)| {
+            let sdf = get_sdf_view(system, current_pd)?;
+            let cap = get_cap_view(capdl_spec, system, current_pd)?;
+
+            Some(CombinedView {
+                pd_name: pd.name.clone(),
+                sdf,
+                cap,
+            })
+        })
+        .collect()
+}

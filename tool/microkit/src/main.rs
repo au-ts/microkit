@@ -86,6 +86,7 @@ enum MainError {
     MissingArmPaSizeBits,
     Aarch64HypervisorRequired,
     UnsupportedWordSize { word_size: u64 },
+    CannotWriteFile { path: PathBuf, source: std::io::Error },
     CannotParseElf { description: String, path: PathBuf, source: String },
     CannotPatchSymbols { source: String },
     CannotBuildCapdlSpec { source: String },
@@ -121,6 +122,9 @@ impl fmt::Display for MainError {
             }
             Self::UnsupportedWordSize { word_size } => {
                 write!(f, "Microkit requires 64-bit word size, found {}", word_size)
+            }
+            Self::CannotWriteFile { path, source } => {
+                write!(f, "failed to write to '{}' ({source})", path.display())
             }
             Self::CannotParseElf { description, path, source } => {
                 write!(f, "failed to parse {description} (at {}, {source})", path.display())
@@ -503,8 +507,6 @@ fn main() -> Result<(), String> {
     // The main loop for creating the CapDL spec and the final image.
     // Now build the capDL spec and final image. We may need to do this in >1 iterations on ARM and RISC-V
     // if there are Memory Regions without a paddr but subject to setvar region_paddr.
-
-
     let finished_build = (|| -> Result<FinishedBuild, MainError> {
         let mut iteration = 0;
         let mut spec_need_refinement = true;
@@ -792,16 +794,6 @@ fn main() -> Result<(), String> {
             image,
         }) => {
 
-            // TODO: this is a debug print block, factor it out of here
-            println!("{:#?}", system.protection_domains);
-            for (ipd, pd) in system.protection_domains.iter().enumerate() {
-                let mut output: String = format!("{}.vpr\n", pd.name).to_string();
-                let vsb = viper::get_sdf_view(&system, ipd).unwrap();
-                vsb.export(&mut output);
-                let vcb = viper::get_cap_view(&spec_container, &system, ipd).unwrap();
-                vcb.export(&mut output);
-                println!("{}", output);
-            }
 
             let image_out_path = args.output_path.as_path();
 
@@ -861,7 +853,22 @@ fn main() -> Result<(), String> {
 
             if let Some(capdl_json) = args.capdl_json_path {
                 let serialised = serde_json::to_string_pretty(&spec_container.spec).unwrap();
-                fs::write(capdl_json, &serialised).unwrap();
+                fs::write(&capdl_json, &serialised).map_err(|source| {
+                    MainError::CannotWriteFile { path: capdl_json, source }
+                    .to_string()
+                })?;
+            };
+
+            if let Some(viper_output_prefix) = &args.viper_output_prefix {
+                for view in viper::get_combined_views(&spec_container, &system) {
+                    let mut output = String::new();
+                    view.export(&mut output);
+                    let path = PathBuf::from(format!("{}{}.vpr", viper_output_prefix, view.pd_name));
+                    fs::write(&path, output).map_err(|source| {
+                        MainError::CannotWriteFile { path, source }
+                        .to_string()
+                    })?;
+                }
             };
 
             write_report(&spec_container, &kernel_config, &args.report_path);

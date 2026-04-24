@@ -17,7 +17,7 @@ use crate::sdkparse::{SdkInfo};
 // we put the output functions here to keep all argument-related code together
 
 pub fn print_usage() {
-    println!("usage: microkit [-h] [-o OUTPUT] [--image-type {{binary,elf,uimage}}] [-r REPORT] --board BOARD --config CONFIG [--capdl-json CAPDL_SPEC] --search-path [SEARCH_PATH ...] system")
+    println!("usage: microkit [-h] [-o OUTPUT] [--image-type {{binary,elf,uimage}}] [-r REPORT] --board BOARD --config CONFIG [--capdl-json CAPDL_SPEC] [--viper-output PREFIX] --search-path [SEARCH_PATH ...] system")
 }
 
 pub fn print_help(sdkinfo: &SdkInfo) {
@@ -32,6 +32,7 @@ pub fn print_help(sdkinfo: &SdkInfo) {
     println!("  --board {}", sdkinfo.available_board_names().join("\n          "));
     println!("  --config CONFIG");
     println!("  --capdl-json CAPDL_SPEC (JSON format)");
+    println!("  --viper-output PREFIX");
     println!("  --search-path [SEARCH_PATH ...]");
 }
 
@@ -72,6 +73,7 @@ pub struct Args {
     pub config: String,
     pub report_path: PathBuf,
     pub capdl_json_path: Option<PathBuf>,
+    pub viper_output_prefix: Option<String>,
     pub output_path: PathBuf,
     pub search_paths: Vec<PathBuf>,
     pub requested_image_type: RequestedImageType,
@@ -150,6 +152,7 @@ impl Args {
         let mut output_path = PathBuf::from("loader.img");
         let mut report_path = PathBuf::from("report.txt");
         let mut capdl_json_path = None;
+        let mut viper_output_prefix = None;
         let mut search_paths = Vec::new();
 
         let mut sdf_path = None;
@@ -184,6 +187,9 @@ impl Args {
                 "--search-path" => {
                     let params = consume_parameters(&mut args);
                     search_paths.extend(params.into_iter().map(PathBuf::from));
+                }
+                "--viper-output" => {
+                    viper_output_prefix = Some(consume_parameter(&mut args, "--viper-output")?);
                 }
                 "--image-type" => {
                     let value = consume_parameter(&mut args, "--image-type")?;
@@ -238,6 +244,7 @@ impl Args {
             config,
             report_path,
             capdl_json_path,
+            viper_output_prefix,
             output_path,
             search_paths,
             requested_image_type,

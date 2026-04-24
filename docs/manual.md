@@ -438,7 +438,7 @@ The format of the system description is described in a subsequent chapter.
 Usage:
 
     microkit [-h] [-o OUTPUT] [-r REPORT]
-              [--capdl-json CAPDL_SPEC] [--image-type {binary,elf,uimage}]
+              [--capdl-json CAPDL_SPEC] [--viper-output PREFIX] [--image-type {binary,elf,uimage}]
               --board [BOARD] --config CONFIG [--search-path [SEARCH_PATH ...]] system
 
 The path to the system description file, board to build the system for, and configuration to build for must be provided.
@@ -451,6 +451,11 @@ In the case of success, a loadable image file and a report shall be produced. Th
 type of image is specified by the `--image-type` argument.
 The output paths for these can be specified by `-o` and `-r` respectively.
 The default output paths are `loader.img` and `report.txt`.
+
+If the `--viper-output PREFIX` argument is set, then for each protection domain
+`name` specified in the system description file, a file `PREFIXname.vpr` will
+be output, containing a description of the capability table of the given PD in
+the Viper verification language.
 
 The report is a plain text file describing important information about the system.
 The report can be useful when debugging potential system problems.

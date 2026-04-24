@@ -102,8 +102,11 @@ $(PONGELF): $(BUILD_DIR)/pong.o | $(BUILD_DIR)
 
 # Build the whole system image
 $(IMAGE) $(REPORT): $(PINGELF) $(PONGELF) pingpong.system | $(BUILD_DIR)
-	$(MICROKIT_TOOL) pingpong.system --search-path $(BUILD_DIR) \
-	  --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) \
+	$(MICROKIT_TOOL) pingpong.system \
+	  --search-path $(BUILD_DIR) \
+	  --board $(MICROKIT_BOARD) \
+	  --config $(MICROKIT_CONFIG) \
+	  --viper-output caps-for- \
 	  -o $(IMAGE) -r $(REPORT)
 
 clean:
