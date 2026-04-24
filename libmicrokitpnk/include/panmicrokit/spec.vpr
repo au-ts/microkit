@@ -30,10 +30,16 @@ define mk_is_notification_response(response)
 )
 
 define mk_is_protected_response(response)
-  (mk_response_bit_set(response,63))
+(
+  mk_response_bit_set(response,63) &&
+  !mk_response_bit_set(response,62)
+)
 
 define mk_is_fault_response(response)
-  (mk_response_bit_set(response,62))
+(
+  !mk_response_bit_set(response,63) &&
+  mk_response_bit_set(response,62)
+)
 
 define mk_protected_channel_of_response(response)
   (response % 64)
@@ -63,6 +69,7 @@ define mk_oracle_correspondence(response,pp,pf,ns)
       mk_is_notification_response(response) &&
       pp == -1 &&
       pf == -1 &&
+      ns != Set[Int]() &&
       (
         forall ch: Int :: { ch in ns }
         0 <= ch && ch < 64 ==>
@@ -72,7 +79,18 @@ define mk_oracle_correspondence(response,pp,pf,ns)
   )
 )
 
-define mk_is_patched_irqs(badge) (
+define mk_no_pending_tasks(ctx)
+(
+  acc(ctx.pending_protected_call) &&
+  acc(ctx.pending_fault_call) &&
+  acc(ctx.pending_notified) &&
+  ctx.pending_protected_call == -1 &&
+  ctx.pending_fault_call == -1 &&
+  ctx.pending_notified == Set[Int]()
+)
+
+define mk_is_patched_irqs(badge)
+(
   forall ch: Int ::
   (0 <= ch && ch < 64) ==>
   (mk_is_irq_channel(ch) <==> (builtin_lshr(badge, ch) % 2 == 1))
@@ -85,7 +103,59 @@ field pending_protected_call: Int
 field pending_fault_call: Int
 field pending_notified: Set[Int]
 
-define f_mk_pow2(heap,gv,x) (mk_pow2(x))
+define mk_notified_preconditions(ch) 
+(
+  acc(mkGhost().pending_notified) &&
+  ch in mkGhost().pending_notified
+)
+
+define mk_notified_postconditions(ch) 
+(
+  acc(mkGhost().pending_notified) &&
+  mkGhost().pending_notified == old(mkGhost().pending_notified) setminus Set(ch)
+)
+
+define apply_mk_notified_postconditions(ch) 
+(
+  mkGhost().pending_notified == old(mkGhost().pending_notified) setminus Set(ch)
+)
+
+define mk_protected_preconditions(ch) 
+(
+  acc(mkGhost().pending_protected_call) &&
+  mkGhost().pending_protected_call == ch
+)
+
+define mk_protected_postconditions(ch) 
+(
+  acc(mkGhost().pending_protected_call) &&
+  mkGhost().pending_protected_call == -1
+)
+
+define apply_mk_protected_postconditions()
+  (mkGhost().pending_protected_call == -1)
+
+define mk_fault_preconditions(ch) 
+(
+  acc(mkGhost().pending_fault_call) &&
+  mkGhost().pending_fault_call == ch
+)
+
+define mk_fault_postconditions(ch) 
+(
+  acc(mkGhost().pending_fault_call) &&
+  mkGhost().pending_fault_call == -1
+)
+
+define apply_mk_fault_postconditions()
+  (mkGhost().pending_fault_call == -1)
+
+define apply_set_bv64_lshr_suffix_nonzero(i,n,the_set)
+(
+  forall m: Int ::
+  { m in the_set }
+  m in the_set ==> apply_bv64_lshr_suffix_nonzero(i, n, m)
+)
 
 define f_mkGhost(heap,gv) (mkGhost())
 
@@ -122,27 +192,38 @@ define f_mk_response_bit_set(heap,gv,response,ch)
 define f_mk_oracle_correspondence(heap,gv,response,pp,pf,ns)
   (mk_oracle_correspondence(response,pp,pf,ns))
 
+define f_mk_no_pending_tasks(heap,gv,ctx)
+  (mk_no_pending_tasks(ctx))
+
 define f_mk_is_patched_irqs(heap,gv,badge)
   (mk_is_patched_irqs(badge))
 
-/*
-predicate mk_loop_state(ctx: Ref) {
-  acc(ctx.pending_protected_call) &&
-  acc(ctx.pending_fault_call) &&
-  acc(ctx.pending_notified) &&
-  mk_state_wf(
-    ctx.pending_protected_call,
-    ctx.pending_fault_call,
-    ctx.pending_notified
-  )
-}
+define f_mk_notified_preconditions(heap,gv,ch)
+  (mk_notified_preconditions(ch))
 
-predicate mk_no_pending_tasks(ctx: Ref) {
-  acc(ctx.pending_protected_call) &&
-  acc(ctx.pending_fault_call) &&
-  acc(ctx.pending_notified) &&
-  ctx.pending_protected_call == -1 &&
-  ctx.pending_fault_call == -1 &&
-  ctx.pending_notified == Set[Int]()
-}
-*/
+define f_mk_notified_postconditions(heap,gv,ch)
+  (mk_notified_postconditions(ch))
+
+define f_apply_mk_notified_postconditions(heap,gv,ch) 
+  (apply_mk_notified_postconditions(ch))
+
+define f_mk_protected_preconditions(heap,gv,ch)
+  (mk_protected_preconditions(ch))
+
+define f_mk_protected_postconditions(heap,gv,ch)
+  (mk_protected_postconditions(ch))
+
+define f_apply_mk_protected_postconditions(heap,gv)
+  (apply_mk_protected_postconditions())
+
+define f_mk_fault_preconditions(heap,gv,ch)
+  (mk_fault_preconditions(ch))
+
+define f_mk_fault_postconditions(heap,gv,ch)
+  (mk_fault_postconditions(ch))
+
+define f_apply_mk_fault_postconditions(heap,gv)
+  (apply_mk_fault_postconditions())
+
+define f_apply_set_bv64_lshr_suffix_nonzero(heap,gv,i,n,the_set)
+  (apply_set_bv64_lshr_suffix_nonzero(i,n,the_set))

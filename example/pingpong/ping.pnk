@@ -1,3 +1,13 @@
+/@ extern function mk_notified_preconditions(ch: Int): Bool @/
+/@ extern function mk_notified_postconditions(ch: Int): Bool @/
+/@ extern function apply_mk_notified_postconditions(ch: Int): Bool @/
+/@ extern function mk_protected_preconditions(ch: Int): Bool @/
+/@ extern function mk_protected_postconditions(ch: Int): Bool @/
+/@ extern function apply_mk_protected_postconditions(): Bool @/
+/@ extern function mk_fault_preconditions(ch: Int): Bool @/
+/@ extern function mk_fault_postconditions(ch: Int): Bool @/
+/@ extern function apply_mk_fault_postconditions(): Bool @/
+
 fun uep_init() {
     @microkit_report_debug(0, 0, 0, 1);
     microkit_notify(5);
@@ -5,20 +15,29 @@ fun uep_init() {
 }
 
 fun uep_notified(microkit_channel ch) {
+    /@ requires mk_notified_preconditions(ch) @/
+    /@ ensures mk_notified_postconditions(ch) @/
     @microkit_report_debug(0, 0, 0, 2);
     microkit_notify(5);
+    /@ inhale apply_mk_notified_postconditions(ch) @/
     return 0;
 }
 
 fun microkit_fault_reply_option uep_fault(microkit_child child, microkit_msginfo msginfo) {
+    /@ requires mk_fault_preconditions(child) @/
     /@ ensures retval.0 == 0 @/
+    /@ ensures mk_fault_postconditions(child) @/
     @microkit_report_debug(0, 0, 0, 4);
+    /@ inhale apply_mk_fault_postconditions() @/
     return microkit_fault_reply_nothing;
 }
 
 fun uep_protected(microkit_channel ch, microkit_msginfo msginfo) {
+    /@ requires mk_protected_preconditions(ch) @/
     /@ ensures IsAbsMsgInfo(retval) @/
+    /@ ensures mk_protected_postconditions(ch) @/
     @microkit_report_debug(0, 0, 0, 3);
     var 1 res = panseL4_MessageInfo_new(0,0,0,0);
+    /@ inhale apply_mk_protected_postconditions() @/
     return res;
 }

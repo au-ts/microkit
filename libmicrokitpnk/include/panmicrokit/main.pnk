@@ -10,25 +10,26 @@
 #define PD_MASK 255
 #define CHANNEL_MASK 63
 
+/@ extern function mk_is_patched_irqs(badge: Int): Bool @/
 
 /@ extern field pending_protected_call: Int @/ 
 /@ extern field pending_fault_call: Int @/ 
 /@ extern field pending_notified: Set[Int] @/ 
 
-/@ extern function builtin_lshr(x: Int, y: Int): Int @/ 
-/@ extern function mk_pow2(x: Int): Int @/ 
-
 /@ extern function mkGhost(): Ref @/ 
 /@ extern function mk_state_wf(pp: Int, pf: Int, ns: Set[Int]): Bool @/ 
+/@ extern function mk_oracle_correspondence(response: Int, x: Int, y: Int, z: Set[Int]): Bool @/
+/@ extern function mk_no_pending_tasks(ctx: Ref): Bool @/
+/@ extern function mk_response_bit_set(response: Int, ch: Int): Bool @/
 
+/@ extern function builtin_lshr(x: Int, y: Int): Int @/ 
 /@ extern function apply_bv64_lshr0_sem(x: Int): Bool @/
+/@ extern function apply_bv64_lshr63_bit(x: Int): Bool @/
 /@ extern function apply_bv64_lshr64_zero(x: Int): Bool @/
 /@ extern function apply_bv64_lshr_closed(x: Int): Bool @/
 /@ extern function apply_bv64_lshr_compose(x: Int, y: Int, z: Int): Bool @/
+/@ extern function apply_set_bv64_lshr_suffix_nonzero(i: Int, n: Int, m: Set[Int]): Bool @/
 
-/@ extern function mk_oracle_correspondence(response: Int, x: Int, y: Int, z: Set[Int]): Bool @/
-
-/@ extern function mk_is_patched_irqs(badge: Int): Bool @/
 
 var panseL4_Bool microkit_have_signal = false;
 var panseL4_CPtr microkit_signal_cap = 0;
@@ -131,16 +132,29 @@ fun handler_loop() {
         } else {
             if (is_endpoint) {
                 have_reply = true;
+                /@ inhale apply_bv64_lshr63_bit(badge) @/
                 reply_tag = uep_protected(badge & CHANNEL_MASK, tag);
             } else {
                 var 1 channel_index = 0;
                 var 1 badge_orig = badge;
                 /@ inhale apply_bv64_lshr0_sem(badge_orig) @/
                 while (badge != 0) {
-                    /@ invariant (0 <= channel_index) &&
+                    /@ invariant acc(mkGhost().pending_notified) &&
+                                 0 <= channel_index &&
                                  channel_index <= 64 &&
                                  bounded64(badge) &&
-                                 badge == builtin_lshr(badge_orig, channel_index)
+                                 badge == builtin_lshr(badge_orig, channel_index) &&
+                                 forall ch: Int ::
+                                 {ch in mkGhost().pending_notified}
+                                 (
+                                     ch in mkGhost().pending_notified <==>
+                                     (
+                                         0 <= ch &&
+                                         channel_index <= ch &&
+                                         ch < 64 &&
+                                         mk_response_bit_set(badge_orig, ch)
+                                     )
+                                 )
                     @/
                     /@ inhale apply_bv64_lshr64_zero(badge_orig) @/
                     if (badge & 1) {
@@ -151,8 +165,10 @@ fun handler_loop() {
                     badge = badge >>> 1;
                     channel_index = channel_index + 1;
                 }
+                /@ inhale apply_set_bv64_lshr_suffix_nonzero(badge_orig,channel_index,mkGhost().pending_notified) @/ 
             }
         }
+        /@ assert mk_no_pending_tasks(mkGhost()) @/
     }
     return 0;
 }

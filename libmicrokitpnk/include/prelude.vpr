@@ -93,11 +93,30 @@ domain BitVectorDomain64 {
         bv64_lshr(bv64_from_int(i), bv64_from_int(n + m))
   }
 
+  function apply_bv64_lshr63_bit(i: Int): Bool
+  axiom bv64_lshr63_bit {
+    forall i: Int :: { apply_bv64_lshr63_bit(i) }
+      bounded64(i) ==>
+        bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(63))) ==
+        (bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(63))) % 2)
+  }
+
   function apply_bv64_lshr64_zero(i: Int): Bool
   axiom bv64_lshr64_zero {
     forall i: Int :: { apply_bv64_lshr64_zero(i) }
       bounded64(i) ==>
         bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(64))) == 0
+  }
+
+  function apply_bv64_lshr_suffix_nonzero(i: Int, n: Int, m: Int): Bool
+  axiom bv64_lshr_suffix_nonzero {
+    forall i: Int, n: Int, m: Int ::
+      { apply_bv64_lshr_suffix_nonzero(i, n, m) }
+      bounded64(i) &&
+      0 <= n && n <= m && m < 64 &&
+      bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(m))) % 2 == 1
+      ==>
+      bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(n))) != 0
   }
 }
 
@@ -108,8 +127,9 @@ define f_apply_bv64_lshr0_sem(heap, gv, i) (apply_bv64_lshr0_sem(i))
 define f_apply_bv64_lshr1_sem(heap, gv, i) (apply_bv64_lshr1_sem(i))
 define f_apply_bv64_lshr_closed(heap, gv, i) (apply_bv64_lshr_closed(i))
 define f_apply_bv64_lshr_compose(heap, gv, i, n, m) (apply_bv64_lshr_compose(i,n,m))
+define f_apply_bv64_lshr63_bit(heap, gv, i) (apply_bv64_lshr63_bit(i))
 define f_apply_bv64_lshr64_zero(heap, gv, i) (apply_bv64_lshr64_zero(i))
-
+define f_apply_bv64_lshr_suffix_nonzero(heap, gv, i, n, m) (apply_bv64_lshr_suffix_nonzero(i,n,m))
 
 define builtin_lshr(x,y) (bv64_to_int(bv64_lshr(bv64_from_int(x), bv64_from_int(y))))
 define f_builtin_lshr(heap,gv,x,y) (bv64_to_int(bv64_lshr(bv64_from_int(x), bv64_from_int(y))))
