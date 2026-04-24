@@ -106,7 +106,7 @@ $(IMAGE) $(REPORT): $(PINGELF) $(PONGELF) pingpong.system | $(BUILD_DIR)
 	  --search-path $(BUILD_DIR) \
 	  --board $(MICROKIT_BOARD) \
 	  --config $(MICROKIT_CONFIG) \
-	  --viper-output caps-for- \
+	  --viper-output build/caps-for- \
 	  -o $(IMAGE) -r $(REPORT)
 
 clean:
