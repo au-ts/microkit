@@ -18,7 +18,7 @@
 
 /@ extern function mkGhost(): Ref @/ 
 /@ extern function mk_state_wf(pp: Int, pf: Int, ns: Set[Int]): Bool @/ 
-/@ extern function mk_oracle_correspondence(response: Int, x: Int, y: Int, z: Set[Int]): Bool @/
+/@ extern function mk_oracle_correspondence(response: Int, pp: Int, pf: Int, ns: Set[Int]): Bool @/
 /@ extern function mk_no_pending_tasks(ctx: Ref): Bool @/
 /@ extern function mk_response_bit_set(response: Int, ch: Int): Bool @/
 
@@ -30,6 +30,8 @@
 /@ extern function apply_bv64_lshr_compose(x: Int, y: Int, z: Int): Bool @/
 /@ extern function apply_set_bv64_lshr_suffix_nonzero(i: Int, n: Int, m: Set[Int]): Bool @/
 
+/@ extern function user_rely(badge: Int, tag: Int): Bool @/
+/@ extern function user_guarantee_microkit_notify(ch: Int): Bool @/
 
 var panseL4_Bool microkit_have_signal = false;
 var panseL4_CPtr microkit_signal_cap = 0;
@@ -104,20 +106,22 @@ fun handler_loop() {
         /@ inhale acc(mkGhost().pending_fault_call) @/
         /@ inhale acc(mkGhost().pending_notified) @/
         /@ assume mk_state_wf(mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified) @/
+        /@ assume user_rely(mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified) @/
         var panseL4_Response response = <0,0>;
         if (have_reply) {
             response = panseL4_ReplyRecv(INPUT_CAP, reply_tag, REPLY_CAP);
         } else {
             if (microkit_have_signal) {
+                /@ assert pansel4_has_notification_cap(gv.microkit_signal_cap) ==> user_guarantee_microkit_notify(gv.microkit_signal_cap - BASE_OUTPUT_NOTIFICATION_CAP) @/
                 response = panseL4_NBSendRecv(microkit_signal_cap, microkit_signal_msg, INPUT_CAP, REPLY_CAP);
                 microkit_have_signal = false;
             } else {
                 response = panseL4_Recv(INPUT_CAP, REPLY_CAP);
             }
         }
-        /@ assume mk_oracle_correspondence(panseL4_Response_badge(response), mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified) @/
         var panseL4_MessageInfo_t tag = panseL4_Response_tag(response);
         var 1 badge = panseL4_Response_badge(response);
+        /@ assume mk_oracle_correspondence(badge, mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified) @/
         have_reply = false;
 
         var 1 is_endpoint = badge >>> 63;

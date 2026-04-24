@@ -33,3 +33,7 @@ define f_mk_is_notified_source(heap,gv,x) (x in Set(5))
 define f_mk_is_notify_target(heap,gv,x) (x in Set(5))
 define f_mk_is_irq_channel(heap,gv,x) (false)
 define f_mk_is_child(heap,gv,x) (false)
+
+define f_user_guarantee_microkit_notify(heap,gv,ch) (true)
+define f_user_guarantee_microkit_ppcall(heap,gv,ch,msginfo) (true)
+define f_user_rely(heap,gv,pp,pf,ns) (true)
