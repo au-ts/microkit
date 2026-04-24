@@ -15,7 +15,7 @@ fn export_define_set(name: &'static str, vector: &Vec<u64>, target: &mut String)
             "define {name}(x) (false)\n"
         ));
         target.push_str(&format!(
-            "define f_{name}(heap,gv,x) (false)\n"
+            "define f_{name}(heap,gv,x) ({name}(x))\n"
         ));
         return;
     }
@@ -30,7 +30,7 @@ fn export_define_set(name: &'static str, vector: &Vec<u64>, target: &mut String)
         "define {name}(x) (x in Set({items}))\n"
     ));
     target.push_str(&format!(
-        "define f_{name}(heap,gv,x) (x in Set({items}))\n"
+        "define f_{name}(heap,gv,x) ({name}(x))\n"
     ));
 }
 
