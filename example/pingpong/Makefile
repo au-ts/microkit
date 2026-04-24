@@ -52,12 +52,11 @@ PINGSTAGE3 := $(BUILD_DIR)/stage3_assembly.S
 PINGSTAGE4 := $(BUILD_DIR)/stage4_object.o
 
 
-PINGVSTAGE1 := $(BUILD_DIR)/vstage1_processed.pnk
-
-PINGELF := $(BUILD_DIR)/ping.elf
-PONGELF := $(BUILD_DIR)/pong.elf
-IMAGE   := $(BUILD_DIR)/loader.img
-REPORT  := $(BUILD_DIR)/report.txt
+PINGELF   := $(BUILD_DIR)/ping.elf
+PONGELF   := $(BUILD_DIR)/pong.elf
+IMAGE     := $(BUILD_DIR)/loader.img
+REPORT    := $(BUILD_DIR)/report.txt
+VIPER_OUT := $(BUILD_DIR)/ping_verification.vpr
 
 all: $(IMAGE)
 
@@ -75,11 +74,8 @@ $(PINGSTAGE1): ping.pnk | $(BUILD_DIR)
 $(PINGSTAGE2): $(PINGSTAGE1) | $(BUILD_DIR)
 	$(CPP) -P -I$(BOARD_DIR)/include $< > $@
 
-$(PINGVSTAGE1): $(PINGSTAGE1) | $(BUILD_DIR)
-	$(CPP) -DLIBMICROKIT_VERIFICATION_BW -P -I$(BOARD_DIR)/include $< > $@
-
 # Stage3: compile all Pancake code into asm / machine code
-$(PINGSTAGE3): $(PINGSTAGE2) $(PINGVSTAGE1) | $(BUILD_DIR)
+$(PINGSTAGE3): $(PINGSTAGE2) | $(BUILD_DIR)
 	cat $< | cake --target=riscv --pancake --main_return=true > $@
 
 # Stage4: create object file from Stage3 asm
@@ -109,7 +105,34 @@ $(IMAGE) $(REPORT): $(PINGELF) $(PONGELF) pingpong.system | $(BUILD_DIR)
 	  --viper-output build/caps-for- \
 	  -o $(IMAGE) -r $(REPORT)
 
+# Output verifiable Viper
+verify: $(IMAGE) $(REPORT) $(PINGSTAGE2)
+	pancake2viper transpile \
+	  --disable-prelude \
+	  -I $(BOARD_DIR)/include/prelude.vpr \
+	  -I $(BOARD_DIR)/include/pansel4/spec.vpr \
+	  -I $(BOARD_DIR)/include/panmicrokit/spec.vpr \
+	  -I $(BUILD_DIR)/caps-for-ping.vpr \
+	  -I ./spec-for-ping.vpr \
+	  $(PINGSTAGE2) \
+	  $(VIPER_OUT)
+
+	# Workaround for transpiler issue #6
+	sed -i 's/  patched/  gv.patched/g' $(VIPER_OUT)
+	sed -i 's/ microkit_signal_msg :/ gv.microkit_signal_msg :/g' $(VIPER_OUT)
+
+	# Workaround for transpiler issue #7
+	sed -i 's/label continue/\/\/label continue/g' $(VIPER_OUT)
+	sed -i 's/label break/\/\/label break/g' $(VIPER_OUT)
+
+	# Disable refute false checks
+        # Refute false is a Viper idiom to prevent inconsistent sets of assumptions.
+        # We _allow_ inconsistent assumption sets, for example calling
+        # microkit_ppcall(..) should be impossible if there are no ppcalls defined in
+        # the system description file.
+	sed -i 's/refute false/\/\/refute false/g' $(VIPER_OUT)
+
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: all clean
+.PHONY: all clean verify

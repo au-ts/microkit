@@ -1,24 +1,34 @@
-// rely assumptions made about the environment //
+//// rely assumptions this PD makes about the environment ////
 
+// The following condition is assumed to hold when entering uep_init()
 define f_user_rely_init(heap,gv)
 (
     acc(gv.unanswered_pings)
 )
 
+// The following condition is assumed to hold whenever this PD receives
+// on its endpoint.
 define f_user_rely_receive(heap,gv,pp,pf,ns) (true)
 
-// guarantees provided by the PD on externally visible events //
+//// guarantees provided by the PD on externally visible events ////
 
+// The following condition is guaranteed to hold whenever this PD makes a
+// microkit_notify(ch) call.
 define f_user_guarantee_microkit_notify(heap,gv,ch)
 (
     acc(gv.unanswered_pings) &&
     gv.unanswered_pings == 0
 )
 
+// The following condition is guaranteed to hold whenever this PD makes a
+// microkit_ppcall(ch, msginfo) call.
 define f_user_guarantee_microkit_ppcall(heap,gv,ch,msginfo) (true)
+
+// The following condition is guaranteed to hold whenever this PD returns
+// from a fault-handling call or protected procedure call.
 define f_user_guarantee_reply(heap,gv) (true)
 
-// loop invariants required for the proof //
+//// loop invariants required for the proof ////
 
 define f_user_handler_loop_entry(heap,gv)
 (
