@@ -793,8 +793,6 @@ fn main() -> Result<(), String> {
             initialiser_vaddr_range,
             image,
         }) => {
-
-
             let image_out_path = args.output_path.as_path();
 
             match image {
@@ -851,6 +849,8 @@ fn main() -> Result<(), String> {
                 }
             };
 
+            write_report(&spec_container, &kernel_config, &args.report_path);
+
             if let Some(capdl_json) = args.capdl_json_path {
                 let serialised = serde_json::to_string_pretty(&spec_container.spec).unwrap();
                 fs::write(&capdl_json, &serialised).map_err(|source| {
@@ -870,8 +870,6 @@ fn main() -> Result<(), String> {
                     })?;
                 }
             };
-
-            write_report(&spec_container, &kernel_config, &args.report_path);
         }
         Err(err) => {
             eprintln!("microkit: error: {err}");
