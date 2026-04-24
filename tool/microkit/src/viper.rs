@@ -194,6 +194,7 @@ pub struct SdfView {
     pub notified_sources: Vec<u64>,
     pub notify_targets: Vec<u64>,
     pub irqs: Vec<u64>,
+    pub children: Vec<u64>,
 }
 
 impl SdfView {
@@ -226,6 +227,12 @@ impl SdfView {
         export_define_set(
             "mk_is_irq_channel",
             &self.irqs,
+            target,
+        );
+
+        export_define_set(
+            "mk_is_child",
+            &self.children,
             target,
         );
     }
@@ -271,6 +278,15 @@ pub fn get_sdf_view(system: &SystemDescription, current_pd: usize) -> Option<Sdf
 
         if local.notify {
             view.notify_targets.push(local.id);
+        }
+    }
+
+    for pd in &system.protection_domains {
+        if pd.parent == Some(current_pd) {
+            match pd.id {
+                Some(id) => { view.children.push(id) }
+                None => {}
+            }
         }
     }
 
