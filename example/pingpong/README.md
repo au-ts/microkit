@@ -30,3 +30,25 @@ qemu-system-riscv64 \
 ```
 
 Tested only on RISC-V qemu.
+
+## Verifying
+
+To verify the `ping` protection domain against the specification, you have to
+transpile it to Viper code first. This has the `pancake2viper` transpiler as an
+additional dependency. You will need a recent version with support for
+`/@ extern function ... @/` annotations.
+
+After obtaining `pancake2viper`, you will be able to use the `verify` target
+by invoking
+```sh
+mkdir build
+make \
+  ARCH=riscv64 \
+  BUILD_DIR=./build \
+  MICROKIT_SDK=~/microkit/panmicrokit-sdk/ \
+  MICROKIT_BOARD=qemu_virt_riscv64 \
+  MICROKIT_CONFIG=debug \
+  verify
+```
+and then inspect `build/ping_verification.vpr` with Viper / VS Code to complete
+the verification.
