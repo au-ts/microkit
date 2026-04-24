@@ -192,10 +192,22 @@ fun 1 microkit_get_constant(1 constant) {
 }
 
 fun main() {
+    /@ requires acc(gv.patched_microkit_irqs) @/
+    /@ requires acc(gv.patched_microkit_notifications) @/
+    /@ requires acc(gv.patched_microkit_pps) @/
+    /@ requires acc(gv.patched_microkit_ioports) @/
+    /@ requires acc(gv.microkit_have_signal) @/
+    /@ requires acc(gv.microkit_signal_cap) @/
+    /@ requires acc(gv.microkit_signal_msg) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
     patched_microkit_irqs = microkit_get_constant(0);
     patched_microkit_notifications = microkit_get_constant(1);
     patched_microkit_pps = microkit_get_constant(2);
     patched_microkit_ioports = microkit_get_constant(3);
+    microkit_have_signal = 0;
     uep_init();
     handler_loop();
     return 0;

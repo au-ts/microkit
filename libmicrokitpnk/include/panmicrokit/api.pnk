@@ -38,6 +38,7 @@
 /@ extern function mk_is_notified_source(x: Int): Bool @/
 /@ extern function mk_is_notify_target(x: Int): Bool @/
 /@ extern function mk_is_irq_channel(x: Int): Bool @/
+/@ extern function mk_is_child(x: Int): Bool @/
 
 
 export fun microkit_notify(microkit_channel ch) {
@@ -55,6 +56,9 @@ export fun microkit_irq_ack(microkit_channel ch) {
 }
 
 export fun panseL4_Error microkit_pd_stop(microkit_child pd) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires mk_is_child(pd) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
     var panseL4_Error err = panseL4_TCB_Suspend(BASE_TCB_CAP + pd);
     if (err != panseL4_NoError) {
         @microkit_report_error(0, 1, 0, err);
@@ -63,6 +67,9 @@ export fun panseL4_Error microkit_pd_stop(microkit_child pd) {
 }
 
 export fun panseL4_Error microkit_pd_restart(microkit_child pd, 1 entry_point) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires mk_is_child(pd) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
     var panseL4_Error err = panseL4_TCB_WriteRegisters_spec(BASE_TCB_CAP + pd, entry_point);
     if (err != panseL4_NoError) {
         @microkit_report_error(0, 2, 0, err);
