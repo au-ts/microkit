@@ -30,8 +30,14 @@
 /@ extern function apply_bv64_lshr_compose(x: Int, y: Int, z: Int): Bool @/
 /@ extern function apply_set_bv64_lshr_suffix_nonzero(i: Int, n: Int, m: Set[Int]): Bool @/
 
-/@ extern function user_rely(badge: Int, tag: Int): Bool @/
+/@ extern function user_rely_init(): Bool @/
+/@ extern function user_rely_receive(pp: Int,pf: Int,ns: Set[Int]): Bool @/
 /@ extern function user_guarantee_microkit_notify(ch: Int): Bool @/
+/@ extern function user_guarantee_microkit_ppcall(ch: Int,msginfo: Int): Bool @/
+/@ extern function user_guarantee_reply(): Bool @/
+/@ extern function user_handler_loop_entry(): Bool @/
+/@ extern function user_handler_loop_invariant(have_reply: Int): Bool @/
+/@ extern function user_notified_loop_invariant(channel_index: Int): Bool @/
 
 var panseL4_Bool microkit_have_signal = false;
 var panseL4_CPtr microkit_signal_cap = 0;
@@ -61,6 +67,7 @@ fun handler_loop() {
                     pansel4_has_notification_cap(gv.microkit_signal_cap)
                 )
     @/
+    /@ requires user_handler_loop_entry() @/
     var 1 irq_index = 0;
     var panseL4_Word irqs_to_ack_orig = patched_microkit_irqs;
     var panseL4_Word irqs_to_ack = patched_microkit_irqs;
@@ -100,20 +107,25 @@ fun handler_loop() {
                          pansel4_has_endpoint_cap(gv.microkit_signal_cap) ||
                          pansel4_has_notification_cap(gv.microkit_signal_cap)
                      ) &&
-                     (have_reply == 0 || IsAbsMsgInfo(reply_tag))
+                     (have_reply == 0 || IsAbsMsgInfo(reply_tag)) &&
+                     user_handler_loop_invariant(have_reply)
         @/
         /@ inhale acc(mkGhost().pending_protected_call) @/
         /@ inhale acc(mkGhost().pending_fault_call) @/
         /@ inhale acc(mkGhost().pending_notified) @/
         /@ assume mk_state_wf(mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified) @/
-        /@ assume user_rely(mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified) @/
+        /@ assume user_rely_receive(mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified) @/
         var panseL4_Response response = <0,0>;
         if (have_reply) {
+            /@ assert user_guarantee_reply() @/
             response = panseL4_ReplyRecv(INPUT_CAP, reply_tag, REPLY_CAP);
+            /@ assume user_guarantee_reply() @/
         } else {
             if (microkit_have_signal) {
+                // a deferred notify takes place here, so notify guarantee must also hold
                 /@ assert pansel4_has_notification_cap(gv.microkit_signal_cap) ==> user_guarantee_microkit_notify(gv.microkit_signal_cap - BASE_OUTPUT_NOTIFICATION_CAP) @/
                 response = panseL4_NBSendRecv(microkit_signal_cap, microkit_signal_msg, INPUT_CAP, REPLY_CAP);
+                /@ assume pansel4_has_notification_cap(gv.microkit_signal_cap) ==> user_guarantee_microkit_notify(gv.microkit_signal_cap - BASE_OUTPUT_NOTIFICATION_CAP) @/
                 microkit_have_signal = false;
             } else {
                 response = panseL4_Recv(INPUT_CAP, REPLY_CAP);
@@ -148,17 +160,20 @@ fun handler_loop() {
                                  channel_index <= 64 &&
                                  bounded64(badge) &&
                                  badge == builtin_lshr(badge_orig, channel_index) &&
-                                 forall ch: Int ::
-                                 {ch in mkGhost().pending_notified}
                                  (
-                                     ch in mkGhost().pending_notified <==>
+                                     forall ch: Int ::
+                                     {ch in mkGhost().pending_notified}
                                      (
-                                         0 <= ch &&
-                                         channel_index <= ch &&
-                                         ch < 64 &&
-                                         mk_response_bit_set(badge_orig, ch)
+                                         ch in mkGhost().pending_notified <==>
+                                         (
+                                             0 <= ch &&
+                                             channel_index <= ch &&
+                                             ch < 64 &&
+                                             mk_response_bit_set(badge_orig, ch)
+                                         )
                                      )
-                                 )
+                                 ) &&
+                                 user_notified_loop_invariant(channel_index)
                     @/
                     /@ inhale apply_bv64_lshr64_zero(badge_orig) @/
                     if (badge & 1) {
@@ -173,6 +188,9 @@ fun handler_loop() {
             }
         }
         /@ assert mk_no_pending_tasks(mkGhost()) @/
+        /@ exhale acc(mkGhost().pending_protected_call) @/
+        /@ exhale acc(mkGhost().pending_fault_call) @/
+        /@ exhale acc(mkGhost().pending_notified) @/
     }
     return 0;
 }
@@ -207,6 +225,7 @@ fun main() {
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
+    /@ requires user_rely_init() @/
     patched_microkit_irqs = microkit_get_constant(0);
     patched_microkit_notifications = microkit_get_constant(1);
     patched_microkit_pps = microkit_get_constant(2);

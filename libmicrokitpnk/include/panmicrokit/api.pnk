@@ -41,11 +41,13 @@
 /@ extern function mk_is_child(x: Int): Bool @/
 
 /@ extern function user_guarantee_microkit_notify(ch: Int): Bool @/
-/@ extern function user_guarantee_microkit_ppcall(ch: Int, msginfo: Int): Bool @/
+/@ extern function user_guarantee_microkit_ppcall(ch: Int,msginfo: Int): Bool @/
+/@ extern function user_guarantee_microkit_reply(): Bool @/
 
 export fun microkit_notify(microkit_channel ch) {
     /@ requires user_guarantee_microkit_notify(ch) @/
     /@ requires mk_is_notify_target(ch) @/
+    /@ ensures user_guarantee_microkit_notify(ch) @/
     panseL4_Signal(BASE_OUTPUT_NOTIFICATION_CAP + ch);
     return 0;
 }
@@ -55,6 +57,7 @@ export fun microkit_irq_ack(microkit_channel ch) {
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
     /@ requires mk_is_irq_channel(ch) @/
     /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures user_guarantee_microkit_notify(ch) @/
     panseL4_IRQHandler_Ack(BASE_IRQ_CAP + ch);
     return 0;
 }
@@ -85,6 +88,7 @@ export fun microkit_msginfo microkit_ppcall(microkit_channel ch, microkit_msginf
     /@ requires user_guarantee_microkit_ppcall(ch, msginfo) @/
     /@ requires mk_is_ppcall_target(ch) @/
     /@ requires IsAbsMsgInfo(msginfo) @/
+    /@ ensures user_guarantee_microkit_ppcall(ch, msginfo) @/
     var microkit_msginfo tag = panseL4_Call(BASE_ENDPOINT_CAP + ch, msginfo);
     return tag;
 }

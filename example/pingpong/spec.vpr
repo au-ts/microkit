@@ -1,3 +1,42 @@
-define f_user_guarantee_microkit_notify(heap,gv,ch) (true)
+// rely assumptions made about the environment //
+
+define f_user_rely_init(heap,gv)
+(
+    acc(gv.unanswered_pings)
+)
+
+define f_user_rely_receive(heap,gv,pp,pf,ns) (true)
+
+// guarantees provided by the PD on externally visible events //
+
+define f_user_guarantee_microkit_notify(heap,gv,ch)
+(
+    acc(gv.unanswered_pings) &&
+    gv.unanswered_pings == 0
+)
+
 define f_user_guarantee_microkit_ppcall(heap,gv,ch,msginfo) (true)
-define f_user_rely(heap,gv,pp,pf,ns) (true)
+define f_user_guarantee_reply(heap,gv) (true)
+
+// loop invariants required for the proof //
+
+define f_user_handler_loop_entry(heap,gv)
+(
+    gv.microkit_have_signal == 0 &&
+    acc(gv.unanswered_pings) &&
+    gv.unanswered_pings == 1
+)
+
+define f_user_handler_loop_invariant(heap,gv,have_reply)
+(
+    have_reply == 0 &&
+    gv.microkit_have_signal == 0 &&
+    acc(gv.unanswered_pings) &&
+    gv.unanswered_pings == 1
+)
+
+define f_user_notified_loop_invariant(heap,gv,channel_index)
+(
+    acc(gv.unanswered_pings) &&
+    gv.unanswered_pings == 1
+)

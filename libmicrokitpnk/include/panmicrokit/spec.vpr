@@ -1,9 +1,9 @@
 
 define mk_valid_pending_protected(pp)
-  (pp == -1 || (0 <= pp && pp < 63))
+  (pp == -1 || mk_is_protected_source(pp))
 
 define mk_valid_pending_fault(pf)
-  (pf == -1 || (0 <= pf && pf < 256))
+  (pf == -1 || mk_is_child(pf))
 
 define mk_valid_pending_notified(ns)
   (forall ch: Int :: { ch in ns }

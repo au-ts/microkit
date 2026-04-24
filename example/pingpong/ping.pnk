@@ -8,17 +8,38 @@
 /@ extern function mk_fault_postconditions(ch: Int): Bool @/
 /@ extern function apply_mk_fault_postconditions(): Bool @/
 
-fun uep_init() {
-    @microkit_report_debug(0, 0, 0, 1);
+var 1 unanswered_pings = 0;
+
+fun ping() {
+    /@ requires acc(gv.unanswered_pings) @/
+    /@ requires gv.unanswered_pings == 0 @/
+    /@ ensures acc(gv.unanswered_pings) @/
+    /@ ensures gv.unanswered_pings == 1 @/
     microkit_notify(5);
+    unanswered_pings = unanswered_pings + 1;
+    return 0;
+}
+
+fun uep_init() {
+    /@ requires acc(gv.unanswered_pings) @/
+    /@ ensures acc(gv.unanswered_pings) @/
+    /@ ensures gv.unanswered_pings == 1 @/
+    @microkit_report_debug(0, 0, 0, 1);
+    unanswered_pings = 0;
+    ping();
     return 0;
 }
 
 fun uep_notified(microkit_channel ch) {
     /@ requires mk_notified_preconditions(ch) @/
+    /@ requires acc(gv.unanswered_pings) @/
+    /@ requires gv.unanswered_pings == 1 @/
+    /@ ensures acc(gv.unanswered_pings) @/
+    /@ ensures gv.unanswered_pings == 1 @/
     /@ ensures mk_notified_postconditions(ch) @/
+    unanswered_pings = unanswered_pings - 1;
     @microkit_report_debug(0, 0, 0, 2);
-    microkit_notify(5);
+    ping();
     /@ inhale apply_mk_notified_postconditions(ch) @/
     return 0;
 }
