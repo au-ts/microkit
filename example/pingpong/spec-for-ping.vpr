@@ -1,34 +1,56 @@
-//// rely assumptions this PD makes about the environment ////
 
-// The following condition is assumed to hold when entering uep_init()
+///////////////////////////////////////////////////////////////////////////////
+//// Assumptions that the PD makes about the environment.
+//// These become assumptions in the proof, and unsubstantiated assumptions can
+//// lead to unsoundness. Tread lightly.
+
 define f_user_rely_init(heap,gv)
 (
+    // Assumed to hold when entering uep_init()
     acc(gv.unanswered_pings)
 )
 
-// The following condition is assumed to hold whenever this PD receives
-// on its endpoint.
-define f_user_rely_receive(heap,gv,pp,pf,ns) (true)
+define f_user_rely_receive(heap,gv,pp,pf,ns) (
+    // Assumed to hold whenever this PD receives on its endpoint
+    true
+)
 
-//// guarantees provided by the PD on externally visible events ////
+define f_user_rely_microkit_ppcall(heap,gv,ch,msginfo,retval)
+(
+    // Assumed to hold whenever a ppcall returns in this PD
+    // WARN: assumed to hold together with `f_user_guarantee_microkit_ppcall`.
+    // It is best not to put any `acc(-)` or other impure predicates here,
+    // since access rights exceeding 1 will cause unsoundness.
+    true
+)
 
-// The following condition is guaranteed to hold whenever this PD makes a
-// microkit_notify(ch) call.
+///////////////////////////////////////////////////////////////////////////////
+//// Guarantees provided by the PD on externally visible events.
+//// These become proof obligations that the user/verifier must show to hold
+//// whenever the corresponding event takes place.
+
 define f_user_guarantee_microkit_notify(heap,gv,ch)
 (
+    // Checked to hold whenever this PD makes a microkit_notify(ch) call
     acc(gv.unanswered_pings) &&
     gv.unanswered_pings == 0
 )
 
-// The following condition is guaranteed to hold whenever this PD makes a
-// microkit_ppcall(ch, msginfo) call.
-define f_user_guarantee_microkit_ppcall(heap,gv,ch,msginfo) (true)
+define f_user_guarantee_microkit_ppcall(heap,gv,ch,msginfo) (
+    // Checked to hold whenever this PD makes a microkit_ppcall(ch, msg) call
+    true
+)
 
-// The following condition is guaranteed to hold whenever this PD returns
-// from a fault-handling call or protected procedure call.
-define f_user_guarantee_reply(heap,gv) (true)
+define f_user_guarantee_reply(heap,gv) (
+    // Checked to hold whenever this PD transmits the result of a
+    // `fault` or `protected` call to another PD
+    true
+)
 
-//// loop invariants required for the proof ////
+///////////////////////////////////////////////////////////////////////////////
+//// Loop invariants for Microkit's internal loops
+//// The preservation of these invariants becomes a proof obligation that the
+//// user/verifier must show.
 
 define f_user_handler_loop_entry(heap,gv)
 (

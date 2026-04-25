@@ -40,6 +40,7 @@
 /@ extern function mk_is_irq_channel(x: Int): Bool @/
 /@ extern function mk_is_child(x: Int): Bool @/
 
+/@ extern function user_rely_microkit_ppcall(ch: Int,msginfo: Int,tag: Int): Bool @/
 /@ extern function user_guarantee_microkit_notify(ch: Int): Bool @/
 /@ extern function user_guarantee_microkit_ppcall(ch: Int,msginfo: Int): Bool @/
 /@ extern function user_guarantee_microkit_reply(): Bool @/
@@ -89,7 +90,9 @@ export fun microkit_msginfo microkit_ppcall(microkit_channel ch, microkit_msginf
     /@ requires mk_is_ppcall_target(ch) @/
     /@ requires IsAbsMsgInfo(msginfo) @/
     /@ ensures user_guarantee_microkit_ppcall(ch, msginfo) @/
+    /@ ensures user_rely_microkit_ppcall(ch, msginfo, retval) @/
     var microkit_msginfo tag = panseL4_Call(BASE_ENDPOINT_CAP + ch, msginfo);
+    /@ assume user_rely_microkit_ppcall(ch, msginfo, tag) @/
     return tag;
 }
 
