@@ -1,3 +1,10 @@
+///////////////////////////////////////////////////////////////////////////////
+// panseL4: MessageInfo type                                                 //
+///////////////////////////////////////////////////////////////////////////////
+// The following definitions let us state that a given integer is a valid
+// MessageInfo_t value, without having to directly interact with the bitfield
+// generation in the seL4 kernel code.
+
 domain AbsMsgInfo {
   function IsAbsMsgInfo(x: Int): Bool
   function label_of(x: Int): Int

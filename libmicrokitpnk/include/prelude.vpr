@@ -1,3 +1,7 @@
+///////////////////////////////////////////////////////////////////////////////
+// panseL4 / panmicrokit prelude                                             //
+///////////////////////////////////////////////////////////////////////////////
+
 domain IArray  {
   function slot(a: IArray, i: Int): Ref 
   function alen(a: IArray): Int 
@@ -14,6 +18,10 @@ domain IArray  {
 }
 
 domain BitVectorDomain64 {
+  // We axiomatize bit vector operations directly. This is currently minimal,
+  // containing just enough axioms to let us verify the correctness of the
+  // panmicrokit handler loop.
+
   function not(a: BitVectorDomain64): BitVectorDomain64
   function bv64_xor(a: BitVectorDomain64, b: BitVectorDomain64): BitVectorDomain64
   function bv64_and(a: BitVectorDomain64, b: BitVectorDomain64): BitVectorDomain64
@@ -135,7 +143,6 @@ define builtin_lshr(x,y) (bv64_to_int(bv64_lshr(bv64_from_int(x), bv64_from_int(
 define f_builtin_lshr(heap,gv,x,y) (bv64_to_int(bv64_lshr(bv64_from_int(x), bv64_from_int(y))))
 
 field local_mem: Int
-
 field shared_mem: Int
 
 function bounded8(x: Int): Bool {
@@ -192,4 +199,3 @@ method shared_load64(heap: IArray, gv: Ref, address: Int)
 
 method shared_store64(heap: IArray, gv: Ref, address: Int, value: Int)
   requires bounded64(value)
-
