@@ -105,12 +105,14 @@ field pending_notified: Set[Int]
 
 define mk_notified_preconditions(ch) 
 (
+  power_acc_ghost_state(pdGhost()) &&
   acc(mkGhost().pending_notified) &&
   ch in mkGhost().pending_notified
 )
 
 define mk_notified_postconditions(ch) 
 (
+  power_acc_ghost_state(pdGhost()) &&
   acc(mkGhost().pending_notified) &&
   mkGhost().pending_notified == old(mkGhost().pending_notified) setminus Set(ch)
 )
@@ -122,12 +124,14 @@ define apply_mk_notified_postconditions(ch)
 
 define mk_protected_preconditions(ch) 
 (
+  power_acc_ghost_state(pdGhost()) &&
   acc(mkGhost().pending_protected_call) &&
   mkGhost().pending_protected_call == ch
 )
 
 define mk_protected_postconditions(ch) 
 (
+  power_acc_ghost_state(pdGhost()) &&
   acc(mkGhost().pending_protected_call) &&
   mkGhost().pending_protected_call == -1
 )
@@ -137,12 +141,14 @@ define apply_mk_protected_postconditions()
 
 define mk_fault_preconditions(ch) 
 (
+  power_acc_ghost_state(pdGhost()) &&
   acc(mkGhost().pending_fault_call) &&
   mkGhost().pending_fault_call == ch
 )
 
 define mk_fault_postconditions(ch) 
 (
+  power_acc_ghost_state(pdGhost()) &&
   acc(mkGhost().pending_fault_call) &&
   mkGhost().pending_fault_call == -1
 )

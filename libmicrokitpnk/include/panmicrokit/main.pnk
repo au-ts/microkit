@@ -30,14 +30,20 @@
 /@ extern function apply_bv64_lshr_compose(x: Int, y: Int, z: Int): Bool @/
 /@ extern function apply_set_bv64_lshr_suffix_nonzero(i: Int, n: Int, m: Set[Int]): Bool @/
 
-/@ extern function user_rely_init(): Bool @/
-/@ extern function user_rely_receive(pp: Int,pf: Int,ns: Set[Int]): Bool @/
-/@ extern function user_guarantee_microkit_notify(ch: Int): Bool @/
-/@ extern function user_guarantee_microkit_ppcall(ch: Int,msginfo: Int): Bool @/
-/@ extern function user_guarantee_reply(): Bool @/
+/@ extern function power_rely_init(state: Ref): Bool @/
+/@ extern function user_rely_receive(pp: Int,pf: Int,ns: Set[Int], state: Ref): Bool @/
 /@ extern function user_handler_loop_entry(): Bool @/
-/@ extern function user_handler_loop_invariant(have_reply: Int): Bool @/
-/@ extern function user_notified_loop_invariant(channel_index: Int): Bool @/
+/@ extern function user_handler_loop_invariant(have_reply: Int, state: Ref): Bool @/
+/@ extern function user_notified_loop_invariant(channel_index: Int, state: Ref): Bool @/
+
+/@ extern function power_guarantee_Recv(state: Ref): Bool @/
+/@ extern function power_transition_Recv(state: Ref): Bool @/
+
+/@ extern function power_guarantee_ReplyRecv(reply_tag: Int, state: Ref): Bool @/
+/@ extern function power_transition_ReplyRecv(reply_tag: Int, state: Ref): Bool @/
+
+/@ extern function power_guarantee_NBSendRecv(signal_cap: Int, signal_msg: Int, state: Ref): Bool @/
+/@ extern function power_transition_NBSendRecv(signal_cap: Int, signal_msg: Int, state: Ref): Bool @/
 
 var panseL4_Bool microkit_have_signal = false;
 var panseL4_CPtr microkit_signal_cap = 0;
@@ -47,6 +53,111 @@ var panseL4_Word patched_microkit_irqs = 0;
 var panseL4_Word patched_microkit_notifications = 0;
 var panseL4_Word patched_microkit_pps = 0;
 var panseL4_Word patched_microkit_ioports = 0;
+
+
+fun panseL4_Response mk_Recv() {
+    // panseL4_Recv preconditions:
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ requires pansel4_has_cap(INPUT_CAP) @/
+    /@ requires pansel4_has_endpoint_cap(INPUT_CAP) || pansel4_has_notification_cap(INPUT_CAP) @/
+    /@ requires pansel4_has_notification_cap(INPUT_CAP) || pansel4_has_cap(REPLY_CAP) @/
+    /@ requires pansel4_has_notification_cap(INPUT_CAP) || pansel4_has_reply_cap(REPLY_CAP) @/
+
+    // ghost state transition preconditions:
+    /@ requires power_acc_ghost_state(pdGhost()) @/
+    /@ requires power_guarantee_Recv(pdGhost()) @/
+
+    // panseL4_Recv postconditions:
+    /@ ensures IsAbsMsgInfo(panseL4_Response_tag(retval)) @/
+    /@ ensures bounded64(panseL4_Response_badge(retval)) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+
+    // ghost state transition postconditions:
+    /@ ensures power_acc_ghost_state(pdGhost()) @/
+    /@ ensures power_transition_Recv(pdGhost()) @/
+
+    var panseL4_Response response = panseL4_Recv(INPUT_CAP,REPLY_CAP);
+    // perform a nondeterministic ghost state machine transition
+    /@ exhale power_acc_ghost_state(pdGhost()) @/
+    /@ inhale power_acc_ghost_state(pdGhost()) @/
+    /@ assume power_transition_Recv(pdGhost()) @/
+    return response;
+}
+
+fun panseL4_Response mk_ReplyRecv(panseL4_MessageInfo_t reply_tag) {
+    // panseL4_ReplyRecv preconditions:
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ requires pansel4_has_cap(INPUT_CAP) @/
+    /@ requires pansel4_has_endpoint_cap(INPUT_CAP) || pansel4_has_notification_cap(INPUT_CAP) @/
+    /@ requires IsAbsMsgInfo(reply_tag) @/
+    /@ requires pansel4_has_cap(REPLY_CAP) @/
+    /@ requires pansel4_has_reply_cap(REPLY_CAP) @/
+
+    // ghost state transition preconditions:
+    /@ requires power_acc_ghost_state(pdGhost()) @/
+    /@ requires power_guarantee_ReplyRecv(reply_tag, pdGhost()) @/
+
+    // panseL4_ReplyRecv postconditions:
+    /@ ensures IsAbsMsgInfo(panseL4_Response_tag(retval)) @/
+    /@ ensures bounded64(panseL4_Response_badge(retval)) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+
+    // ghost state transition postconditions:
+    /@ ensures power_acc_ghost_state(pdGhost()) @/
+    /@ ensures power_transition_ReplyRecv(reply_tag, pdGhost()) @/
+
+    var panseL4_Response response = panseL4_ReplyRecv(INPUT_CAP,reply_tag,REPLY_CAP);
+    // perform a nondeterministic ghost state machine transition
+    /@ exhale power_acc_ghost_state(pdGhost()) @/
+    /@ inhale power_acc_ghost_state(pdGhost()) @/
+    /@ assume power_transition_ReplyRecv(reply_tag, pdGhost()) @/
+    return response;
+}
+
+fun panseL4_Response mk_NBSendRecv() {
+    /@ requires acc(gv.microkit_signal_cap) @/
+    /@ requires acc(gv.microkit_signal_msg) @/
+
+    // panseL4_NBSendRecv preconditions:
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ requires pansel4_has_cap(gv.microkit_signal_cap) @/
+    /@ requires pansel4_has_endpoint_cap(gv.microkit_signal_cap) || pansel4_has_notification_cap(gv.microkit_signal_cap) @/
+    /@ requires IsAbsMsgInfo(gv.microkit_signal_msg) @/
+    /@ requires pansel4_has_cap(INPUT_CAP) @/
+    /@ requires pansel4_has_endpoint_cap(INPUT_CAP) || pansel4_has_notification_cap(INPUT_CAP) @/
+    /@ requires pansel4_has_cap(REPLY_CAP) @/
+    /@ requires pansel4_has_notification_cap(INPUT_CAP) || pansel4_has_reply_cap(REPLY_CAP) @/
+
+    // ghost state transition preconditions:
+    /@ requires power_acc_ghost_state(pdGhost()) @/
+    /@ requires power_guarantee_NBSendRecv(gv.microkit_signal_cap, gv.microkit_signal_msg, pdGhost()) @/
+
+    // panseL4_NBSendRecv postconditions:
+    /@ ensures IsAbsMsgInfo(panseL4_Response_tag(retval)) @/
+    /@ ensures bounded64(panseL4_Response_badge(retval)) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+
+    // ghost state transition postconditions:
+    /@ ensures power_acc_ghost_state(pdGhost()) @/
+    /@ ensures power_transition_NBSendRecv(gv.microkit_signal_cap, gv.microkit_signal_msg, pdGhost()) @/
+
+    /@ ensures acc(gv.microkit_signal_cap) @/
+    /@ ensures acc(gv.microkit_signal_msg) @/
+
+    var panseL4_Response response =
+        panseL4_NBSendRecv(microkit_signal_cap, microkit_signal_msg, INPUT_CAP, REPLY_CAP);
+    // perform a nondeterministic ghost state machine transition
+    /@ exhale power_acc_ghost_state(pdGhost()) @/
+    /@ inhale power_acc_ghost_state(pdGhost()) @/
+    /@ assume power_transition_NBSendRecv(gv.microkit_signal_cap, gv.microkit_signal_msg, pdGhost()) @/
+    return response;
+}
 
 fun handler_loop() {
     /@ requires acc(gv.patched_microkit_irqs) @/
@@ -67,7 +178,8 @@ fun handler_loop() {
                     pansel4_has_notification_cap(gv.microkit_signal_cap)
                 )
     @/
-    /@ requires user_handler_loop_entry() @/
+    /@ requires power_acc_ghost_state(pdGhost()) @/
+    /@ requires user_handler_loop_entry(pdGhost()) @/
     var 1 irq_index = 0;
     var panseL4_Word irqs_to_ack_orig = patched_microkit_irqs;
     var panseL4_Word irqs_to_ack = patched_microkit_irqs;
@@ -108,32 +220,27 @@ fun handler_loop() {
                          pansel4_has_notification_cap(gv.microkit_signal_cap)
                      ) &&
                      (have_reply == 0 || IsAbsMsgInfo(reply_tag)) &&
-                     user_handler_loop_invariant(have_reply)
+                     power_acc_ghost_state(pdGhost()) &&
+                     user_handler_loop_invariant(have_reply, pdGhost())
         @/
-        /@ inhale acc(mkGhost().pending_protected_call) @/
-        /@ inhale acc(mkGhost().pending_fault_call) @/
-        /@ inhale acc(mkGhost().pending_notified) @/
-        /@ assume mk_state_wf(mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified) @/
-        /@ assume user_rely_receive(mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified) @/
         var panseL4_Response response = <0,0>;
         if (have_reply) {
-            /@ assert user_guarantee_reply() @/
-            response = panseL4_ReplyRecv(INPUT_CAP, reply_tag, REPLY_CAP);
-            /@ assume user_guarantee_reply() @/
+            response = mk_ReplyRecv(reply_tag);
         } else {
             if (microkit_have_signal) {
-                // a deferred notify takes place here, so notify guarantee must also hold
-                /@ assert pansel4_has_notification_cap(gv.microkit_signal_cap) ==> user_guarantee_microkit_notify(gv.microkit_signal_cap - BASE_OUTPUT_NOTIFICATION_CAP) @/
-                response = panseL4_NBSendRecv(microkit_signal_cap, microkit_signal_msg, INPUT_CAP, REPLY_CAP);
-                /@ assume pansel4_has_notification_cap(gv.microkit_signal_cap) ==> user_guarantee_microkit_notify(gv.microkit_signal_cap - BASE_OUTPUT_NOTIFICATION_CAP) @/
+                response = mk_NBSendRecv();
                 microkit_have_signal = false;
             } else {
-                response = panseL4_Recv(INPUT_CAP, REPLY_CAP);
+                response = mk_Recv();
             }
         }
         var panseL4_MessageInfo_t tag = panseL4_Response_tag(response);
         var 1 badge = panseL4_Response_badge(response);
+        /@ inhale acc(mkGhost().pending_protected_call) @/
+        /@ inhale acc(mkGhost().pending_fault_call) @/
+        /@ inhale acc(mkGhost().pending_notified) @/
         /@ assume mk_oracle_correspondence(badge, mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified) @/
+        /@ assume user_rely_receive(mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified, pdGhost()) @/
         have_reply = false;
 
         var 1 is_endpoint = badge >>> 63;
@@ -173,7 +280,8 @@ fun handler_loop() {
                                          )
                                      )
                                  ) &&
-                                 user_notified_loop_invariant(channel_index)
+                                 power_acc_ghost_state(pdGhost()) &&
+                                 user_notified_loop_invariant(channel_index, pdGhost())
                     @/
                     /@ inhale apply_bv64_lshr64_zero(badge_orig) @/
                     if (badge & 1) {
@@ -188,9 +296,6 @@ fun handler_loop() {
             }
         }
         /@ assert mk_no_pending_tasks(mkGhost()) @/
-        /@ exhale acc(mkGhost().pending_protected_call) @/
-        /@ exhale acc(mkGhost().pending_fault_call) @/
-        /@ exhale acc(mkGhost().pending_notified) @/
     }
     return 0;
 }
@@ -225,7 +330,8 @@ fun main() {
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
-    /@ requires user_rely_init() @/
+    /@ requires power_acc_ghost_state(pdGhost()) @/
+    /@ requires power_rely_init(pdGhost()) @/
     patched_microkit_irqs = microkit_get_constant(0);
     patched_microkit_notifications = microkit_get_constant(1);
     patched_microkit_pps = microkit_get_constant(2);
