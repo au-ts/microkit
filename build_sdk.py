@@ -542,7 +542,7 @@ def test_tool() -> None:
 
 def build_tool(tool_target: Path, target_triple: str) -> None:
     r = system(
-        f"cargo build --release  --target {target_triple} -p microkit-tool"
+        f"cargo build --release --locked --target {target_triple} -p microkit-tool"
     )
     assert r == 0
 
