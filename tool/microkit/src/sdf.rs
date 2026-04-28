@@ -160,40 +160,40 @@ impl SysMemoryRegion {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
-pub enum CNodeType {
-    Normal = 0,
-    RemainingUntypeds,
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub struct CNode {
-    pub cnode_type: CNodeType,
-    pub cnode_name: String,
-    pub cnode_size_bits: u8,
+    pub name: String,
+    pub remaining_untypeds: bool,
+    pub size_bits: u8,
 }
 
 impl CNode {
     fn from_xml(xml_sdf: &XmlSystemDescription, node: &roxmltree::Node) -> Result<CNode, String> {
-        check_attributes(xml_sdf, node, &["name", "type", "size_bits"])?;
+        check_attributes(xml_sdf, node, &["name", "remaining_untypeds", "size_bits"])?;
 
-        let cnode_name = checked_lookup(xml_sdf, node, "name")?.to_string();
-        let xml_cnode_type = if let Some(_xml_type_param) = node.attribute("type") {
-            checked_lookup(xml_sdf, node, "type")?
+        let name = checked_lookup(xml_sdf, node, "name")?.to_string();
+
+        let remaining_untypeds = if let Some(xml_remaining_untypeds) = node.attribute("remaining_untypeds") {
+            match str_to_bool(xml_remaining_untypeds) {
+                Some(val) => val,
+                None => {
+                    return Err(value_error(
+                        xml_sdf,
+                        node,
+                        "remaining_untypeds must be 'true' or 'false'".to_string(),
+                    ))
+                }
+            }
         } else {
-            "normal"
+            false
         };
-        let cnode_type = match xml_cnode_type {
-            "remaining_untypeds" => CNodeType::RemainingUntypeds,
-            "normal" => CNodeType::Normal,
-            _ => return Err(format!("CNode type: '{xml_cnode_type}' is not supported.")),
-        };
-        let cnode_size_bits = sdf_parse_number(checked_lookup(xml_sdf, node, "size_bits")?, node)? as u8;
+
+        let size_bits = sdf_parse_number(checked_lookup(xml_sdf, node, "size_bits")?, node)? as u8;
 
         Ok(CNode {
-            cnode_type,
-            cnode_name,
-            cnode_size_bits,
+            name,
+            remaining_untypeds,
+            size_bits,
         })
     }
 }
@@ -1984,10 +1984,10 @@ pub fn parse(
     }
 
     for cnode in &cnodes {
-        if cnodes.iter().filter(|x| cnode.cnode_name == x.cnode_name).count() > 1 {
+        if cnodes.iter().filter(|x| cnode.name == x.name).count() > 1 {
             return Err(format!(
                 "Error: duplicate cnode name '{}'.",
-                cnode.cnode_name
+                cnode.name
             ));
         }
     }
