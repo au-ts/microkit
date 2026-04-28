@@ -303,14 +303,14 @@ fun handler_loop() {
 
 /@ method ffimicrokit_get_constant(c: Int, c2: Int, a: Int, a2: Int)
    requires acc(heap[LIBSEL4_FFI_OFFSET])
-   requires 0 <= a2 && a2 <= 4
+   requires 0 <= a2 && a2 < 4
    ensures acc(heap[LIBSEL4_FFI_OFFSET])
    ensures bounded64(heap[LIBSEL4_FFI_OFFSET])
    ensures (a2 == 0) ==> mk_is_patched_irqs(heap[LIBSEL4_FFI_OFFSET])
 @/
 fun 1 microkit_get_constant(1 constant) {
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
-    /@ requires 0 <= constant && constant <= 4 @/
+    /@ requires 0 <= constant && constant < 4 @/
     /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
     /@ ensures bounded64(heap[LIBSEL4_FFI_OFFSET]) @/
     /@ ensures (constant == 0) ==> mk_is_patched_irqs(retval) @/
