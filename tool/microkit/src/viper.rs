@@ -6,8 +6,8 @@
 use sel4_capdl_initializer_types::{Cap, Object};
 
 use crate::capdl::CapDLSpecContainer;
+use crate::sdf::SysMapPerms;
 use crate::sdf::SystemDescription;
-
 
 fn export_define_set(name: &'static str, vector: &Vec<u64>, target: &mut String) {
     if vector.is_empty() {
@@ -33,6 +33,7 @@ fn export_define_set(name: &'static str, vector: &Vec<u64>, target: &mut String)
         "define f_{name}(heap,gv,x) ({name}(x))\n"
     ));
 }
+
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CapView {
@@ -293,17 +294,112 @@ pub fn get_sdf_view(system: &SystemDescription, current_pd: usize) -> Option<Sdf
     Some(view)
 }
 
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Mem {
+    pub name: String,
+    pub start: u64,
+    pub end: u64,
+}
+
+impl Mem {
+    pub fn export(&self, target: &mut String) {
+        let name: &String = &self.name;
+        let start: u64 = self.start;
+        let end: u64 = self.end;
+        target.push_str(&format!(
+            "define mem_{name}_contains(x) ({start} <= x && x < {end})\n"
+        ));
+    }
+}
+
+fn export_define_mem_set(perm: &'static str, vector: &Vec<Mem>, target: &mut String) {
+    if vector.is_empty() {
+        target.push_str(&format!(
+            "define mem_{perm}(x) (false)\n"
+        ));
+        target.push_str(&format!(
+            "define f_mem_{perm}(heap,gv,x) (mem_{perm}(x))\n"
+        ));
+        return;
+    }
+    let items = vector
+        .iter()
+        .map(|x| format!("mem_{}_contains(x)",x.name))
+        .collect::<Vec<_>>()
+        .join(" || ");
+
+    target.push_str(&format!(
+        "define mem_{perm}(x) ({items})\n"
+    ));
+    target.push_str(&format!(
+        "define f_mem_{perm}(heap,gv,x) (mem_{perm}(x))\n"
+    ));
+}
+
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MemView {
+    pub read: Vec<Mem>,
+    pub readwrite: Vec<Mem>,
+}
+
+impl MemView {
+    pub fn export(&self, target: &mut String) {
+        for mr in &self.read {
+            mr.export(target);
+        }
+
+        export_define_mem_set("readable", &self.read, target);
+        export_define_mem_set("writeable", &self.readwrite, target);
+    }
+}
+
+pub fn get_mem_view(system: &SystemDescription, current_pd: usize) -> Option<MemView> {
+    let current = system.protection_domains.get(current_pd)?;
+
+    let mut view = MemView {
+        ..Default::default()
+    };
+
+    for mr in &system.memory_regions {
+        let mmaps_into_current_pd =
+            current.maps.iter().filter(|map| map.mr == mr.name);
+
+        for mmap in mmaps_into_current_pd {
+            let start = mmap.vaddr;
+            let end = start + mr.size;
+            if end < start {
+                // we catch bonkers mappings elsewhere, ignore them here!
+                continue;
+            }
+            let name = mr.name.clone();
+            let mem: Mem = Mem { name, start, end };
+            view.read.push(mem.clone());
+
+            let writeable = (mmap.perms & SysMapPerms::Write as u8) != 0;
+            if writeable {
+                view.readwrite.push(mem);
+            }
+        }
+    }
+
+    Some(view)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CombinedView {
     pub pd_name: String,
     pub sdf: SdfView,
     pub cap: CapView,
+    pub mem: MemView,
 }
 
 impl CombinedView {
     pub fn export(&self, target: &mut String) {
         self.sdf.export(target);
         self.cap.export(target);
+        self.mem.export(target);
     }
 }
 
@@ -318,11 +414,13 @@ pub fn get_combined_views(
         .filter_map(|(current_pd, pd)| {
             let sdf = get_sdf_view(system, current_pd)?;
             let cap = get_cap_view(capdl_spec, system, current_pd)?;
+            let mem = get_mem_view(system, current_pd)?;
 
             Some(CombinedView {
                 pd_name: pd.name.clone(),
                 sdf,
                 cap,
+                mem,
             })
         })
         .collect()
