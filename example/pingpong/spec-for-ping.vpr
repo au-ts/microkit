@@ -70,6 +70,62 @@ define user_guarantee_NBSendRecv(signal_cap, signal_msg, state)
     true
 )
 
+define user_guarantee_shared_load8(address, state)
+(
+    // Checked to hold whenever this PD triggers a read event to shared memory
+    // on the given address. 
+    true
+)
+
+define user_guarantee_shared_load16(address, state)
+(
+    // Checked to hold whenever this PD triggers a read event to shared memory
+    // on the given address. 
+    true
+)
+
+define user_guarantee_shared_load32(address, state)
+(
+    // Checked to hold whenever this PD triggers a read event to shared memory
+    // on the given address. 
+    true
+)
+
+define user_guarantee_shared_load64(address, state)
+(
+    // Checked to hold whenever this PD triggers a read event to shared memory
+    // on the given address. 
+    true
+)
+
+define user_guarantee_shared_store8(address, value, state)
+(
+    // Checked to hold whenever this PD triggers a write event to shared memory
+    // on the given address. 
+    true
+)
+
+define user_guarantee_shared_store16(address, value, state)
+(
+    // Checked to hold whenever this PD triggers a write event to shared memory
+    // on the given address. 
+    true
+)
+
+define user_guarantee_shared_store32(address, value, state)
+(
+    // Checked to hold whenever this PD triggers a write event to shared memory
+    // on the given address. 
+    true
+)
+
+define user_guarantee_shared_store64(address, value, state)
+(
+    // Checked to hold whenever this PD triggers a write event to shared memory
+    // on the given address. 
+    true
+)
+
 define f_user_guarantee_microkit_notify(heap, gv, ch, state)
   (user_guarantee_microkit_notify(ch, state))
 
@@ -87,6 +143,31 @@ define f_user_guarantee_ReplyRecv(heap, gv, reply_tag, state)
 
 define f_user_guarantee_NBSendRecv(heap, gv, signal_cap, signal_msg, state)
   (user_guarantee_NBSendRecv(signal_cap, signal_msg, state))
+
+define f_user_guarantee_shared_load8(heap, gv, address, state)
+  (user_guarantee_shared_load8(address, state))
+
+define f_user_guarantee_shared_load16(heap, gv, address, state)
+  (user_guarantee_shared_load16(address, state))
+
+define f_user_guarantee_shared_load32(heap, gv, address, state)
+  (user_guarantee_shared_load32(address, state))
+
+define f_user_guarantee_shared_load64(heap, gv, address, state)
+  (user_guarantee_shared_load64(address, state))
+
+define f_user_guarantee_shared_store8(heap, gv, address, value, state)
+  (user_guarantee_shared_store8(address, value, state))
+
+define f_user_guarantee_shared_store16(heap, gv, address, value, state)
+  (user_guarantee_shared_store16(address, value, state))
+
+define f_user_guarantee_shared_store32(heap, gv, address, value, state)
+  (user_guarantee_shared_store32(address, value, state))
+
+define f_user_guarantee_shared_store64(heap, gv, address, value, state)
+  (user_guarantee_shared_store64(address, value, state))
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // user: transitions                                                         //
@@ -152,6 +233,63 @@ define user_transition_NBSendRecv(signal_cap, signal_msg, state)
     true
 )
 
+define user_transition_shared_load8(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // reads from a given shared memory address.
+    true
+)
+
+define user_transition_shared_load16(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // reads from a given shared memory address.
+    true
+)
+
+define user_transition_shared_load32(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // reads from a given shared memory address.
+    true
+)
+
+define user_transition_shared_load64(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // reads from a given shared memory address.
+    true
+)
+
+
+define user_transition_shared_store8(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // writes to a given shared memory address.
+    true
+)
+
+define user_transition_shared_store16(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // writes to a given shared memory address.
+    true
+)
+
+define user_transition_shared_store32(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // writes to a given shared memory address.
+    true
+)
+
+define user_transition_shared_store64(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // writes to a given shared memory address.
+    true
+)
+
 define f_user_transition_microkit_notify(heap, gv, ch, state)
   (user_transition_microkit_notify(ch, state))
 
@@ -170,6 +308,29 @@ define f_user_transition_ReplyRecv(heap, gv, reply_tag, state)
 define f_user_transition_NBSendRecv(heap, gv, signal_cap, signal_msg, state)
   (user_transition_NBSendRecv(signal_cap, signal_msg, state))
 
+define f_user_transition_shared_load8(heap, gv, address, value, state)
+  (user_transition_shared_load8(address, value, state))
+
+define f_user_transition_shared_load16(heap, gv, address, value, state)
+  (user_transition_shared_load16(address, value, state))
+
+define f_user_transition_shared_load32(heap, gv, address, value, state)
+  (user_transition_shared_load32(address, value, state))
+
+define f_user_transition_shared_load64(heap, gv, address, value, state)
+  (user_transition_shared_load64(address, value, state))
+
+define f_user_transition_shared_store8(heap, gv, address, value, state)
+  (user_transition_shared_store8(address, value, state))
+
+define f_user_transition_shared_store16(heap, gv, address, value, state)
+  (user_transition_shared_store16(address, value, state))
+
+define f_user_transition_shared_store32(heap, gv, address, value, state)
+  (user_transition_shared_store32(address, value, state))
+
+define f_user_transition_shared_store64(heap, gv, address, value, state)
+  (user_transition_shared_store64(address, value, state))
 
 ///////////////////////////////////////////////////////////////////////////////
 // user: rely                                                                //
@@ -239,9 +400,15 @@ define f_user_local_microkit_ppcall_pre(heap, gv, ch, msginfo, state)
 
 define f_user_local_microkit_ppcall_post(heap, gv, ch, msginfo, response, state)
 (
-    // Checked to hold every time a `microkit_ppcall(ch,msginfo)` call returns
+    // Checked to hold every time a `microkit_ppcall(ch,msginfo)` call returns.
+    // This is quite useful, as it allows one to tie the user_rely_ppcall
+    // guarantee together with the internal state of the protection domain.
     true
 )
+
+// NB pre/postconditions are not available for shared_{load/store}XX methods
+// since these are virtual methods without a method body. Hence, postconditions
+// would not be checked, but would introduce assumptions.
 
 
 ///////////////////////////////////////////////////////////////////////////////
