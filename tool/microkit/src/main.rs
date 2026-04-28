@@ -448,8 +448,8 @@ fn main() -> Result<(), String> {
         ImageOutputType::default_from_arch_and_board(&arch, args.board)
     };
 
-    let (device_regions, normal_regions, kernel_devices) = match arch {
-        Arch::X86_64 => (None, None, None),
+    let (normal_regions, kernel_devices) = match arch {
+        Arch::X86_64 => (None, None),
         _ => {
             let kernel_platform_config_path = sdk_dir
                 .join("board")
@@ -470,7 +470,6 @@ fn main() -> Result<(), String> {
                     .unwrap();
 
             (
-                Some(kernel_platform_config.devices),
                 Some(kernel_platform_config.memory),
                 Some(kernel_platform_config.kernel_devs),
             )
@@ -564,7 +563,6 @@ fn main() -> Result<(), String> {
         x86_xsave_size,
         invocations_labels,
         kernel_devices,
-        device_regions,
         normal_regions,
         domain_scheduler: json_str_as_u64(&kernel_config_json, "NUM_DOMAINS")? != 1,
     };

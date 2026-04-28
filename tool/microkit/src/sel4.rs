@@ -162,6 +162,9 @@ fn kernel_partial_boot(
     full_system_state: &FullSystemState,
     cpu: CpuCore,
 ) -> KernelPartialBootInfo {
+    // Determine the untyped caps of the system
+    // This lets allocations happen correctly.
+    // This function follows the kernel boot sequence.
 
     // Reserved regions will cover device memory, and the memory of other
     // cores that we do not wish to modify.
@@ -180,16 +183,29 @@ fn kernel_partial_boot(
         }
     }
 
+    // =====
+    //       Here we emulate init_freemem() and arch_init_freemem(), excluding
+    //       the addition of the root task memory to the reserved regions,
+    //       as we don't know this information yet.
+    //       Multikernel: Also follows arch_init_coremem() for subset physical memory.
+    // =====
+
     // Passed to the kernel
     let ram_regions = full_system_state
         .per_core_ram_regions
         .get(&cpu)
         .expect("INTERNAL: should have chosen RAM for a core we are booting");
 
-    // Add device regions to the reserved regions
-    for r in kernel_config.device_regions.as_ref().unwrap().iter() {
-        reserved_regions.insert_region(r.start, r.end);
+    // Done during map_kernel_window(): Remove any kernel-reserved device regions
+    for region in kernel_config.kernel_devices.as_ref().unwrap().iter() {
+        if !region.user_available {
+            reserved_regions.insert_region(region.start, region.end);
+        }
     }
+
+    // ============ arch_init_freemem():
+    // XXX: Theoreticallly, the initial task size would be added to reserved regions, as well
+    //    as the DTB and the extra reserved region. But it's not since this is partial()
 
     let (kernel_region, boot_region, kernel_p_v_offset) =
         kernel_calculate_phys_image(kernel_elf, ram_regions);
@@ -277,22 +293,18 @@ fn kernel_partial_boot(
 
     println!("Finished the contstruction of reserved regions from the availabel ram!");
 
+    // ====
+    //     Here we emulate create_untypeds(), where normal_memory represents
+    //     the normal memory untypeds, and device_memory is those untypeds
+    //     marked as "device". All of this is available to userspace.
+    // ====
+
     let mut device_memory = DisjointMemoryRegion::default();
     let mut normal_memory = DisjointMemoryRegion::default();
 
-    // for r in kernel_config.device_regions.as_ref().unwrap().iter() {
-    //     device_memory.insert_region(r.start, r.end);
-    // }
-    // for r in kernel_config.normal_regions.as_ref().unwrap().iter() {
-    //     normal_memory.insert_region(r.start, r.end);
-    // }
-
     let mut start = 0;
     for reserved_reg in reserved_regions.regions.iter() {
-        // @kwinter: Why do we need this edge case?
-        if (reserved_reg.base != 0) {
-            device_memory.insert_region(start, reserved_reg.base);
-        }
+        device_memory.insert_region(start, reserved_reg.base);
         start = reserved_reg.end;
     }
 
@@ -307,12 +319,6 @@ fn kernel_partial_boot(
         normal_memory.insert_region(free_memory.base, free_memory.end);
     }
 
-    // Remove the kernel image itself
-    // let self_mem = kernel_self_mem(kernel_elf);
-    // println!("Attempting to remove region: {:?}", normal_memory);
-    // normal_memory.remove_region(self_mem.base, self_mem.end);
-    // println!("{:x?}\n{:x?}", normal_memory.regions, device_memory.regions);
-
     KernelPartialBootInfo {
         device_memory,
         normal_memory,
@@ -325,11 +331,15 @@ pub fn emulate_kernel_boot_partial(
     kernel_config: &Config,
     kernel_elf: &ElfFile,
     full_system_state: &FullSystemState,
-    cpu: CpuCore
+    cpu: CpuCore,
 ) -> (DisjointMemoryRegion, MemoryRegion, u64) {
     println!("Attempting to emulate kernel boot partial!");
     let partial_info = kernel_partial_boot(kernel_config, kernel_elf, full_system_state, cpu);
-    (partial_info.normal_memory, partial_info.boot_region, partial_info.kernel_p_v_offset)
+    (
+        partial_info.normal_memory,
+        partial_info.boot_region,
+        partial_info.kernel_p_v_offset,
+    )
 }
 
 fn get_n_paging(region: MemoryRegion, bits: u64) -> u64 {
@@ -466,7 +476,7 @@ pub fn emulate_kernel_boot(
         Arch::X86_64 => unreachable!("the kernel boot process should not be emulated for x86!"),
     };
     let device_regions: Vec<MemoryRegion> =
-        [device_memory.aligned_power_of_two_regions(config, max_bits)].concat();
+        device_memory.aligned_power_of_two_regions(config, max_bits);
     let normal_regions: Vec<MemoryRegion> = [
         boot_region.aligned_power_of_two_regions(config, max_bits),
         normal_memory.aligned_power_of_two_regions(config, max_bits),
@@ -829,9 +839,8 @@ pub struct Config {
     /// x86 specific, user context size
     pub x86_xsave_size: Option<usize>,
     pub invocations_labels: serde_json::Value,
-    pub kernel_devices: Option<Vec<PlatformKernelDeviceRegion>>,
     /// The two remaining fields are only valid on ARM and RISC-V
-    pub device_regions: Option<Vec<PlatformConfigRegion>>,
+    pub kernel_devices: Option<Vec<PlatformKernelDeviceRegion>>,
     pub normal_regions: Option<Vec<PlatformConfigRegion>>,
     pub domain_scheduler: bool,
 }
