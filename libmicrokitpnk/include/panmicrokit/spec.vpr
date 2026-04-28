@@ -57,19 +57,21 @@ define mk_response_bit_set(response, ch)
 
 define mk_is_notification_response(response)
 (
+  bounded64(response) &&
   !mk_response_bit_set(response, 62) &&
-  !mk_response_bit_set(response, 63) &&
-  bounded64(response)
+  !mk_response_bit_set(response, 63)
 )
 
 define mk_is_protected_response(response)
 (
+  bounded64(response) &&
   mk_response_bit_set(response,63) &&
   !mk_response_bit_set(response,62)
 )
 
 define mk_is_fault_response(response)
 (
+  bounded64(response) &&
   !mk_response_bit_set(response,63) &&
   mk_response_bit_set(response,62)
 )
