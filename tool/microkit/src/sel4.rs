@@ -582,3 +582,15 @@ impl X86IoapicIrqPolarity {
         }
     }
 }
+
+#[repr(u64)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum BootInfoId {
+    Padding,
+    X86Vbe,
+    X86Mbmmap,
+    X86AcpiRsdp,
+    X86FrameBuffer,
+    X86TscFreq,
+    Fdt,
+}

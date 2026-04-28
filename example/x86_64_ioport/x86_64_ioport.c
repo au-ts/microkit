@@ -31,7 +31,8 @@ void init(void)
     microkit_dbg_puts(microkit_name);
     microkit_dbg_puts("\n");
 
-    microkit_dbg_puts("Now writing to serial I/O port: ");
+    /* microkit_dbg_puts("Now writing to serial I/O port: "); */
+    /* microkit_dbg_puts("\n"); */
     serial_puts("hello!\n");
 }
 

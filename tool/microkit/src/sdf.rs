@@ -17,7 +17,7 @@
 /// XML. The roxmltree project allows us to work on a lower-level than something based
 /// on serde and so we can report proper user errors.
 use crate::sel4::{
-    Arch, ArmRiscvIrqTrigger, Config, PageSize, X86IoapicIrqPolarity, X86IoapicIrqTrigger,
+    Arch, ArmRiscvIrqTrigger, Config, PageSize, X86IoapicIrqPolarity, X86IoapicIrqTrigger, BootInfoId,
 };
 use crate::util::{get_full_path, ranges_overlap, round_up, str_to_bool};
 use crate::MAX_PDS;
@@ -310,6 +310,7 @@ pub struct ProtectionDomain {
     pub ioports: Vec<IOPort>,
     pub setvars: Vec<SysSetVar>,
     pub cap_maps: Vec<CapMap>,
+    pub bootinfo_maps: Vec<BootInfoMap>,
     pub virtual_machine: Option<VirtualMachine>,
     /// Only used when parsing child PDs. All elements will be removed
     /// once we flatten each PD and its children into one list.
@@ -338,6 +339,13 @@ pub struct CapMap {
     pub cnode_name: Option<String>,
     pub pd_name: Option<String>,
     pub dest_cspace_slot: u64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct BootInfoMap {
+    pub bi_type: BootInfoId ,
+    pub vaddr: u64,
+    pub size: u64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -656,6 +664,8 @@ impl ProtectionDomain {
         let mut setvars: Vec<SysSetVar> = Vec::new();
         let mut child_pds = Vec::new();
         let mut cap_maps = Vec::new();
+        let mut bootinfo_maps = Vec::new();
+        let mut mem_top = config.pd_map_max_vaddr(stack_size);
 
         let mut program_image = None;
         let mut program_image_for_symbols = None;
@@ -715,7 +725,7 @@ impl ProtectionDomain {
                         child.attribute("path_for_symbols").map(PathBuf::from);
                 }
                 "map" => {
-                    let map_max_vaddr = config.pd_map_max_vaddr(stack_size);
+                    let map_max_vaddr = mem_top;
                     let map = SysMap::from_xml(xml_sdf, &child, true, map_max_vaddr)?;
 
                     if let Some(setvar_vaddr) = child.attribute("setvar_vaddr") {
@@ -1130,6 +1140,9 @@ impl ProtectionDomain {
                 "cap" => {
                     cap_maps.push(CapMap::from_xml(xml_sdf, &child)?);
                 }
+                "bootinfo" => {
+                    bootinfo_maps.push(BootInfoMap::from_xml(&mut mem_top, xml_sdf, &child)?);
+                }
                 _ => {
                     let pos = xml_sdf.doc.text_pos_at(child.range().start);
                     return Err(format!(
@@ -1169,6 +1182,7 @@ impl ProtectionDomain {
             ioports,
             setvars,
             cap_maps,
+            bootinfo_maps,
             child_pds,
             virtual_machine,
             has_children,
@@ -1356,6 +1370,35 @@ impl CapMap {
             cnode_name,
             pd_name,
             dest_cspace_slot,
+        })
+    }
+}
+
+impl BootInfoMap {
+    fn from_xml(
+        mem_top: &mut u64,
+        xml_sdf: &XmlSystemDescription,
+        node: &roxmltree::Node,
+    ) -> Result<BootInfoMap, String> {
+        check_attributes(xml_sdf, node, &["type"])?;
+
+        let xml_bi_type = checked_lookup(xml_sdf, node, "type")?;
+        // TODO: complete all bootinfo types
+        let bi_type = match xml_bi_type {
+            // "remaining_untypeds" => CapDLBootInfo::RemainingUntypeds,
+            "rsdp" => BootInfoId::X86AcpiRsdp,
+            _ => return Err(format!("BootInfoMap type: '{xml_bi_type}' is not supported.")),
+        };
+        println!("Detected BootInfo type'{}'", xml_bi_type);
+
+        let map_max_vaddr = *mem_top;
+        println!("max vaddr: 0x{:x}", map_max_vaddr);
+        *mem_top = map_max_vaddr - 4096;
+
+        Ok(BootInfoMap {
+            bi_type,
+            vaddr: map_max_vaddr,
+            size: 4096,
         })
     }
 }

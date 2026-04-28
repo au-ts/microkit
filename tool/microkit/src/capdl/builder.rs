@@ -207,6 +207,8 @@ impl CapDLSpecContainer {
                 continue;
             }
 
+            println!("segment vaddr: 0x{:x}, size: 0x{:x}", segment.virt_addr, segment.mem_size());
+
             let seg_base_vaddr = segment.virt_addr;
             let seg_mem_size: u64 = segment.mem_size();
 
@@ -665,6 +667,7 @@ pub fn build_capdl_spec(
 
             let pd_stack_range =
                 kernel_config.pd_stack_bottom(pd.stack_size)..kernel_config.pd_stack_top();
+
             if ranges_overlap(&mr_vaddr_range, &pd_stack_range) {
                 return Err(format!("ERROR: mapping MR '{}' to PD '{}' with vaddr [0x{:x}..0x{:x}) will overlap with the stack at [0x{:x}..0x{:x})", map.mr, pd.name, mr_vaddr_range.start, mr_vaddr_range.end, pd_stack_range.start, pd_stack_range.end));
             }
@@ -688,8 +691,14 @@ pub fn build_capdl_spec(
             );
         }
 
+        for map in pd.bootinfo_maps.iter() {
+            // TODO: check if overlap with mrs or stack
+            println!("boot info - id: {}, vaddr: {}", map.bi_type as u64, map.vaddr);
+        }
+
         // Step 4-3: Create and map in the stack (bottom up)
         let mut cur_stack_vaddr = kernel_config.pd_stack_bottom(pd.stack_size);
+        println!("stack range: [0x{:x}..0x{:x}]", cur_stack_vaddr, kernel_config.pd_stack_top());
         pd_stack_bottoms.push(cur_stack_vaddr);
         let num_stack_frames = pd.stack_size / PageSize::Small as u64;
         for stack_frame_seq in 0..num_stack_frames {
