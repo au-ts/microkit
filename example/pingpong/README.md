@@ -1,3 +1,8 @@
+<!--
+     Copyright 2026, UNSW
+     SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
 # Example - Ping pong
 
 This is a basic example with two protection domains that constantly notify

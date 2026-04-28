@@ -1,5 +1,5 @@
 /*
- * Copyright 2021, Breakaway Consulting Pty. Ltd.
+ * Copyright 2026, UNSW
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */

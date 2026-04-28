@@ -1,3 +1,9 @@
+/*
+ * Copyright 2026, UNSW
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
 /@ extern function mk_notified_preconditions(ch: Int): Bool @/
 /@ extern function mk_notified_postconditions(ch: Int): Bool @/
 /@ extern function apply_mk_notified_postconditions(ch: Int): Bool @/

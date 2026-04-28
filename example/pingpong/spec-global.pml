@@ -1,3 +1,9 @@
+/*
+ * Copyright 2026, UNSW
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+*/
+
 /* We show that global properties of Microkit-based systems can be specified
  * using linear temporal logic. This SPIN/Promela file simulates a Microkit
  * system running the Ping and Pong protection domains, which keep notifying
