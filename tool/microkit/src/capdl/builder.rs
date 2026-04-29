@@ -11,7 +11,7 @@ use std::{
 };
 
 use sel4_capdl_initializer_types::{
-    object, Cap, CapTableEntry, Fill, FillEntry, FillEntryContent, NamedObject, Object, ObjectId,
+    object, Cap, CapTableEntry, Fill, FillEntry, FillEntryContent, FillEntryContentBootInfo, FillEntryContentBootInfoId, NamedObject, Object, ObjectId,
     Spec, Word,
 };
 
@@ -694,6 +694,42 @@ pub fn build_capdl_spec(
         for map in pd.bootinfo_maps.iter() {
             // TODO: check if overlap with mrs or stack
             println!("boot info - id: {}, vaddr: {}", map.bi_type as u64, map.vaddr);
+            let num_bi_frames = map.size / PageSize::Small as u64;
+            for bi_frame_seq in 0..num_bi_frames {
+                // FIXME: fill entries
+                let mut frame_fill = Fill {
+                    entries: [].to_vec(),
+                };
+                frame_fill.entries.push(FillEntry {
+                    range: Range {
+                        start: 0,
+                        end: 4096,
+                    },
+                    content: FillEntryContent::BootInfo(FillEntryContentBootInfo {
+                        id: FillEntryContentBootInfoId::X86AcpiRsdp,
+                        offset: 0,
+                    }),
+                });
+                let bi_frame_obj_id = capdl_util_make_frame_obj(
+                    &mut spec_container,
+                    frame_fill,
+                    &format!("{}_bi_{:09}", pd.name, bi_frame_seq),
+                    None,
+                    PageSize::Small.fixed_size_bits(kernel_config) as u8,
+                );
+                let bi_frame_cap =
+                    capdl_util_make_frame_cap(bi_frame_obj_id, true, true, false, true);
+                map_page(
+                    &mut spec_container,
+                    kernel_config,
+                    &pd.name,
+                    pd_vspace_obj_id,
+                    bi_frame_cap,
+                    PageSize::Small as u64,
+                    map.vaddr,
+                )
+                .unwrap();
+            }
         }
 
         // Step 4-3: Create and map in the stack (bottom up)

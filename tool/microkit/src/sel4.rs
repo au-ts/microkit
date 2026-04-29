@@ -594,3 +594,9 @@ pub enum BootInfoId {
     X86TscFreq,
     Fdt,
 }
+
+// impl BootInfoId {
+//     pub fn to_size(&self) -> u64 {
+
+//     }
+// }

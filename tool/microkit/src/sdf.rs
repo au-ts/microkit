@@ -343,6 +343,7 @@ pub struct CapMap {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct BootInfoMap {
+    pub name: String,
     pub bi_type: BootInfoId ,
     pub vaddr: u64,
     pub size: u64,
@@ -1141,7 +1142,13 @@ impl ProtectionDomain {
                     cap_maps.push(CapMap::from_xml(xml_sdf, &child)?);
                 }
                 "bootinfo" => {
-                    bootinfo_maps.push(BootInfoMap::from_xml(&mut mem_top, xml_sdf, &child)?);
+                    let bi_map = BootInfoMap::from_xml(&mut mem_top, xml_sdf, &child)?;
+                    let setvar = SysSetVar {
+                        symbol: bi_map.name.clone(),
+                        kind: SysSetVarKind::Vaddr { address: bi_map.vaddr },
+                    };
+                    checked_add_setvar(&mut setvars, setvar, xml_sdf, &child)?;
+                    bootinfo_maps.push(bi_map);
                 }
                 _ => {
                     let pos = xml_sdf.doc.text_pos_at(child.range().start);
@@ -1391,11 +1398,12 @@ impl BootInfoMap {
         };
         println!("Detected BootInfo type'{}'", xml_bi_type);
 
-        let map_max_vaddr = *mem_top;
+        let map_max_vaddr = *mem_top - 4096;
         println!("max vaddr: 0x{:x}", map_max_vaddr);
-        *mem_top = map_max_vaddr - 4096;
+        *mem_top = map_max_vaddr;
 
         Ok(BootInfoMap {
+            name: format!("bootinfo_{xml_bi_type}"),
             bi_type,
             vaddr: map_max_vaddr,
             size: 4096,
