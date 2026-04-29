@@ -145,6 +145,7 @@ define f_apply_bv64_lshr63_bit(heap, gv, i) (apply_bv64_lshr63_bit(i))
 define f_apply_bv64_lshr64_zero(heap, gv, i) (apply_bv64_lshr64_zero(i))
 define f_apply_bv64_lshr_suffix_nonzero(heap, gv, i, n, m) (apply_bv64_lshr_suffix_nonzero(i,n,m))
 
+// FIXME: workaround for transpiler issue #15, use instead of `x >>> y` in annotations
 define builtin_lshr(x,y) (bv64_to_int(bv64_lshr(bv64_from_int(x), bv64_from_int(y))))
 define f_builtin_lshr(heap,gv,x,y) (bv64_to_int(bv64_lshr(bv64_from_int(x), bv64_from_int(y))))
 
