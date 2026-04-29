@@ -665,7 +665,7 @@ impl ProtectionDomain {
         let mut setvars: Vec<SysSetVar> = Vec::new();
         let mut child_pds = Vec::new();
         let mut cap_maps = Vec::new();
-        let mut bootinfo_maps = Vec::new();
+        let mut bootinfo_maps: Vec<BootInfoMap> = Vec::new();
         let mut mem_top = config.pd_map_max_vaddr(stack_size);
 
         let mut program_image = None;
@@ -1143,6 +1143,17 @@ impl ProtectionDomain {
                 }
                 "bootinfo" => {
                     let bi_map = BootInfoMap::from_xml(&mut mem_top, xml_sdf, &child)?;
+                    for existing_bi_map in &bootinfo_maps {
+                        if existing_bi_map.bi_type == bi_map.bi_type {
+                            let pos = xml_sdf.doc.text_pos_at(child.range().start);
+                            return Err(format!(
+                                "Error: duplicate {:?} in protection domain '{}' @ {}",
+                                bi_map.name,
+                                name,
+                                loc_string(xml_sdf, pos)
+                            ));
+                        }
+                    }
                     let setvar = SysSetVar {
                         symbol: bi_map.name.clone(),
                         kind: SysSetVarKind::Vaddr { address: bi_map.vaddr },
