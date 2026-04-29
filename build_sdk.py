@@ -378,6 +378,17 @@ SUPPORTED_BOARDS = (
         } | DEFAULT_KERNEL_OPTIONS_RISCV64,
     ),
     BoardInfo(
+        name="milkv_jupiter",
+        arch=KernelArch.RISCV64,
+        gcc_cpu=None,
+        loader_link_address=0x10000000,
+        smp_cores=8,
+        kernel_options={
+            "KernelPlatform": "bananapi-f3",
+            "KernelCustomDTSOverlay": Path("custom_dts/overlay-milkv-jupiter.dts"),
+        } | DEFAULT_KERNEL_OPTIONS_RISCV64,
+    ),
+    BoardInfo(
         name="ariane",
         arch=KernelArch.RISCV64,
         gcc_cpu=None,
