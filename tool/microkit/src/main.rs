@@ -861,7 +861,14 @@ fn main() -> Result<(), String> {
 
             if let Some(viper_output_prefix) = &args.viper_output_prefix {
                 for view in viper::get_combined_views(&spec_container, &system) {
-                    let mut output = String::new();
+                    let mut output =
+                        String::from(
+                            format!(
+                                "// exported invariants for PD {} in {}\n",
+                                view.pd_name,
+                                &args.sdf_path.display(),
+                            )
+                        );
                     view.export(&mut output);
                     let path = PathBuf::from(format!("{}{}.vpr", viper_output_prefix, view.pd_name));
                     fs::write(&path, output).map_err(|source| {
