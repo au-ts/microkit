@@ -123,11 +123,11 @@ verify: $(IMAGE) $(REPORT) $(PINGSTAGE2)
 	  $(PINGSTAGE2) \
 	  $(VIPER_OUT)
 
-	# Workaround for transpiler issue #6
+	# FIXME: Workaround for transpiler issue #6
 	sed -i 's/  patched/  gv.patched/g' $(VIPER_OUT)
 	sed -i 's/ microkit_signal_msg :/ gv.microkit_signal_msg :/g' $(VIPER_OUT)
 
-	# Workaround for transpiler issue #7
+	# FIXME: Workaround for transpiler issue #7
 	sed -i 's/label continue/\/\/label continue/g' $(VIPER_OUT)
 	sed -i 's/label break/\/\/label break/g' $(VIPER_OUT)
 
