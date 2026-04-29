@@ -1403,7 +1403,7 @@ impl BootInfoMap {
         let xml_bi_type = checked_lookup(xml_sdf, node, "type")?;
         // TODO: complete all bootinfo types
         let bi_type = match xml_bi_type {
-            // "remaining_untypeds" => CapDLBootInfo::RemainingUntypeds,
+            "remaining_untypeds" => BootInfoId::RemainingUntypeds,
             "rsdp" => BootInfoId::X86AcpiRsdp,
             _ => return Err(format!("BootInfoMap type: '{xml_bi_type}' is not supported.")),
         };

@@ -27,7 +27,7 @@ use crate::{
         CapMapType, CpuCore, SysMap, SysMapPerms, SystemDescription, BUDGET_DEFAULT,
         MONITOR_PD_NAME, MONITOR_PRIORITY,
     },
-    sel4::{Arch, Config, PageSize},
+    sel4::{Arch, Config, PageSize, BootInfoId},
     util::{ranges_overlap, round_down, round_up},
 };
 
@@ -696,24 +696,35 @@ pub fn build_capdl_spec(
             println!("boot info - id: {}, vaddr: {}", map.bi_type as u64, map.vaddr);
             let num_bi_frames = map.size / PageSize::Small as u64;
             for bi_frame_seq in 0..num_bi_frames {
-                // FIXME: fill entries
                 let mut frame_fill = Fill {
                     entries: [].to_vec(),
                 };
+
+                let bootinfo_id = match map.bi_type {
+                    BootInfoId::Padding => FillEntryContentBootInfoId::Padding,
+                    BootInfoId::X86Vbe => FillEntryContentBootInfoId::X86Vbe,
+                    BootInfoId::X86Mbmmap => FillEntryContentBootInfoId::X86Mbmmap,
+                    BootInfoId::X86AcpiRsdp => FillEntryContentBootInfoId::X86AcpiRsdp,
+                    BootInfoId::X86FrameBuffer => FillEntryContentBootInfoId::X86FrameBuffer,
+                    BootInfoId::X86TscFreq => FillEntryContentBootInfoId::X86TscFreq,
+                    BootInfoId::Fdt => FillEntryContentBootInfoId::Fdt,
+                    BootInfoId::RemainingUntypeds => FillEntryContentBootInfoId::RemainingUntypeds,
+                };
+
                 frame_fill.entries.push(FillEntry {
                     range: Range {
                         start: 0,
                         end: 4096,
                     },
                     content: FillEntryContent::BootInfo(FillEntryContentBootInfo {
-                        id: FillEntryContentBootInfoId::X86AcpiRsdp,
+                        id: bootinfo_id,
                         offset: 0,
                     }),
                 });
                 let bi_frame_obj_id = capdl_util_make_frame_obj(
                     &mut spec_container,
                     frame_fill,
-                    &format!("{}_bi_{:09}", pd.name, bi_frame_seq),
+                    &format!("{}_bi_{}_{:09}", pd.name, map.name, bi_frame_seq),
                     None,
                     PageSize::Small.fixed_size_bits(kernel_config) as u8,
                 );

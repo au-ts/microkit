@@ -593,10 +593,11 @@ pub enum BootInfoId {
     X86FrameBuffer,
     X86TscFreq,
     Fdt,
+    RemainingUntypeds,
 }
 
 // impl BootInfoId {
-//     pub fn to_size(&self) -> u64 {
+    // pub fn to_size(&self) -> u64 {
 
-//     }
+    // }
 // }
