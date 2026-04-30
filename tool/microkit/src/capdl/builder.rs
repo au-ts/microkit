@@ -1110,7 +1110,7 @@ pub fn build_capdl_spec(
         let send_cspace_id = *pd_name_to_cspace_id.get(&send.pd).unwrap();
         let send_cap_idx = PD_BASE_OUTPUT_NOTIFICATION_CAP + send.id;
 
-        println!("sender: {:?}, receiver: {:?}", send, recv);
+        // println!("sender: {:?}, receiver: {:?}", send, recv);
 
         let &recv_irq_number = full_system_state
             .sgi_irq_numbers

@@ -129,7 +129,7 @@ fn kernel_calculate_phys_image(
 ) -> (MemoryRegion, MemoryRegion, u64) {
     // Calculate where the kernel image region is
     let kernel_virt_image = kernel_calculate_virt_image(kernel_elf);
-    println!("Kernel Virt Image: {:#x?}", kernel_virt_image);
+    // println!("Kernel Virt Image: {:#x?}", kernel_virt_image);
 
     // nb: Picked arbitrarily
     let kernel_first_paddr = ram_regions.regions[0].base;
@@ -138,7 +138,7 @@ fn kernel_calculate_phys_image(
     // Remove the kernel image.
     let kernel_last_paddr = kernel_virt_image.end - kernel_p_v_offset;
     let kernel_phys_image = MemoryRegion::new(kernel_first_paddr, kernel_last_paddr);
-    println!("Kernel Phys Image: {:#x?}", kernel_phys_image);
+    // println!("Kernel Phys Image: {:#x?}", kernel_phys_image);
 
     // but get the boot region, we'll add that back later
     // FIXME: Why calculate it now if we add it back later?
@@ -167,6 +167,8 @@ fn kernel_partial_boot(
     // This lets allocations happen correctly.
     // This function follows the kernel boot sequence.
 
+    // println!("kernel_partial_boot cpu: {cpu:?}");
+
     // Reserved regions will cover device memory, and the memory of other
     // cores that we do not wish to modify.
     let mut reserved_regions = DisjointMemoryRegion::default();
@@ -179,10 +181,14 @@ fn kernel_partial_boot(
     {
         // Add all the regions of other core's allocated ram regions
         // to reserved regions
+        // This removes things like other core's kernels from device UT,
+        // as well as other cores' normal UT from our device UT.
         for region in other_core_ram.regions.iter() {
             reserved_regions.insert_region(region.base, region.end);
         }
     }
+
+    // println!("other-core: {reserved_regions:#x?}");
 
     // =====
     //       Here we emulate init_freemem() and arch_init_freemem(), excluding
@@ -204,6 +210,8 @@ fn kernel_partial_boot(
         }
     }
 
+    // println!("kernel-devices: {reserved_regions:#x?}");
+
     // ============ arch_init_freemem():
     // XXX: Theoreticallly, the initial task size would be added to reserved regions, as well
     //    as the DTB and the extra reserved region. But it's not since this is partial()
@@ -213,7 +221,11 @@ fn kernel_partial_boot(
 
     reserved_regions.insert_region(kernel_region.base, kernel_region.end);
 
+    // println!("kernel: {reserved_regions:#x?}");
+
     let mut available_regions = ram_regions.clone();
+
+    // println!("avail: {available_regions:#x?}");
 
     // ============ init_freemem()
 
@@ -292,7 +304,11 @@ fn kernel_partial_boot(
         reserved2
     };
 
-    println!("Finished the contstruction of reserved regions from the availabel ram!");
+    // println!("init freemem reserved2: {reserved_regions:#x?}");
+    // println!("init freemem free: {free_memory:#x?}");
+
+
+    // println!("Finished the construction of reserved regions from the available ram!");
 
     // ====
     //     Here we emulate create_untypeds(), where normal_memory represents
@@ -313,12 +329,16 @@ fn kernel_partial_boot(
         device_memory.insert_region(start, kernel_config.paddr_user_device_top);
     }
 
+    // println!("device UT: {device_memory:#x?}");
+
     // XXX: Don't add the boot_region to normal_memory, for some reason (???)
 
     // =========== Add the free memory as normal
     for free_memory in free_memory.regions.iter() {
         normal_memory.insert_region(free_memory.base, free_memory.end);
     }
+
+    // println!("normal UT: {normal_memory:#x?}");
 
     KernelPartialBootInfo {
         device_memory,
@@ -334,7 +354,7 @@ pub fn emulate_kernel_boot_partial(
     full_system_state: &FullSystemState,
     cpu: CpuCore,
 ) -> (DisjointMemoryRegion, MemoryRegion, u64) {
-    println!("Attempting to emulate kernel boot partial!");
+    // println!("Attempting to emulate kernel boot partial!");
     let partial_info = kernel_partial_boot(kernel_config, kernel_elf, full_system_state, cpu);
     (
         partial_info.normal_memory,
@@ -641,7 +661,7 @@ pub fn build_full_system_state(
 
     for mr in system.memory_regions.iter().cloned() {
         if mr.used_cores.len() > 1 {
-            println!("allocation shared: {mr:?}");
+            // println!("allocation shared: {mr:#x?}");
 
             match mr.phys_addr {
                 SysMemoryRegionPaddr::Specified(phys_addr) => {
