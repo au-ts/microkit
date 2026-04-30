@@ -280,19 +280,19 @@ new_state.ping_counter == old_state.ping_counter + 1
 The `ping` domain may wait on its endpoint to `receive` only without the ball,
 meaning that after handling the notification it must pass the ball on.
 
-The transition relation says that once the response is received, the ball is
-received along with it, and the counter remains unchanged:
+The transition relation says that after the receive call returns, the ball is
+received, but the counter remains unchanged:
 ```
 new_state.has_the_ball == true &&
 new_state.ping_counter == old_state.ping_counter
 ```
 
 The global proof can reason only about this abstract state, it should not have
-to inspect the body of `ping`. The automated Viper proofs establish, for each
-concrete implementation, that the code actually satisfies the PD-level
-contracts expected by the system-level proof.
+to inspect the implemenatiion of `ping`. The automated Viper proofs establish
+that the implementation itself satisfies the PD-level contracts expected by the
+system-level proof.
 
-## Verifying the local contract
+## Verifying the PD-level contract
 
 TODO: WRITE
 
