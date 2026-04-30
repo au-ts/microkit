@@ -55,15 +55,14 @@ E.g. when a PD calls the `microkit_notify(5)` API function, the verifier must:
   event transition relation.
 
 For calls that receive information from another PD or from the system, the 
-wrapper may also assume a reliance about the possible values that might be
+postcondition may also assume a reliance about the possible values that might be
 returned in a given state. Those reliances will later on have to be justified by
 any system-level proof.
 
 
 ## System-level verification
 
-At the system level, the system will get modeled as a stream of Microkit
-events.
+The system level will get modeled as a stream of Microkit events.
 
 Shared memory regions appear in this model. Private memory inside each 
 protection domain does not. Instead, each PD is represented by its abstract
@@ -157,7 +156,7 @@ However, such a check is easy to introduce using Viper's `acc(-)` mechanism.
 
 # Missing or incomplete specification coverage
 
-**PD control events are not fully specified**
+**PD control events not fully specified**
 
 The calls `microkit_pd_stop` and `microkit_pd_restart` are implemented and
 usable in the Pancake Microkit API. Viper can verify local safety facts about
@@ -184,3 +183,23 @@ VCPUs are not implemented, and not specified.
 
 Cap slots and their kinds are exported, but the current spec does not check
 against rights/badges/grant rights. See the section on PD-level specification.
+
+**No guards against raw kernel / libsel4 calls**
+
+If one has access to direct kernel calls, one can bypass verification by
+using a manual call to trigger a Microkit event. For example, instead of
+calling `microkit_notify(x)`, one can get the `CPtr y` corresponding to the
+notification of channel `x`, and make a direct call to `panseL4_Signal(y)`.
+This will emit a Microkit event, but will not create an obligation to show
+that the `microkit_notify` guarantee and transition relation hold.
+
+This has an easy solution: one can add a precondition,
+`acc(panseL4.unsafe_calls)`, to each `panseL4_` call, and inhale this inside
+`microkit_` calls only. This will let the verifier prevent any unintended
+or accidental such violations. This is easy to implement, and has not been
+done yet only to cut down the number of access rights one needs to handle
+during this experimental phase.
+
+However, the verifier cannot prevent kernel calls made outside of Pancake, in
+the FFI code. Ensuring that FFI calls are safe remains the proof engineer's
+responsibility.
