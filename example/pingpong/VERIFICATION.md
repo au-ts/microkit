@@ -1,9 +1,17 @@
-# Verification of Microkit-based systems
+<!--
+     Copyright 2026, UNSW
+     SPDX-License-Identifier: CC-BY-SA-4.0
+-->
 
 This example constitutes an early experiment in verification of Microkit-based
 systems by combining automated local proofs about protection domains with
 planned hand-written machine-checked global correctness proofs about the whole
 system.
+
+The first section explains the general verification approach, and the second
+section instantiates the approach on the toy `pingpong` system.
+
+# Verification of Microkit-based systems
 
 The long-term goal is to prove system-level properties of a system running on
 top of Microkit. A system-level property talks about the stream of Microkit
@@ -11,46 +19,57 @@ events produced by the system. Examples of Microkit events include:
 notifications, protected procedure calls, receives, IRQ-related events, and
 accesses to shared memory regions.
 
-A property might say, for example, that a PD never emits two notifications on 
-the same channel in a row, or that two PDs never both hold the same resource
-at the same time.
+A system-level property might say, for example, that no PD ever emits two
+notifications on  the same channel in a row, or that two PDs never both hold
+the same resource at the same time, or that a word from one part of shared
+memory gets correctly copied to a different part of the shared memory.
+
+Ideally, proofs of system-level properties should reason only about abstract
+protection domain states, shared memory, and the stream of Microkit events,
+instead of about each protection domain's specific implementation.
+
+System-level properties should connect to the implementation using
+*PD-level properties*. The idea is to make each protection domain prove a local
+event contract: when it may emit a Microkit event, how that event changes its
+abstract state, and what assumptions it needs from the rest of the system.
+
 
 ## PD-level verification
 
 Each verified Pancake protection domain gets a local specification.
 The local specification defines:
 
-- the abstract state machine that represents the PD at the system level;
-- event guards (guarantees);
-- event transition relations;
-- local preconditions and postconditions for selected Microkit calls;
-- reliances, which are assumptions about the PD's environment;
-- loop invariants needed by the Microkit handler loop.
+* the abstract state machine that represents the PD at the system level;
+* event guards (guarantees),
+* event transition relations,
+* local state preconditions and postconditions for Microkit calls,
+* reliances, which are assumptions about the PD's environment, and
+* loop invariants needed by the Microkit handler loop.
 
-In this project, a guarantee means an event guard: the PD promises not to emit 
-a certain type of Microkit event (e.g. a notify on a certain channel, or a
+In this project, a *guarantee* means an event guard: the PD promises not to
+emit a certain type of Microkit event (e.g. a notify on a certain channel, or a
 write to a certain area of memory) unless the guarantee property holds about
-its current abstract state. A reliance means an environment assumption that the
-PD proof may use (e.g. that other PDs won't notify it unless its abstract
-machine state satisfies a predicate). NB These names somewhat clash with
+its current abstract state. A *reliance* means an environment assumption that
+the PD proof may use (e.g. that other PDs won't notify it unless its abstract
+machine state satisfies a predicate). **NB** These names somewhat clash with
 "rely/guarantee reasoning", but these are not rely/guarantee proof rules in the
 classic concurrency-verification sense!
 
 For example, a PD specification can say:
 
-- the PD may notify on channel 5 only when its abstract state says it has a 
-token;
-- after that notify event, the PD no longer has the token;
-- after a receive event, the PD may assume only facts that the global system 
+* the PD may notify on channel 5 only when its abstract state says it has a 
+resource token,
+* after that notify event, the PD no longer has the token, and
+* after a receive event, the PD may assume only facts that the global system
 proof later proves.
 
 Viper checks that the Pancake implementation honors this local specification.
 
 E.g. when a PD calls the `microkit_notify(5)` API function, the verifier must:
 * establish common preconditions, such as "the channel 5 exists, and allows
-  notifications according to the SDF";
+  notifications according to the SDF",
 * establish that the PD's abstract state `state` at the time of the call
-  satisfies the the event guarantee `guarantee_microkit_notify(5,state)`.
+  satisfies the the event guarantee `guarantee_microkit_notify(5,state)`, and
 * assume that after the call, the abstract ghost state changes according to the
   event transition relation.
 
@@ -154,7 +173,7 @@ The current proof story also does not check whether the user makes any direct
 libsel4 calls (e.g. in external code) which violate the Microkit boundaries.
 However, such a check is easy to introduce using Viper's `acc(-)` mechanism.
 
-# Missing or incomplete specification coverage
+## Missing or incomplete specification coverage
 
 **PD control events not fully specified**
 
@@ -203,3 +222,7 @@ during this experimental phase.
 However, the verifier cannot prevent kernel calls made outside of Pancake, in
 the FFI code. Ensuring that FFI calls are safe remains the proof engineer's
 responsibility.
+
+# The ping-pong example
+
+
