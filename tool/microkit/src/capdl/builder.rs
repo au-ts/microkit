@@ -101,7 +101,7 @@ const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
 // overwrite other parts of the cspace. The cspace slot that the users provide
 // for mapping in extra caps such as TCBs and SCs will be as an offset to this
 // index. We are bounding this to 128 slots for now.
-const PD_BASE_USER_CAPS: u64 = PD_BASE_IOPORT_CAP + 64;
+const PD_ROOT_BASE_USER_CAPS: u64 = 1;
 
 const PD_ROOT_CAP_SIZE: u32 = 64;
 const PD_ROOT_CAP_BITS: u8 = PD_ROOT_CAP_SIZE.ilog2() as u8;
@@ -572,18 +572,17 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 3. Create the CNodes' spec
     // *********************************
-    let mut cnodes: HashMap<&String, ObjectId> = HashMap::new();
+    let mut cnodes: HashMap<&String, (ObjectId, u8)> = HashMap::new();
     for cnode in system.cnodes.iter() {
-
         let cnode_obj_id = capdl_util_make_cnode_obj(
             &mut spec_container,
             &(cnode.name.clone()),
             cnode.size_bits,
             Vec::new(),
-            false,
+            cnode.receive_all_untypeds,
         );
 
-        cnodes.insert(&cnode.name, cnode_obj_id);
+        cnodes.insert(&cnode.name, (cnode_obj_id, cnode.size_bits));
     }
 
 
@@ -608,6 +607,7 @@ pub fn build_capdl_spec(
 
     // Keep tabs on each PD's CSpace, Notification and Endpoint objects so we can create channels between them at a later step.
     let mut pd_id_to_cspace_id: HashMap<usize, ObjectId> = HashMap::new();
+    let mut pd_id_to_root_cspace_id: HashMap<usize, ObjectId> = HashMap::new();
     let mut pd_id_to_ntfn_id: HashMap<usize, ObjectId> = HashMap::new();
     let mut pd_id_to_ep_id: HashMap<usize, ObjectId> = HashMap::new();
 
@@ -1128,6 +1128,7 @@ pub fn build_capdl_spec(
             pd_root_cnode_cap,
         ));
         pd_id_to_cspace_id.insert(pd_global_idx, pd_cnode_obj_id);
+        pd_id_to_root_cspace_id.insert(pd_global_idx, pd_root_cnode_obj_id);
 
         // Step 4-14 Set the TCB parameters and all the various caps that we need to bind to this TCB.
         if let Object::Tcb(pd_tcb) = &mut spec_container
@@ -1244,7 +1245,7 @@ pub fn build_capdl_spec(
     // Step 5. Handle extra cap mappings
     // *********************************
     for (pd_dest_idx, pd) in system.protection_domains.iter().enumerate() {
-        let pd_dest_cspace_id = pd_id_to_cspace_id[&pd_dest_idx];
+        let pd_dest_cspace_id = pd_id_to_root_cspace_id[&pd_dest_idx];
         for cap_map in pd.cap_maps.iter() {
             if let Some(cap_pd_name) = &cap_map.pd_name {
                 let pd_src_idx = pd_name_to_id.get(&cap_pd_name).ok_or(format!(
@@ -1262,26 +1263,36 @@ pub fn build_capdl_spec(
                 capdl_util_insert_cap_into_cspace(
                     &mut spec_container,
                     pd_dest_cspace_id,
-                    (PD_BASE_USER_CAPS + cap_map.dest_cspace_slot) as u32,
+                    (PD_ROOT_BASE_USER_CAPS + cap_map.dest_cspace_slot) as u32,
                     pd_obj,
                 );
             }
 
             if let Some(cap_cnode_name) = &cap_map.cnode_name {
-                println!("insert a CNode cap at slot {}\n", (PD_BASE_USER_CAPS + cap_map.dest_cspace_slot));
-                let cnode_obj_id = cnodes.get(cap_cnode_name).unwrap().clone();
-                // let pd_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS as u64 - PD_ROOT_CAP_BITS as u64;
-                let cnode_cap = capdl_util_make_cnode_cap(cnode_obj_id, 0, 0);
+                println!("insert a CNode cap at slot {}\n", (PD_ROOT_BASE_USER_CAPS + cap_map.dest_cspace_slot));
+                if let Some((cnode_obj_id, size_bits)) = cnodes.get(cap_cnode_name) {
+                    println!("Cnode size bits: {}", size_bits);
+                    let pd_guard_size = kernel_config.cap_address_bits - *size_bits as u64 - PD_ROOT_CAP_BITS as u64;
+                    let cnode_cap = capdl_util_make_cnode_cap(*cnode_obj_id, 0, pd_guard_size.try_into().unwrap());
 
-                // Map this into the destination pd's cspace and the specified slot.
-                capdl_util_insert_cap_into_cspace(
-                    &mut spec_container,
-                    pd_dest_cspace_id,
-                    (PD_BASE_USER_CAPS + cap_map.dest_cspace_slot) as u32,
-                    cnode_cap,
-                );
+                    // Have a cap at slot 0 pointing to itself
+                    let cnode_cap_self_ref = capdl_util_make_cnode_cap(*cnode_obj_id, 0, pd_guard_size.try_into().unwrap());
+                    capdl_util_insert_cap_into_cspace(
+                        &mut spec_container,
+                        *cnode_obj_id,
+                        0,
+                        cnode_cap_self_ref,
+                    );
+
+                    // Map this into the destination pd's cspace and the specified slot.
+                    capdl_util_insert_cap_into_cspace(
+                        &mut spec_container,
+                        pd_dest_cspace_id,
+                        (PD_ROOT_BASE_USER_CAPS + cap_map.dest_cspace_slot) as u32,
+                        cnode_cap,
+                    );
+                }
             }
-
         }
     }
 

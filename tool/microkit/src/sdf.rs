@@ -163,7 +163,7 @@ impl SysMemoryRegion {
 #[derive(Debug, PartialEq, Eq)]
 pub struct CNode {
     pub name: String,
-    pub remaining_untypeds: bool,
+    pub receive_all_untypeds: bool,
     pub size_bits: u8,
 }
 
@@ -173,7 +173,7 @@ impl CNode {
 
         let name = checked_lookup(xml_sdf, node, "name")?.to_string();
 
-        let remaining_untypeds = if let Some(xml_remaining_untypeds) = node.attribute("remaining_untypeds") {
+        let receive_all_untypeds = if let Some(xml_remaining_untypeds) = node.attribute("remaining_untypeds") {
             match str_to_bool(xml_remaining_untypeds) {
                 Some(val) => val,
                 None => {
@@ -192,7 +192,7 @@ impl CNode {
 
         Ok(CNode {
             name,
-            remaining_untypeds,
+            receive_all_untypeds,
             size_bits,
         })
     }
