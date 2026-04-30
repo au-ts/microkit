@@ -321,6 +321,18 @@ fn kernel_partial_boot(
 
     let mut start = 0;
     for reserved_reg in reserved_regions.regions.iter() {
+        // If we have a reserved region that starts at [0x0, ...) like is the
+        // case on boards where DRAM starts at 0, then we can't insert this
+        // region in device memory.
+        // Upstream seL4 doesn't run into this issue because it allows inserting
+        // regions of zero-length into the array of regions. It's
+        // create_untypeds_for_region and (our) aligned_power_of_two_regions
+        // will do nothing if the region is empty.
+        if start == 0 && reserved_reg.base == 0 {
+            start = reserved_reg.end;
+            continue;
+        }
+
         device_memory.insert_region(start, reserved_reg.base);
         start = reserved_reg.end;
     }
