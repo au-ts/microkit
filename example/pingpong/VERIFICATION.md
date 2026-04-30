@@ -225,4 +225,77 @@ responsibility.
 
 # The ping-pong example
 
+The `pingpong` system consists of two protection domains, which behave like two
+players playing table tennis, passing a resource (the "pingpong ball") back and
+forth.
 
+The `ping` domain starts with the ball, sends a notification to `pong`, then
+waits until `pong` sends a notification back, *ad infinitum*.
+
+The system-level property is meant to ensure the coherence of the game:
+the two protection domains never both "have the ball" at the same time, and
+neither side gets more than one turn ahead of the other (passing the ball,
+to the other without the other having passed the ball back first).
+
+## PD-level contract
+
+Working backwards from this intended system-level property, we can decide to
+model each PD using a small PD-level ghost state consisting of the following
+fields:
+
+```
+field has_the_ball: Bool
+field ping_counter: Int
+```
+
+The PD-level state keeps track of whether the PD currently has the ball, and
+how many times it has already sent it.
+
+The PD-level contract governs what kinds of Microkit events these PDs can emit,
+and how their state may change when they do so. These are as follows:
+
+**The `microkit_notify` contract**
+
+The `ping` domain may cause a `microkit_notify` event only when it has the
+ball. After notifying, it transitions into a state that gives up the ball and
+increments its pass counter.
+
+More formally, the guarantee (guard) that the PD-level state has to satisfy
+before a notify event is that `has_the_ball == true`.
+
+The corresponding transition relation is that
+```
+state.has_the_ball := false;
+state.ping_counter := state.ping_counter + 1
+```
+or, since transitions are non-deterministic, the following relation has to
+hold between the old and new states:
+```
+new_state.has_the_ball == false &&
+new_state.ping_counter == old_state.ping_counter + 1
+```
+
+**The `receive` contract**
+
+The `ping` domain may wait on its endpoint to `receive` only without the ball,
+meaning that after handling the notification it must pass the ball on.
+
+The transition relation says that once the response is received, the ball is
+received along with it, and the counter remains unchanged:
+```
+new_state.has_the_ball == true &&
+new_state.ping_counter == old_state.ping_counter
+```
+
+The global proof can reason only about this abstract state, it should not have
+to inspect the body of `ping`. The automated Viper proofs establish, for each
+concrete implementation, that the code actually satisfies the PD-level
+contracts expected by the system-level proof.
+
+## Verifying the local contract
+
+TODO: WRITE
+
+## Connecting to the system-level proof
+
+TODO:WRITE
