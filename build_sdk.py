@@ -159,6 +159,8 @@ SUPPORTED_BOARDS = (
         kernel_options={
             "KernelPlatform": "zynqmp",
             "KernelARMPlatform": "zcu102",
+            "KernelEnableMultikernelSupport": True,
+            "KernelMultikernelNumCPUs": 2,
         } | DEFAULT_KERNEL_OPTIONS_AARCH64,
     ),
     BoardInfo(
