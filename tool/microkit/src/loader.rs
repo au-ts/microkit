@@ -357,13 +357,13 @@ impl<'a> Loader<'a> {
 
             let init_task_phy_base = core_init_task.phys_base.unwrap();
 
-            let inittask_p_v_offset = core_init_task.image_bound().start - init_task_phy_base;
+            let init_task_size = core_init_task.image_bound().end - core_init_task.image_bound().start;
 
             let root_task_regions = vec![
                 // TODO: remove pv_offset
                 seL4_KernelBoot_RootTaskRegion {
                     paddr_base: init_task_phy_base,
-                    paddr_end: core_init_task.image_bound().end - inittask_p_v_offset,
+                    paddr_end: init_task_phy_base + init_task_size,
                     vaddr_base: core_init_task.image_bound().start,
                     _padding: [0; 8],
                 },

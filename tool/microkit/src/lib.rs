@@ -217,10 +217,7 @@ impl DisjointMemoryRegion {
     }
 
     pub fn insert_region(&mut self, base: u64, end: u64) {
-                println!("Inserting region from {:x} to {:x}", base, end);
-
         assert!(base < end);
-
 
         if self.regions.is_empty() {
             self.regions.push(MemoryRegion::new(base, end));

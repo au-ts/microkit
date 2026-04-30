@@ -120,7 +120,6 @@ class BoardInfo:
     gcc_cpu: Optional[str]
     loader_link_address: Optional[int]
     kernel_options: KERNEL_OPTIONS
-    multikernels: Optional[int] = None
 
 
 @dataclass

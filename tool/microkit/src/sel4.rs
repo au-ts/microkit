@@ -119,7 +119,6 @@ pub fn kernel_calculate_virt_image(kernel_elf: &ElfFile) -> MemoryRegion {
         .find_symbol("ki_end")
         .expect("Could not find 'ki_end' symbol");
 
-    println!("CALCULATING KERNEL VIRT IMAGE: 0x{:x} to 0x{:x}", kernel_first_vaddr, kernel_last_vaddr);
 
     MemoryRegion::new(kernel_first_vaddr, kernel_last_vaddr)
 }
@@ -130,14 +129,16 @@ fn kernel_calculate_phys_image(
 ) -> (MemoryRegion, MemoryRegion, u64) {
     // Calculate where the kernel image region is
     let kernel_virt_image = kernel_calculate_virt_image(kernel_elf);
+    println!("Kernel Virt Image: {:#x?}", kernel_virt_image);
 
-    // nb: Picked arbitarily
+    // nb: Picked arbitrarily
     let kernel_first_paddr = ram_regions.regions[0].base;
     let kernel_p_v_offset = kernel_virt_image.base - kernel_first_paddr;
 
     // Remove the kernel image.
     let kernel_last_paddr = kernel_virt_image.end - kernel_p_v_offset;
     let kernel_phys_image = MemoryRegion::new(kernel_first_paddr, kernel_last_paddr);
+    println!("Kernel Phys Image: {:#x?}", kernel_phys_image);
 
     // but get the boot region, we'll add that back later
     // FIXME: Why calculate it now if we add it back later?

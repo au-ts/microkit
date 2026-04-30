@@ -1065,7 +1065,8 @@ fn main() -> Result<(), String> {
             println!("MICROKIT TOOL| Outputting capdl_json for core {}", spec_idx);
             let capdl_json_core = format!("{capdl_json}_{spec_idx}.json");
             let serialised = serde_json::to_string_pretty(&spec.spec).unwrap();
-            fs::write(capdl_json_core, &serialised).unwrap();
+            fs::write(&capdl_json_core, &serialised)
+                .unwrap_or_else(|_| panic!("no such file or directory when creating {capdl_json_core}"));
             // write_report(&spec_container, &kernel_config, args.report);
         // Check where the object ids in the json are greater 
         }
