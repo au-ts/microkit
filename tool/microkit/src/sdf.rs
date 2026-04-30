@@ -19,6 +19,7 @@
 use crate::sel4::{
     Arch, ArmRiscvIrqTrigger, Config, PageSize, X86IoapicIrqPolarity, X86IoapicIrqTrigger, BootInfoId,
 };
+use crate::capdl::{builder::PD_ROOT_CAP_BITS};
 use crate::util::{get_full_path, ranges_overlap, round_up, str_to_bool};
 use crate::MAX_PDS;
 use std::collections::HashSet;
@@ -339,6 +340,7 @@ pub struct CapMap {
     pub cnode_name: Option<String>,
     pub pd_name: Option<String>,
     pub dest_cspace_slot: u64,
+    pub text_pos: Option<roxmltree::TextPos>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1388,6 +1390,7 @@ impl CapMap {
             cnode_name,
             pd_name,
             dest_cspace_slot,
+            text_pos: Some(xml_sdf.doc.text_pos_at(node.range().start)),
         })
     }
 }
@@ -2209,7 +2212,7 @@ pub fn parse(
 
     // Ensure that there are no overlapping extra cap maps in the user caps region
     // and we are not mapping in the same cap from the same source more than once
-    for pd in &pds {
+    for pd in &mut pds {
         let mut user_cap_slots = Vec::new();
         let mut seen_pd_cap_maps: Vec<(CapMapType, String)> = Vec::new();
         let mut seen_extra_cnode_maps: Vec<String> = Vec::new();
@@ -2242,6 +2245,19 @@ pub fn parse(
                         cap_map.cap_type, cap_cnode_name, pd.name
                     ));
                 } else {
+                    for cnode in &cnodes {
+                        if cnode.name == *cap_cnode_name {
+                            let cnode_cptr = cap_map.dest_cspace_slot << (64 - PD_ROOT_CAP_BITS);
+                            println!("slot: {}, cap size: {}", cap_map.dest_cspace_slot, PD_ROOT_CAP_BITS);
+                            println!("found cnode {}, size_bits: {}, cptr: {}, test: {}", cnode.name, cnode.size_bits, cnode_cptr, (1 as u64) << 58);
+
+                            let setvar = SysSetVar {
+                                symbol: format!("cptr_{}", cnode.name),
+                                kind: SysSetVarKind::Vaddr { address: cnode_cptr },
+                            };
+                            checked_add_setvar_or_pos_err(&mut pd.setvars, setvar, &xml_sdf, cap_map.text_pos)?;
+                        }
+                    }
                     seen_extra_cnode_maps.push(cap_cnode_name.clone())
                 }
             }
@@ -2412,6 +2428,28 @@ fn checked_add_setvar(
                 xml_sdf,
                 node,
                 format!("setvar on symbol '{}' already exists", setvar.symbol),
+            ));
+        }
+    }
+
+    setvars.push(setvar);
+
+    Ok(())
+}
+
+fn checked_add_setvar_or_pos_err(
+    setvars: &mut Vec<SysSetVar>,
+    setvar: SysSetVar,
+    xml_sdf: &XmlSystemDescription<'_>,
+    text_pos: Option<roxmltree::TextPos>,
+) -> Result<(), String> {
+    // Check that the symbol does not already exist
+    for other_setvar in setvars.iter() {
+        if setvar.symbol == other_setvar.symbol {
+            return Err(format!(
+                "Error: setvar on symbol '{}' already exists: {}",
+                setvar.symbol,
+                loc_string(&xml_sdf, text_pos.unwrap()),
             ));
         }
     }

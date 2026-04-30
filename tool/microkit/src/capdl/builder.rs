@@ -104,7 +104,7 @@ const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
 const PD_ROOT_BASE_USER_CAPS: u64 = 1;
 
 const PD_ROOT_CAP_SIZE: u32 = 64;
-const PD_ROOT_CAP_BITS: u8 = PD_ROOT_CAP_SIZE.ilog2() as u8;
+pub const PD_ROOT_CAP_BITS: u8 = PD_ROOT_CAP_SIZE.ilog2() as u8;
 pub const PD_CAP_SIZE: u32 = 1024;
 const PD_CAP_BITS: u8 = PD_CAP_SIZE.ilog2() as u8;
 const PD_SCHEDCONTEXT_EXTRA_SIZE: u64 = 256;
@@ -1263,7 +1263,7 @@ pub fn build_capdl_spec(
                 capdl_util_insert_cap_into_cspace(
                     &mut spec_container,
                     pd_dest_cspace_id,
-                    (PD_ROOT_BASE_USER_CAPS + cap_map.dest_cspace_slot) as u32,
+                    cap_map.dest_cspace_slot as u32,
                     pd_obj,
                 );
             }
@@ -1288,7 +1288,7 @@ pub fn build_capdl_spec(
                     capdl_util_insert_cap_into_cspace(
                         &mut spec_container,
                         pd_dest_cspace_id,
-                        (PD_ROOT_BASE_USER_CAPS + cap_map.dest_cspace_slot) as u32,
+                        cap_map.dest_cspace_slot as u32,
                         cnode_cap,
                     );
                 }
