@@ -1329,8 +1329,6 @@ pub fn build_capdl_spec(
         println!("NUMBER OF FRAMES: {}\n", unmapped_frames.len());
         // TODO: I also need to send vspace cap id's over, this should just be an array of size 128...
         elfs[pager_idx].write_symbol("vspaces", vspace_slots.iter().flat_map(|&f| f.to_ne_bytes()).collect::<Vec<_>>().as_slice());
-        // the vspace of the pager.
-        elfs[pager_idx].write_symbol("pager_vspace", &pager_vspace.to_ne_bytes());
         println!("Rust struct size: {}", std::mem::size_of::<FrameInfoRaw>());
     }
 
