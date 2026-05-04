@@ -1109,7 +1109,6 @@ pub fn build_capdl_spec(
         );
         let pd_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS as u64 - PD_ROOT_CAP_BITS as u64;
         let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, pd_guard_size as u8);
-        pd_shadow_cspace_inner.insert(CapMapType::Cnode, pd_cnode_cap.clone());
 
         let pd_root_cnode_obj_id = capdl_util_make_cnode_obj(
             &mut spec_container,
@@ -1122,6 +1121,11 @@ pub fn build_capdl_spec(
         let pd_root_cnode_cap = capdl_util_make_cnode_cap(pd_root_cnode_obj_id, 0, 0);
         // place microkit managed cnode at slot 0
         capdl_util_insert_cap_into_cspace(&mut spec_container, pd_root_cnode_obj_id, 0, pd_cnode_cap);
+
+        // shadow cnode cap will be in the root CNode
+        let pd_shadow_guard_size = kernel_config.cap_address_bits - PD_ROOT_CAP_BITS as u64 - PD_ROOT_CAP_BITS as u64;
+        let pd_shadow_cnode_cap = capdl_util_make_cnode_cap(pd_root_cnode_obj_id, 0, pd_shadow_guard_size as u8);
+        pd_shadow_cspace_inner.insert(CapMapType::Cnode, pd_shadow_cnode_cap.clone());
 
         caps_to_bind_to_tcb.push(capdl_util_make_cte(
             TcbBoundSlot::CSpace as u32,

@@ -2234,6 +2234,12 @@ pub fn parse(
                         cap_map.cap_type, cap_pd_name, pd.name
                     ));
                 } else {
+                    let cptr = cap_map.dest_cspace_slot << (64 - PD_ROOT_CAP_BITS);
+                    let setvar = SysSetVar {
+                        symbol: format!("{:?}_cptr_{}", cap_map.cap_type, cap_pd_name).to_lowercase(),
+                        kind: SysSetVarKind::Vaddr { address: cptr },
+                    };
+                    checked_add_setvar_or_pos_err(&mut pd.setvars, setvar, &xml_sdf, cap_map.text_pos)?;
                     seen_pd_cap_maps.push((cap_map.cap_type, cap_pd_name.clone()))
                 }
             }
@@ -2252,7 +2258,7 @@ pub fn parse(
                             println!("found cnode {}, size_bits: {}, cptr: {}, test: {}", cnode.name, cnode.size_bits, cnode_cptr, (1 as u64) << 58);
 
                             let setvar = SysSetVar {
-                                symbol: format!("cptr_{}", cnode.name),
+                                symbol: format!("cnode_cptr_{}", cnode.name),
                                 kind: SysSetVarKind::Vaddr { address: cnode_cptr },
                             };
                             checked_add_setvar_or_pos_err(&mut pd.setvars, setvar, &xml_sdf, cap_map.text_pos)?;
