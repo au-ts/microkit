@@ -4,6 +4,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
+use rkyv::rancor::Error;
+
 /// This module is responsible for parsing the System Description Format (SDF)
 /// which is based on XML.
 /// We do not use any fancy XML, and instead keep things as minimal and simple
@@ -127,6 +129,7 @@ pub struct SysMemoryRegion {
     /// stack, ELF, etc.
     pub kind: SysMemoryRegionKind,
     pub prefill_bytes: Option<Vec<u8>>,
+    pub backed: bool
 }
 
 impl SysMemoryRegion {
@@ -250,6 +253,7 @@ impl Display for CpuCore {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ProtectionDomain {
     /// Only populated for child protection domains
+    pub backed: bool,
     pub id: Option<u64>,
     pub name: String,
     pub priority: u8,
@@ -464,6 +468,7 @@ impl ProtectionDomain {
             "smc",
             "cpu",
             "fpu",
+            "backed"
         ];
         if is_child {
             attrs.push("id");
@@ -627,6 +632,17 @@ impl ProtectionDomain {
                         "fpu must be 'true' or 'false'".to_string(),
                     ))
                 }
+            }
+        } else {
+            true
+        };
+
+        let backed: bool = if let Some(xml_backed) = node.attribute("backed") {
+            match str_to_bool(xml_backed) {
+                Some(boolean) => {
+                    boolean
+                },
+                _ => return Err(value_error(xml_sdf, node, "backed must be 'true' or 'false'".to_string())),
             }
         } else {
             true
@@ -1087,6 +1103,7 @@ impl ProtectionDomain {
         let has_children = !child_pds.is_empty();
 
         Ok(ProtectionDomain {
+            backed,
             id,
             name,
             // This downcast is safe as we have checked that this is less than
@@ -1387,6 +1404,17 @@ impl SysMemoryRegion {
 
         let page_count = size / page_size;
 
+        let backed = if let Some(xml_backed) = node.attribute("backed") {
+            match str_to_bool(xml_backed) {
+                Some(boolean) => {
+                    boolean
+                },
+                _ => return Err(value_error(xml_sdf, node, "backed must be 'true' or 'false'".to_string())),
+            }
+        } else {
+            true
+        };
+
         Ok(SysMemoryRegion {
             name: name.to_string(),
             size,
@@ -1397,6 +1425,7 @@ impl SysMemoryRegion {
             text_pos: Some(xml_sdf.doc.text_pos_at(node.range().start)),
             kind: SysMemoryRegionKind::User,
             prefill_bytes: prefill_bytes_maybe,
+            backed
         })
     }
 }
