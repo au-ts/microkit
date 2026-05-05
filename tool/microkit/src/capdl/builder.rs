@@ -28,7 +28,7 @@ use crate::{
     },
     elf::ElfFile,
     sdf::{
-        Channel, ChannelEnd, CpuCore, ProtectionDomain, SysIrq, SysIrqKind, SysMap, SysMapPerms,
+        ChannelEnd, CpuCore, ProtectionDomain, SysIrq, SysIrqKind, SysMap, SysMapPerms,
         SysMemoryRegion, SystemDescription, BUDGET_DEFAULT, MONITOR_PD_NAME, MONITOR_PRIORITY,
     },
     sel4::{Arch, ArmRiscvIrqTrigger, Config, FullSystemState, PageSize},

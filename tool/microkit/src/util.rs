@@ -184,7 +184,11 @@ pub fn monitor_serialise_u64_vec(vec: &[u64]) -> Vec<u8> {
 }
 
 /// For serialising an array of PD or VM names
-pub fn monitor_serialise_names(names: &[String], max_len: usize, max_name_len: usize) -> Vec<u8> {
+pub fn monitor_serialise_names(
+    names: Vec<&String>,
+    max_len: usize,
+    max_name_len: usize,
+) -> Vec<u8> {
     let mut names_bytes = vec![0; (max_len + 1) * max_name_len];
     for (i, name) in names.iter().enumerate() {
         let name_bytes = name.as_bytes();

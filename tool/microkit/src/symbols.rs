@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
-use std::{cmp::min, collections::BTreeMap, collections::HashMap};
+use std::{cmp::min, collections::BTreeMap};
 
 use crate::{
     elf::ElfFile,
