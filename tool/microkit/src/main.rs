@@ -627,6 +627,9 @@ fn main() -> Result<(), String> {
         }
     };
 
+    // We don't support multikernel X86.
+    let full_system_state = full_system_state.unwrap();
+
     for multikernel_idx in 0..(usize::from(num_multikernels)) {
         let cpu = CpuCore(multikernel_idx as u8);
 
@@ -645,7 +648,7 @@ fn main() -> Result<(), String> {
                     emulate_kernel_boot_partial(
                         &kernel_config,
                         &kernel_elf_maybe.clone().unwrap(),
-                        &full_system_state.clone().unwrap(),
+                        &full_system_state,
                         cpu,
                     );
 
@@ -703,13 +706,11 @@ fn main() -> Result<(), String> {
         while spec_need_refinement && iteration < MAX_BUILD_ITERATION {
             spec_need_refinement = false;
 
-            let system_state = full_system_state.clone().unwrap();
-
-            let mut memory_regions: Vec<SysMemoryRegion> = system_state
+            let mut memory_regions_for_core: Vec<_> = full_system_state
                 .sys_memory_regions
-                .clone()
-                .into_iter()
+                .iter()
                 .filter(|mr| mr.used_cores.contains(&cpu))
+                .cloned()
                 .collect();
 
             println!("This is multikernel idx: {} and this is sytems elfs: {:?} and this is the core local pds: {:?}", multikernel_idx, system_elfs.keys(), core_local_pds.keys());
@@ -719,9 +720,9 @@ fn main() -> Result<(), String> {
                 &kernel_config,
                 &system_elfs,
                 &core_local_pds,
-                &memory_regions,
+                &memory_regions_for_core,
                 &system,
-                &system_state.clone(),
+                &full_system_state,
                 multikernel_idx as u8,
             )?;
 
@@ -730,10 +731,11 @@ fn main() -> Result<(), String> {
             // Patch all the required symbols in the Monitor and PDs according to the Microkit's requirements
             if let Err(err) = patch_symbols(
                 &kernel_config,
-                &mut system_elfs,
-                &system,
                 &core_local_pds,
-                &spec_container.cross_core_recv_channels.clone().unwrap(),
+                &system.channels,
+                &memory_regions_for_core,
+                &mut system_elfs,
+                &spec_container.cross_core_recv_channels.as_ref().unwrap(),
             ) {
                 eprintln!("ERROR: {err}");
                 std::process::exit(1);
@@ -821,7 +823,7 @@ fn main() -> Result<(), String> {
                     let kernel_boot_info = emulate_kernel_boot(
                         &kernel_config,
                         kernel_elf_maybe.as_ref().unwrap(),
-                        &full_system_state.clone().unwrap(),
+                        &full_system_state,
                         cpu,
                         initial_task_phys_region,
                         user_image_virt_region,
@@ -855,9 +857,11 @@ fn main() -> Result<(), String> {
                             CapDLAllocEmulationErrorLevel::Suppressed,
                         ) {
                             // Encountered a problem, pick a better address.
-                            for tool_allocate_mr in memory_regions.iter_mut().filter(|mr| {
-                                matches!(mr.phys_addr, SysMemoryRegionPaddr::ToolAllocated(_))
-                            }) {
+                            for tool_allocate_mr in
+                                memory_regions_for_core.iter_mut().filter(|mr| {
+                                    matches!(mr.phys_addr, SysMemoryRegionPaddr::ToolAllocated(_))
+                                })
+                            {
                                 tool_allocate_mr.phys_addr =
                                     SysMemoryRegionPaddr::ToolAllocated(None);
                             }
@@ -887,7 +891,7 @@ fn main() -> Result<(), String> {
                         }
 
                         // Then take away any memory ranges occupied by Memory Regions with a paddr specified in SDF.
-                        for mr in memory_regions.iter() {
+                        for mr in memory_regions_for_core.iter() {
                             if let SysMemoryRegionPaddr::Specified(sdf_paddr) = mr.phys_addr {
                                 let mr_end = sdf_paddr + mr.size;
 
@@ -906,8 +910,10 @@ fn main() -> Result<(), String> {
                         }
 
                         let mut tool_allocated_mrs: Vec<usize> = Vec::new();
-                        for (mr_id, tool_allocate_mr) in
-                            memory_regions.iter_mut().enumerate().filter(|(_, mr)| {
+                        for (mr_id, tool_allocate_mr) in memory_regions_for_core
+                            .iter_mut()
+                            .enumerate()
+                            .filter(|(_, mr)| {
                                 matches!(mr.phys_addr, SysMemoryRegionPaddr::ToolAllocated(None))
                             })
                         {
@@ -922,7 +928,7 @@ fn main() -> Result<(), String> {
                                     eprintln!("Previously auto-allocated memory regions:");
                                     for allocated_mr_id in tool_allocated_mrs {
                                         let allocated_mr: &SysMemoryRegion =
-                                            &memory_regions[allocated_mr_id];
+                                            &memory_regions_for_core[allocated_mr_id];
                                         eprintln!(
                                             "name = '{}', paddr = 0x{:0>12x}, size = 0x{:0>12x}",
                                             allocated_mr.name,
@@ -1052,17 +1058,11 @@ fn main() -> Result<(), String> {
                 &kernel_p_v_offset_by_core,
                 &capdl_initialisers_by_core,
                 &full_system_state
-                    .clone()
-                    .unwrap()
                     .per_core_ram_regions
                     .values()
                     .map(|disjoint_mem| &disjoint_mem.regions[..])
                     .collect::<Vec<_>>()[..],
-                &full_system_state
-                    .clone()
-                    .unwrap()
-                    .shared_memory_phys_regions
-                    .regions[..],
+                &full_system_state.shared_memory_phys_regions.regions[..],
             );
 
             match image_output_type {

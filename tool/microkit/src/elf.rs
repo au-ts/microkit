@@ -406,7 +406,9 @@ impl ElfFile {
         for seg in &mut self.segments {
             if vaddr >= seg.virt_addr && vaddr + size <= seg.virt_addr + seg.mem_size() {
                 let offset = (vaddr - seg.virt_addr) as usize;
-                assert!(data.len() as u64 <= size);
+                if data.len() as u64 > size {
+                    return Err(format!("symbol {variable_name} has size {size} which is less than setvar data size {}", data.len()));
+                }
                 seg.data_mut()[offset..offset + data.len()].copy_from_slice(data);
                 return Ok(());
             }

@@ -28,7 +28,7 @@ use crate::{
     },
     elf::ElfFile,
     sdf::{
-        ChannelEnd, CpuCore, ProtectionDomain, SysIrq, SysIrqKind, SysMap, SysMapPerms,
+        Channel, ChannelEnd, CpuCore, ProtectionDomain, SysIrq, SysIrqKind, SysMap, SysMapPerms,
         SysMemoryRegion, SystemDescription, BUDGET_DEFAULT, MONITOR_PD_NAME, MONITOR_PRIORITY,
     },
     sel4::{Arch, ArmRiscvIrqTrigger, Config, FullSystemState, PageSize},
@@ -396,7 +396,7 @@ pub fn build_capdl_spec(
     kernel_config: &Config,
     elfs: &BTreeMap<String, ElfFile>,
     core_protection_domains: &BTreeMap<String, ProtectionDomain>,
-    memory_regions: &Vec<SysMemoryRegion>,
+    memory_regions: &[SysMemoryRegion],
     system: &SystemDescription,
     full_system_state: &FullSystemState,
     cpu_id: u8,
