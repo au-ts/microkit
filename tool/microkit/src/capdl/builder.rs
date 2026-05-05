@@ -7,8 +7,8 @@ use core::ops::Range;
 
 use std::{
     cmp::{min, Ordering},
+    collections::BTreeMap,
     collections::HashMap,
-    collections:: BTreeMap,
 };
 
 use sel4_capdl_initializer_types::{
@@ -18,19 +18,20 @@ use sel4_capdl_initializer_types::{
 
 use crate::{
     capdl::{
-        irq::{create_irq_handler_cap, create_irq_handler_cap_no_ntfn,
-            capdl_util_make_sgi_signal_obj, make_irq_sgi_signal_cap},
+        irq::{
+            capdl_util_make_sgi_signal_obj, create_irq_handler_cap, create_irq_handler_cap_no_ntfn,
+            make_irq_sgi_signal_cap,
+        },
         memory::{create_vspace, create_vspace_ept, map_page},
         spec::{capdl_obj_physical_size_bits, ElfContent},
         util::*,
     },
     elf::ElfFile,
     sdf::{
-        CpuCore, SysMap, SysMapPerms, SystemDescription, BUDGET_DEFAULT, MONITOR_PD_NAME,
-        MONITOR_PRIORITY, SysMemoryRegion, SysMemoryRegionKind, ChannelEnd, SysIrq,
-        SysIrqKind, ProtectionDomain, Channel
+        ChannelEnd, CpuCore, ProtectionDomain, SysIrq, SysIrqKind, SysMap, SysMapPerms,
+        SysMemoryRegion, SystemDescription, BUDGET_DEFAULT, MONITOR_PD_NAME, MONITOR_PRIORITY,
     },
-    sel4::{Arch, Config, PageSize, ArmGicVersion, FullSystemState, ArmRiscvIrqTrigger},
+    sel4::{Arch, ArmRiscvIrqTrigger, Config, FullSystemState, PageSize},
     util::{ranges_overlap, round_down, round_up},
 };
 
@@ -187,7 +188,8 @@ impl CapDLSpecContainer {
         &mut self,
         sel4_config: &Config,
         pd_name: &str,
-        pd_cpu: CpuCore,
+        // TODO: ???
+        _pd_cpu: CpuCore,
         elf: &ElfFile,
     ) -> Result<ObjectId, String> {
         // We assumes that ELFs and PDs have a one-to-one relationship. So for each ELF we create a VSpace.
@@ -412,12 +414,7 @@ pub fn build_capdl_spec(
         // @kwinter: Ditto, hardcoding monitor is probably a bad idea
         let monitor_elf = elfs.get("monitor").unwrap();
         spec_container
-            .add_elf_to_spec(
-                kernel_config,
-                MONITOR_PD_NAME,
-                CpuCore(0),
-                monitor_elf,
-            )
+            .add_elf_to_spec(kernel_config, MONITOR_PD_NAME, CpuCore(0), monitor_elf)
             .unwrap()
     };
 
@@ -690,7 +687,9 @@ pub fn build_capdl_spec(
                 capdl_util_make_endpoint_cap(*parent_ep_obj_id, true, true, true, badge);
 
             // Allow the parent PD to access the child's TCB:
-            let parent_cspace_obj_id = pd_name_to_cspace_id.get(&pd.parent.clone().unwrap()).unwrap();
+            let parent_cspace_obj_id = pd_name_to_cspace_id
+                .get(&pd.parent.clone().unwrap())
+                .unwrap();
             capdl_util_insert_cap_into_cspace(
                 &mut spec_container,
                 *parent_cspace_obj_id,
@@ -1036,38 +1035,46 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 4. Create channels
     // ********************************
-    
+
     // Seperate the channels into same-core and cross-core channels
-    
-    let (same_core_channels, cross_core_channels) : (Vec<_>, Vec<_>) =
+
+    let (same_core_channels, cross_core_channels): (Vec<_>, Vec<_>) =
         system.channels.iter().partition(|channel| {
             // If both the channels end points are within the protection domain
             // list supplied for this core, then partition into same_core channels,
             // otherwise into cross_core
             core_protection_domains.contains_key(&channel.end_a.pd)
-            && core_protection_domains.contains_key(&channel.end_b.pd)
+                && core_protection_domains.contains_key(&channel.end_b.pd)
         });
 
     // Constructs maps for channels where this core is the receiver, and for
     // when this core is the sender
 
-    let cross_core_sender_channels: Vec<_> =
-        cross_core_channels
+    let cross_core_sender_channels: Vec<_> = cross_core_channels
         .iter()
-        .flat_map(|channel| [(&channel.end_a, &channel.end_b), (&channel.end_b, &channel.end_a)])
+        .flat_map(|channel| {
+            [
+                (&channel.end_a, &channel.end_b),
+                (&channel.end_b, &channel.end_a),
+            ]
+        })
         .filter(|(send, _)| core_protection_domains.contains_key(&send.pd) && send.notify)
         .collect();
 
-    let cross_core_recv_channels: Vec<_> =
-        cross_core_channels
+    let cross_core_recv_channels: Vec<_> = cross_core_channels
         .iter()
-        .flat_map(|channel| [(&channel.end_a, &channel.end_b), (&channel.end_b, &channel.end_a)])
+        .flat_map(|channel| {
+            [
+                (&channel.end_a, &channel.end_b),
+                (&channel.end_b, &channel.end_a),
+            ]
+        })
         .filter(|(send, recv)| core_protection_domains.contains_key(&recv.pd) && send.notify)
-        .map(|(send,recv)| (send.clone(), recv.clone()))
+        .map(|(send, recv)| (send.clone(), recv.clone()))
         .collect();
 
     // Construct the list of SGI's that we need to allocate for the receiver
-    
+
     for (_, recv) in cross_core_recv_channels.iter() {
         let sgi_irq = *full_system_state
             .sgi_irq_numbers
@@ -1077,7 +1084,10 @@ pub fn build_capdl_spec(
         let recv_irq = SysIrq {
             id: recv.id,
             // ARM GIC Spec: §4.4 Software Generated Interrupts
-            kind: SysIrqKind::Conventional { irq: sgi_irq, trigger: ArmRiscvIrqTrigger::Edge },
+            kind: SysIrqKind::Conventional {
+                irq: sgi_irq,
+                trigger: ArmRiscvIrqTrigger::Edge,
+            },
         };
 
         let recv_ntfn_obj_id = *pd_name_to_ntfn_id.get(&recv.pd).unwrap();
@@ -1096,13 +1106,12 @@ pub fn build_capdl_spec(
         // channel ids and irq ids? This should be covered in sdf.rs but double check
         let irq_cap_idx = PD_BASE_IRQ_CAP + recv_irq.id;
         capdl_util_insert_cap_into_cspace(
-                &mut spec_container,
-                recv_cspace_id,
-                irq_cap_idx as u32,
-                irq_handle_cap,
-            );
+            &mut spec_container,
+            recv_cspace_id,
+            irq_cap_idx as u32,
+            irq_handle_cap,
+        );
     }
-
 
     for &(send, recv) in cross_core_sender_channels.iter() {
         let recv_pd = &system.protection_domains[&recv.pd];
@@ -1121,16 +1130,16 @@ pub fn build_capdl_spec(
             &mut spec_container,
             recv_irq_number,
             recv_pd.cpu.0 as u64,
-            );
+        );
 
         let sgi_signal_cap = make_irq_sgi_signal_cap(sgi_signal_obj_id);
 
         capdl_util_insert_cap_into_cspace(
-                &mut spec_container,
-                send_cspace_id,
-                send_cap_idx as u32,
-                sgi_signal_cap,
-            );
+            &mut spec_container,
+            send_cspace_id,
+            send_cap_idx as u32,
+            sgi_signal_cap,
+        );
     }
 
     for channel in same_core_channels {
@@ -1193,7 +1202,6 @@ pub fn build_capdl_spec(
         }
     }
 
-
     // *********************************
     // Step 5. Final IRQ handling
     // *********************************
@@ -1215,8 +1223,11 @@ pub fn build_capdl_spec(
                 // interrupt and affinity. The other core's kernel will need
                 // to create another irq handler and bind a notification to receive
                 // the interrupts.
-                println!("Creating an irq handler for irq {} on core {}", irq.id, cpu_id);
-                let irq_handle_cap = create_irq_handler_cap_no_ntfn(
+                println!(
+                    "Creating an irq handler for irq {} on core {}",
+                    irq.id, cpu_id
+                );
+                let _irq_handle_cap = create_irq_handler_cap_no_ntfn(
                     &mut spec_container,
                     kernel_config,
                     &other_core_pd.name,

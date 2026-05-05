@@ -3,19 +3,20 @@
 //
 // SPDX-License-Identifier: BSD-2-Clause
 //
-use crate::elf::{ElfFile, ElfSegmentData};
-use crate::sel4::{Arch, Config, seL4_KernelBootInfo, seL4_KernelBoot_KernelRegion, seL4_KernelBoot_RamRegion,
-    seL4_KernelBoot_RootTaskRegion, seL4_KernelBoot_ReservedRegion, SEL4_KERNEL_BOOT_INFO_MAGIC, SEL4_KERNEL_BOOT_INFO_VERSION_0};
-use crate::uimage::uimage_serialise;
 use crate::capdl::initialiser::CapDLInitialiser;
-use crate::util::{mask, mb, round_up, struct_to_bytes};
+use crate::elf::ElfFile;
+use crate::sel4::{
+    seL4_KernelBootInfo, seL4_KernelBoot_KernelRegion, seL4_KernelBoot_RamRegion,
+    seL4_KernelBoot_ReservedRegion, seL4_KernelBoot_RootTaskRegion, Arch, Config,
+    SEL4_KERNEL_BOOT_INFO_MAGIC, SEL4_KERNEL_BOOT_INFO_VERSION_0,
+};
+use crate::util::{mask, struct_to_bytes};
+use crate::MemoryRegion;
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::ops::Range;
-use std::path::Path;
 use std::iter::zip;
 use std::mem;
-use crate::MemoryRegion;
+use std::path::Path;
 
 const PAGE_TABLE_SIZE: usize = 4096;
 
@@ -225,8 +226,9 @@ impl<'a> Loader<'a> {
 
             for segment in initial_task_segments.iter() {
                 if segment.mem_size() > 0 {
-                    let segment_paddr =
-                        capdl_initialisers[multikernel_idx].phys_base.unwrap() + (segment.virt_addr - capdl_initialisers[multikernel_idx].image_bound().start);
+                    let segment_paddr = capdl_initialisers[multikernel_idx].phys_base.unwrap()
+                        + (segment.virt_addr
+                            - capdl_initialisers[multikernel_idx].image_bound().start);
                     core_init_task_regions.push((segment_paddr, segment.data()));
                 }
             }
@@ -285,13 +287,14 @@ impl<'a> Loader<'a> {
                 assert!(var_size == var_data.len() as u64);
                 assert!(offset > 0);
                 assert!(offset <= loader_image.len() as u64);
-                loader_image[offset as usize..(offset + var_size) as usize].copy_from_slice(var_data);
+                loader_image[offset as usize..(offset + var_size) as usize]
+                    .copy_from_slice(var_data);
             }
         }
 
         // Combine all the init task, kernel and system regions
-        let mut all_regions: Vec<(u64, &[u8], String)> = Vec::with_capacity(
-            inittask_num_regions + kernel_regions.len());
+        let mut all_regions: Vec<(u64, &[u8], String)> =
+            Vec::with_capacity(inittask_num_regions + kernel_regions.len());
 
         // First, add the kernel regions
         for (kernel_idx, region) in kernel_regions.iter().enumerate() {
@@ -302,13 +305,17 @@ impl<'a> Loader<'a> {
         for idx in 0..num_multikernels {
             let core_init_task_regions = &inittask_regions[idx];
             for (region_idx, region) in core_init_task_regions.iter().enumerate() {
-                all_regions.push((region.0, region.1, format!("loader {idx} region {region_idx}")));
+                all_regions.push((
+                    region.0,
+                    region.1,
+                    format!("loader {idx} region {region_idx}"),
+                ));
             }
         }
 
         // This clone isn't too bad as it is just a Vec<(u64, &[u8])>
         let mut all_regions_with_loader = all_regions.clone();
-        all_regions_with_loader.push((image_vaddr, &loader_image, format!{"altloader"}));
+        all_regions_with_loader.push((image_vaddr, &loader_image, format! {"altloader"}));
         check_non_overlapping(&all_regions_with_loader);
 
         let mut region_metadata = Vec::new();
@@ -341,7 +348,9 @@ impl<'a> Loader<'a> {
         // @kwinter: The following code hasn't been vetted. And address TODO's
         let mut kernel_bootinfos = Vec::new();
         for (&raw_ram_regions, (kernel_first_paddr, core_init_task)) in zip(
-            per_core_ram_regions, zip(kernel_first_paddrs, capdl_initialisers)) {
+            per_core_ram_regions,
+            zip(kernel_first_paddrs, capdl_initialisers),
+        ) {
             let kernel_regions = vec![seL4_KernelBoot_KernelRegion {
                 base: kernel_first_paddr,
                 // TODO
@@ -357,7 +366,8 @@ impl<'a> Loader<'a> {
 
             let init_task_phy_base = core_init_task.phys_base.unwrap();
 
-            let init_task_size = core_init_task.image_bound().end - core_init_task.image_bound().start;
+            let init_task_size =
+                core_init_task.image_bound().end - core_init_task.image_bound().start;
 
             let root_task_regions = vec![
                 // TODO: remove pv_offset
@@ -568,6 +578,8 @@ impl<'a> Loader<'a> {
     //     loader_elf
     // }
 
+    // TEMP
+    #[allow(unused_variables)]
     pub fn write_elf(&self, path: &Path) {
         // let loader_elf = self.convert_to_elf(path);
 
@@ -578,6 +590,8 @@ impl<'a> Loader<'a> {
         panic!("We are only building a binary image for now!\n");
     }
 
+    // TEMP
+    #[allow(unused_variables)]
     pub fn write_uimage(&self, path: &Path) {
         // let executable_payload = self.to_bytes();
         // let entry_32: u32 = match <u64 as TryInto<u32>>::try_into(self.entry) {

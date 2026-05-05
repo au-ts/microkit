@@ -192,9 +192,6 @@ pub fn capdl_util_make_sgi_signal_obj(
     spec_container.add_root_object(sgi_signal_obj)
 }
 
-
 pub fn make_irq_sgi_signal_cap(irq_obj_id: ObjectId) -> Cap {
-    Cap::SGISignal(cap::SGISignal {
-        object: irq_obj_id,
-    })
+    Cap::SGISignal(cap::SGISignal { object: irq_obj_id })
 }

@@ -21,10 +21,10 @@ use crate::sel4::{
 };
 use crate::util::{ranges_overlap, str_to_bool};
 use crate::MAX_PDS;
-use std::collections::HashSet;
-use std::collections::HashMap;
-use std::collections::BTreeSet;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
 
@@ -1077,13 +1077,8 @@ impl ProtectionDomain {
                     checked_add_setvar(&mut setvars, setvar, xml_sdf, &child)?;
                 }
                 "protection_domain" => {
-                    let child_pd = ProtectionDomain::from_xml(
-                            config,
-                            xml_sdf,
-                            &child,
-                            true,
-                            domain_schedule
-                        )?;
+                    let child_pd =
+                        ProtectionDomain::from_xml(config, xml_sdf, &child, true, domain_schedule)?;
 
                     if let Some(setvar_id) = &child_pd.setvar_id {
                         let setvar = SysSetVar {
@@ -1739,10 +1734,7 @@ fn pd_tree_to_list(
         // The parent PD's index is set for each child. We then pass the index relative to the *total*
         // list to any nested children so their parent index can be set to the position of this child.
         child_pd.parent = Some(pd.name.clone());
-        new_child_pds.extend(pd_tree_to_list(
-            xml_sdf,
-            child_pd,
-        )?);
+        new_child_pds.extend(pd_tree_to_list(xml_sdf, child_pd)?);
     }
 
     let mut all = vec![pd];
@@ -1819,13 +1811,13 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
 
         let child_name = child.tag_name().name();
         match child_name {
-            "protection_domain" => {
-                root_pds.push(ProtectionDomain::from_xml(config,
-                    &xml_sdf,
-                    &child,
-                    false,
-                    &domain_schedule)?)
-            }
+            "protection_domain" => root_pds.push(ProtectionDomain::from_xml(
+                config,
+                &xml_sdf,
+                &child,
+                false,
+                &domain_schedule,
+            )?),
             "channel" => channel_nodes.push(child),
             "memory_region" => mrs.push(SysMemoryRegion::from_xml(config, &xml_sdf, &child)?),
             "virtual_machine" => {
@@ -1852,7 +1844,7 @@ pub fn parse(filename: &str, xml: &str, config: &Config) -> Result<SystemDescrip
         }
     }
 
-    let mut pds = pd_flatten(&xml_sdf, root_pds)?;
+    let pds = pd_flatten(&xml_sdf, root_pds)?;
 
     for node in channel_nodes {
         let ch = Channel::from_xml(&xml_sdf, &node, &pds)?;

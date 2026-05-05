@@ -402,5 +402,4 @@ impl DisjointMemoryRegion {
 
         Ok(new)
     }
-
 }

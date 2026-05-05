@@ -4,11 +4,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
-use std::{cmp::min, collections::HashMap, collections::BTreeMap};
+use std::{cmp::min, collections::BTreeMap, collections::HashMap};
 
 use crate::{
     elf::ElfFile,
-    sdf::{self, SysMemoryRegion, SystemDescription, CpuCore, ChannelEnd, ProtectionDomain},
+    sdf::{self, ChannelEnd, ProtectionDomain, SysMemoryRegion, SystemDescription},
     sel4::{Arch, Config},
     util::{monitor_serialise_names, monitor_serialise_u64_vec},
     MAX_PDS, MAX_VMS, PD_MAX_NAME_LENGTH, VM_MAX_NAME_LENGTH,
@@ -37,10 +37,7 @@ pub fn patch_symbols(
         .collect();
 
     monitor_elf
-        .write_symbol(
-            "pd_names_len",
-            &core_protection_domains.len().to_le_bytes(),
-        )
+        .write_symbol("pd_names_len", &core_protection_domains.len().to_le_bytes())
         .unwrap();
     monitor_elf
         .write_symbol(
@@ -96,7 +93,11 @@ pub fn patch_symbols(
     }
 
     for pd in core_protection_domains.values() {
-        println!("These are the PD elf files: {:?} and this is PD name: {}", pd_elf_files.keys(), pd.name);
+        println!(
+            "These are the PD elf files: {:?} and this is PD name: {}",
+            pd_elf_files.keys(),
+            pd.name
+        );
         let elf_obj = pd_elf_files.get_mut(&pd.name).unwrap();
 
         let name = pd.name.as_bytes();

@@ -27,7 +27,8 @@ pub fn pack_spec_into_initial_task(
         |_| embed_frames,
         |d, buf| {
             buf.copy_from_slice(
-                &system_elfs.get(&d.elf_pd_name).unwrap().segments[d.elf_seg_idx].data()[d.elf_seg_data_range.clone()],
+                &system_elfs.get(&d.elf_pd_name).unwrap().segments[d.elf_seg_idx].data()
+                    [d.elf_seg_data_range.clone()],
             );
             compress_frames
         },

@@ -16,21 +16,18 @@ use microkit_tool::capdl::packaging::pack_spec_into_initial_task;
 use microkit_tool::capdl::CapDLSpecContainer;
 use microkit_tool::elf::ElfFile;
 use microkit_tool::loader::Loader;
-use microkit_tool::report::write_report;
-use microkit_tool::sdf::{parse, SysMemoryRegion, SysMemoryRegionPaddr, CpuCore,
-    ProtectionDomain};
+use microkit_tool::sdf::{parse, CpuCore, ProtectionDomain, SysMemoryRegion, SysMemoryRegionPaddr};
 use microkit_tool::sel4::{
-    emulate_kernel_boot, emulate_kernel_boot_partial, kernel_calculate_virt_image,
-    build_full_system_state, Arch, Config, PlatformConfig, RiscvVirtualMemory,
-    ArmGicVersion
+    build_full_system_state, emulate_kernel_boot, emulate_kernel_boot_partial,
+    kernel_calculate_virt_image, Arch, ArmGicVersion, Config, PlatformConfig, RiscvVirtualMemory,
 };
 use microkit_tool::symbols::patch_symbols;
 use microkit_tool::util::{
     human_size_strict, json_str, json_str_as_bool, json_str_as_u64, round_down, round_up,
 };
 use microkit_tool::{DisjointMemoryRegion, MemoryRegion};
-use std::collections::HashMap;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fs::{self, metadata};
 use std::path::{Path, PathBuf};
 
@@ -39,9 +36,11 @@ const MAX_BUILD_ITERATION: usize = 3;
 // When building for x86, the kernel is copied from the SDK release package to the same
 // directory as the output boot module image, as Multiboot want them as
 // separate images.
+#[allow(dead_code)] // TEMP
 const KERNEL_COPY_FILENAME: &str = "sel4.elf";
 // The `-kernel` argument of 'qemu-system-x86_64' doesn't accept a 64-bit image, so we
 // also copy the 32-bit version that was prepared by build_sdk.py for convenience.
+#[allow(dead_code)] // TEMP
 const KERNEL32_COPY_FILENAME: &str = "sel4_32.elf";
 
 fn get_full_path(path: &Path, search_paths: &Vec<PathBuf>) -> Option<PathBuf> {
@@ -587,7 +586,7 @@ fn main() -> Result<(), String> {
         "Microkit tool has various assumptions about the word size being 64-bits."
     );
 
-    let mut system = match parse(args.system, &xml, &kernel_config) {
+    let system = match parse(args.system, &xml, &kernel_config) {
         Ok(system) => system,
         Err(err) => {
             eprintln!("{err}");
@@ -608,7 +607,8 @@ fn main() -> Result<(), String> {
 
     let mut capdl_initialisers_by_core: Vec<CapDLInitialiser> = Vec::new();
     let mut capdl_specs_by_core: Vec<CapDLSpecContainer> = Vec::new();
-    let mut system_elf_files_by_core: Vec<BTreeMap<String, ElfFile>> = Vec::with_capacity(num_multikernels.try_into().unwrap());
+    let mut system_elf_files_by_core: Vec<BTreeMap<String, ElfFile>> =
+        Vec::with_capacity(num_multikernels.try_into().unwrap());
     let mut kernel_p_v_offset_by_core: Vec<u64> = Vec::new();
 
     let (kernel_elf_maybe, full_system_state) = {
@@ -616,12 +616,13 @@ fn main() -> Result<(), String> {
             Arch::X86_64 => (None, None),
             Arch::Aarch64 | Arch::Riscv64 => {
                 let kernel_elf = ElfFile::from_path(&kernel_elf_path).unwrap();
-                let full_system_state = build_full_system_state(&system, &kernel_config, kernel_calculate_virt_image(&kernel_elf));
+                let full_system_state = build_full_system_state(
+                    &system,
+                    &kernel_config,
+                    kernel_calculate_virt_image(&kernel_elf),
+                );
 
-                (
-                    Some(kernel_elf),
-                    Some(full_system_state),
-                )
+                (Some(kernel_elf), Some(full_system_state))
             }
         }
     };
@@ -636,22 +637,22 @@ fn main() -> Result<(), String> {
         //    we must automatically select a suitable address inside the Microkit tool.
         // 2. Post-spec generation sanity checks at a later point to ensure that there are sufficient memory
         //    to allocate all kernel objects.
-        let (available_memory_maybe, kernel_boot_region_maybe) =
-            match kernel_config.arch {
-                Arch::X86_64 => (None, None),
-                Arch::Aarch64 | Arch::Riscv64 => {
-                    // Now determine how much memory we have aften the kernel boots.
-                    let (available_memory, kernel_boot_region, kernel_p_v_offset) =
-                        emulate_kernel_boot_partial(&kernel_config, &kernel_elf_maybe.clone().unwrap(), &full_system_state.clone().unwrap(), cpu);
+        let (available_memory_maybe, kernel_boot_region_maybe) = match kernel_config.arch {
+            Arch::X86_64 => (None, None),
+            Arch::Aarch64 | Arch::Riscv64 => {
+                // Now determine how much memory we have aften the kernel boots.
+                let (available_memory, kernel_boot_region, kernel_p_v_offset) =
+                    emulate_kernel_boot_partial(
+                        &kernel_config,
+                        &kernel_elf_maybe.clone().unwrap(),
+                        &full_system_state.clone().unwrap(),
+                        cpu,
+                    );
 
-                    kernel_p_v_offset_by_core.push(kernel_p_v_offset);
-                    (
-                        Some(available_memory),
-                        Some(kernel_boot_region),
-                    )
-                }
-            };
-
+                kernel_p_v_offset_by_core.push(kernel_p_v_offset);
+                (Some(available_memory), Some(kernel_boot_region))
+            }
+        };
 
         let monitor_elf = ElfFile::from_path(&monitor_elf_path)?;
 
@@ -697,28 +698,43 @@ fn main() -> Result<(), String> {
         // if there are Memory Regions without a paddr but subject to setvar region_paddr.
         let mut iteration = 0;
         let mut spec_need_refinement = true;
-        let mut system_built = false;
+        #[allow(unused_variables)] // TEMP
+        let system_built = false;
         while spec_need_refinement && iteration < MAX_BUILD_ITERATION {
             spec_need_refinement = false;
 
             let system_state = full_system_state.clone().unwrap();
 
             let mut memory_regions: Vec<SysMemoryRegion> = system_state
-            .sys_memory_regions
-            .clone()
-            .into_iter()
-            .filter(|mr| mr.used_cores.contains(&cpu))
-            .collect();
+                .sys_memory_regions
+                .clone()
+                .into_iter()
+                .filter(|mr| mr.used_cores.contains(&cpu))
+                .collect();
 
             println!("This is multikernel idx: {} and this is sytems elfs: {:?} and this is the core local pds: {:?}", multikernel_idx, system_elfs.keys(), core_local_pds.keys());
 
             // @kwinter: Fix the full system state, don't just unwrap it in here, and also why is Rust forcing a double clone here?
-            let mut spec_container = build_capdl_spec(&kernel_config, &system_elfs, &core_local_pds, &memory_regions, &system, &system_state.clone(), multikernel_idx as u8)?;
+            let mut spec_container = build_capdl_spec(
+                &kernel_config,
+                &system_elfs,
+                &core_local_pds,
+                &memory_regions,
+                &system,
+                &system_state.clone(),
+                multikernel_idx as u8,
+            )?;
 
             // @kwinter: Is this fine to move to after we build the spec? We need the calculated cross core channels
             println!("------------------ Patching symbols -----------------");
             // Patch all the required symbols in the Monitor and PDs according to the Microkit's requirements
-            if let Err(err) = patch_symbols(&kernel_config, &mut system_elfs, &system, &core_local_pds, &spec_container.cross_core_recv_channels.clone().unwrap()) {
+            if let Err(err) = patch_symbols(
+                &kernel_config,
+                &mut system_elfs,
+                &system,
+                &core_local_pds,
+                &spec_container.cross_core_recv_channels.clone().unwrap(),
+            ) {
                 eprintln!("ERROR: {err}");
                 std::process::exit(1);
             }
@@ -752,7 +768,8 @@ fn main() -> Result<(), String> {
 
                     // Determine how much memory the CapDL initialiser needs.
                     let initialiser_vaddr_range = capdl_initialiser.image_bound();
-                    let initial_task_size = initialiser_vaddr_range.end - initialiser_vaddr_range.start;
+                    let initial_task_size =
+                        initialiser_vaddr_range.end - initialiser_vaddr_range.start;
 
                     // Reuse data from the partial kernel boot emulation previously done.
                     // .clone() as we need to mutate this for every iteration.
@@ -770,7 +787,9 @@ fn main() -> Result<(), String> {
                         eprintln!(
                             "ERROR: cannot allocate memory for the initialiser, contiguous physical memory region of size {} not found", human_size_strict(initial_task_size)
                         );
-                        eprintln!("ERROR: physical memory regions the initialiser can be placed at:");
+                        eprintln!(
+                            "ERROR: physical memory regions the initialiser can be placed at:"
+                        );
                         for region in available_memory.regions {
                             eprintln!(
                                 "       [0x{:0>12x}..0x{:0>12x}), size: {}",
@@ -783,7 +802,10 @@ fn main() -> Result<(), String> {
                     }
 
                     let initial_task_phys_base = initial_task_phys_base_maybe.unwrap();
-                    println!("MICROKIT_TOOL| Core {} initial task phys base: {:x}", multikernel_idx, initial_task_phys_base);
+                    println!(
+                        "MICROKIT_TOOL| Core {} initial task phys base: {:x}",
+                        multikernel_idx, initial_task_phys_base
+                    );
                     capdl_initialiser.set_phys_base(initial_task_phys_base);
                     let initial_task_phys_region = MemoryRegion::new(
                         initial_task_phys_base,
@@ -836,7 +858,8 @@ fn main() -> Result<(), String> {
                             for tool_allocate_mr in memory_regions.iter_mut().filter(|mr| {
                                 matches!(mr.phys_addr, SysMemoryRegionPaddr::ToolAllocated(_))
                             }) {
-                                tool_allocate_mr.phys_addr = SysMemoryRegionPaddr::ToolAllocated(None);
+                                tool_allocate_mr.phys_addr =
+                                    SysMemoryRegionPaddr::ToolAllocated(None);
                             }
                             spec_container.expected_allocations = HashMap::new();
                         }
@@ -876,16 +899,15 @@ fn main() -> Result<(), String> {
                                             && mr_end <= region.end
                                     });
                                 if is_normal_mem {
-                                    available_user_memory.remove_region(sdf_paddr, sdf_paddr + mr.size);
+                                    available_user_memory
+                                        .remove_region(sdf_paddr, sdf_paddr + mr.size);
                                 }
                             }
                         }
 
                         let mut tool_allocated_mrs: Vec<usize> = Vec::new();
-                        for (mr_id, tool_allocate_mr) in memory_regions
-                            .iter_mut()
-                            .enumerate()
-                            .filter(|(_, mr)| {
+                        for (mr_id, tool_allocate_mr) in
+                            memory_regions.iter_mut().enumerate().filter(|(_, mr)| {
                                 matches!(mr.phys_addr, SysMemoryRegionPaddr::ToolAllocated(None))
                             })
                         {
@@ -976,7 +998,6 @@ fn main() -> Result<(), String> {
 
     println!("MICROKIT|BUILT SYSTEM FOR ALL CORES, PACKING FINAL IMAGE");
 
-
     // We have built all the specs for our system. Now construct the final image
     let image_out_path = Path::new(args.output);
 
@@ -1037,7 +1058,11 @@ fn main() -> Result<(), String> {
                     .values()
                     .map(|disjoint_mem| &disjoint_mem.regions[..])
                     .collect::<Vec<_>>()[..],
-                &full_system_state.clone().unwrap().shared_memory_phys_regions.regions[..],
+                &full_system_state
+                    .clone()
+                    .unwrap()
+                    .shared_memory_phys_regions
+                    .regions[..],
             );
 
             match image_output_type {
@@ -1050,12 +1075,11 @@ fn main() -> Result<(), String> {
                 "MICROKIT|LOADER: image file size = {}",
                 human_size_strict(metadata(image_out_path).unwrap().len())
             );
-        },
+        }
         _ => {
             panic!("Experimental multikernel work only supports aarch64 and riscv64 for now");
         }
     };
-
 
     println!("MICROKIT TOOL| BUILT SYSTEM");
 
@@ -1065,13 +1089,17 @@ fn main() -> Result<(), String> {
             println!("MICROKIT TOOL| Outputting capdl_json for core {}", spec_idx);
             let capdl_json_core = format!("{capdl_json}_{spec_idx}.json");
             let serialised = serde_json::to_string_pretty(&spec.spec).unwrap();
-            fs::write(&capdl_json_core, &serialised)
-                .unwrap_or_else(|_| panic!("no such file or directory when creating {capdl_json_core}"));
+            fs::write(&capdl_json_core, &serialised).unwrap_or_else(|_| {
+                panic!("no such file or directory when creating {capdl_json_core}")
+            });
+            println!(
+                "was going to make args.report {} but ignored as unimplemented",
+                args.report
+            );
             // write_report(&spec_container, &kernel_config, args.report);
-        // Check where the object ids in the json are greater 
+            // Check where the object ids in the json are greater
         }
     };
-
 
     Ok(())
 }

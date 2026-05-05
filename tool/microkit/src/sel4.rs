@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 use crate::{elf::ElfFile, util, DisjointMemoryRegion, MemoryRegion, UntypedObject};
 
-use crate::sdf::{ChannelEnd, SysMemoryRegion, CpuCore, SystemDescription, SysMemoryRegionPaddr};
+use crate::sdf::{ChannelEnd, CpuCore, SysMemoryRegion, SysMemoryRegionPaddr, SystemDescription};
 
 use std::collections::BTreeMap;
 
@@ -82,10 +82,11 @@ pub struct seL4_KernelBoot_ReservedRegion {
     pub end: u64,
 }
 
-pub const SEL4_KERNEL_BOOT_INFO_MAGIC: u32 = 0x73654c34;  /* "seL4" */
+pub const SEL4_KERNEL_BOOT_INFO_MAGIC: u32 = 0x73654c34; /* "seL4" */
 
-pub const SEL4_KERNEL_BOOT_INFO_VERSION_0: u8 = 0;        /* Version 0 */
+pub const SEL4_KERNEL_BOOT_INFO_VERSION_0: u8 = 0; /* Version 0 */
 
+#[allow(dead_code)] // TMEP
 fn kernel_self_mem(kernel_elf: &ElfFile) -> MemoryRegion {
     let segments = kernel_elf.loadable_segments();
     let base = segments[0].phys_addr;
@@ -97,6 +98,7 @@ fn kernel_self_mem(kernel_elf: &ElfFile) -> MemoryRegion {
     MemoryRegion::new(base, ki_end_p)
 }
 
+#[allow(dead_code)] // TMEP
 fn kernel_boot_mem(kernel_elf: &ElfFile) -> MemoryRegion {
     let segments = kernel_elf.loadable_segments();
     let base = segments[0].phys_addr;
@@ -118,7 +120,6 @@ pub fn kernel_calculate_virt_image(kernel_elf: &ElfFile) -> MemoryRegion {
     let (kernel_last_vaddr, _) = kernel_elf
         .find_symbol("ki_end")
         .expect("Could not find 'ki_end' symbol");
-
 
     MemoryRegion::new(kernel_first_vaddr, kernel_last_vaddr)
 }
@@ -306,7 +307,6 @@ fn kernel_partial_boot(
 
     // println!("init freemem reserved2: {reserved_regions:#x?}");
     // println!("init freemem free: {free_memory:#x?}");
-
 
     // println!("Finished the construction of reserved regions from the available ram!");
 
@@ -636,7 +636,7 @@ pub fn pick_sgi_channels(
 pub fn build_full_system_state(
     system: &SystemDescription,
     kernel_config: &Config,
-    kernel_virt_image: MemoryRegion
+    kernel_virt_image: MemoryRegion,
 ) -> FullSystemState {
     let sgi_irq_numbers = pick_sgi_channels(system, kernel_config);
 
@@ -678,21 +678,25 @@ pub fn build_full_system_state(
             match mr.phys_addr {
                 SysMemoryRegionPaddr::Specified(phys_addr) => {
                     if kernel_config.normal_regions.is_some() {
-                        let in_ram = kernel_config.normal_regions.as_ref().unwrap().iter().fold(false, |acc, reg| {
-                            let in_region = reg.start <= phys_addr && phys_addr < reg.end;
+                        let in_ram = kernel_config.normal_regions.as_ref().unwrap().iter().fold(
+                            false,
+                            |acc, reg| {
+                                let in_region = reg.start <= phys_addr && phys_addr < reg.end;
 
-                            // We could early exit instead of reducing, but this extra
-                            // check is nice to make sure we haven't messed up any of the
-                            // logic.
-                            if acc && in_region {
-                                panic!("INTERNAL: phys_addr is somehow in two memory regions");
-                            }
+                                // We could early exit instead of reducing, but this extra
+                                // check is nice to make sure we haven't messed up any of the
+                                // logic.
+                                if acc && in_region {
+                                    panic!("INTERNAL: phys_addr is somehow in two memory regions");
+                                }
 
-                            in_region
-                        });
+                                in_region
+                            },
+                        );
 
                         if in_ram {
-                            shared_memory_phys_regions.insert_region(phys_addr, phys_addr + mr.size);
+                            shared_memory_phys_regions
+                                .insert_region(phys_addr, phys_addr + mr.size);
                         } else {
                             // Do nothing to it.
                         }
@@ -712,15 +716,15 @@ pub fn build_full_system_state(
     //        of specified phys regions.
     // @kwinter: We shouldn't be using is_some
     let last_ram_region = if kernel_config.normal_regions.is_some() {
-            kernel_config
+        kernel_config
             .normal_regions
             .as_ref()
             .unwrap()
             .last()
             .expect("kernel should have one memory region")
-        } else {
-            panic!("We shouldn't be calling build state for x86 builds yet!\n");
-        };
+    } else {
+        panic!("We shouldn't be calling build state for x86 builds yet!\n");
+    };
 
     let mut shared_phys_addr_prev = last_ram_region.end;
 
