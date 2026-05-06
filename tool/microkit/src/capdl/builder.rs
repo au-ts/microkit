@@ -582,6 +582,16 @@ pub fn build_capdl_spec(
             cnode.receive_all_untypeds,
         );
 
+        // Have a cap at slot 0 pointing to itself
+        let pd_guard_size = kernel_config.cap_address_bits - cnode.size_bits as u64 - PD_ROOT_CAP_BITS as u64;
+        let cnode_cap_self_ref = capdl_util_make_cnode_cap(cnode_obj_id, 0, pd_guard_size.try_into().unwrap());
+        capdl_util_insert_cap_into_cspace(
+            &mut spec_container,
+            cnode_obj_id,
+            0,
+            cnode_cap_self_ref,
+        );
+
         cnodes.insert(&cnode.name, (cnode_obj_id, cnode.size_bits));
     }
 
@@ -1278,15 +1288,6 @@ pub fn build_capdl_spec(
                     println!("Cnode size bits: {}", size_bits);
                     let pd_guard_size = kernel_config.cap_address_bits - *size_bits as u64 - PD_ROOT_CAP_BITS as u64;
                     let cnode_cap = capdl_util_make_cnode_cap(*cnode_obj_id, 0, pd_guard_size.try_into().unwrap());
-
-                    // Have a cap at slot 0 pointing to itself
-                    let cnode_cap_self_ref = capdl_util_make_cnode_cap(*cnode_obj_id, 0, pd_guard_size.try_into().unwrap());
-                    capdl_util_insert_cap_into_cspace(
-                        &mut spec_container,
-                        *cnode_obj_id,
-                        0,
-                        cnode_cap_self_ref,
-                    );
 
                     // Map this into the destination pd's cspace and the specified slot.
                     capdl_util_insert_cap_into_cspace(
