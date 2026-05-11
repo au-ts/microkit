@@ -92,14 +92,22 @@ const PD_BASE_OUTPUT_NOTIFICATION_CAP: u64 = 10;
 const PD_BASE_OUTPUT_ENDPOINT_CAP: u64 = PD_BASE_OUTPUT_NOTIFICATION_CAP + 64;
 const PD_BASE_IRQ_CAP: u64 = PD_BASE_OUTPUT_ENDPOINT_CAP + 64;
 const PD_BASE_PD_TCB_CAP: u64 = PD_BASE_IRQ_CAP + 64;
-const PD_BASE_VM_TCB_CAP: u64 = PD_BASE_PD_TCB_CAP + 64;
-const PD_BASE_VCPU_CAP: u64 = PD_BASE_VM_TCB_CAP + 64;
-const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
-const BASE_FRAME_CAP: u64 = PD_BASE_IOPORT_CAP + 64;
-pub const PD_CAP_SIZE: u32 = 512;
+
+
+pub const PD_CAP_SIZE: u32 = 4096;
 const PD_CAP_BITS: u8 = PD_CAP_SIZE.ilog2() as u8;
 const PD_SCHEDCONTEXT_EXTRA_SIZE: u64 = 256;
 const PD_SCHEDCONTEXT_EXTRA_SIZE_BITS: u64 = PD_SCHEDCONTEXT_EXTRA_SIZE.ilog2() as u64;
+// const PD_BASE_VM_TCB_CAP: u64 = PD_BASE_PD_TCB_CAP + 64;
+// const PD_BASE_VCPU_CAP: u64 = PD_BASE_VM_TCB_CAP + 64;
+// const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
+// const BASE_FRAME_CAP: u64 = PD_BASE_IOPORT_CAP + 64;
+const PD_BASE_PD_VSPACE_CAP: u64 = PD_BASE_PD_TCB_CAP + 64;
+const PD_BASE_VM_TCB_CAP: u64 = PD_BASE_PD_VSPACE_CAP + 64;
+const PD_BASE_VCPU_CAP: u64 = PD_BASE_VM_TCB_CAP + 64;
+const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
+const BASE_FRAME_CAP: u64 = PD_BASE_IOPORT_CAP + 64;
+
 
 pub const SLOT_BITS: u64 = 5;
 pub const SLOT_SIZE: u64 = 1 << SLOT_BITS;
@@ -720,6 +728,21 @@ pub fn build_capdl_spec(
                     cur_stack_vaddr,
                 )
                 .unwrap();
+                cur_stack_vaddr += PageSize::Small as u64;
+            }
+        } else {
+            let num_stack_frames = pd.stack_size / PageSize::Small as u64;
+            for stack_frame_seq in 0..num_stack_frames {
+                create_page_structure_recursive(
+                        top_pt_level_number(kernel_config), 
+                        kernel_config, 
+                        cur_stack_vaddr,
+                        PageSize::Small as u64,
+                        &mut spec_container,
+                        &pd.name,
+                        pd_vspace_obj_id,
+                        pd_vspace_obj_id
+                    );
                 cur_stack_vaddr += PageSize::Small as u64;
             }
         }
@@ -1356,6 +1379,15 @@ pub fn build_capdl_spec(
                 pd_b_ep_cap_idx as u32,
                 pd_b_ep_cap,
             );
+        }
+
+        if let Some((mm_idx, mm_pd)) = system.protection_domains.iter().enumerate().find(|p| p.1.name.eq("memory_manager")) {
+            if channel.end_b.pd == mm_idx {
+                elfs[channel.end_a.pd as usize].write_symbol("memory_manager_ep", &channel.end_a.id.to_ne_bytes());
+            }
+            if (channel.end_a.pd == mm_idx) {
+                elfs[channel.end_b.pd as usize].write_symbol("memory_manager_ep", &channel.end_b.id.to_ne_bytes());
+            }
         }
     }
 

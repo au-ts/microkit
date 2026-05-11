@@ -520,3 +520,8 @@ static inline int microkit_arm_page_map_rw(unsigned long frame_cap, unsigned lon
 static inline int microkit_arm_page_unmap(unsigned long frame_cap) {
     return seL4_ARM_Page_Unmap(frame_cap);
 }
+
+static void finished_vm_fault() {
+    seL4_MessageInfo_t reply_tag = seL4_MessageInfo_new(0, 0, 0, 0);
+    seL4_Send(4, reply_tag);
+};

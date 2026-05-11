@@ -1326,7 +1326,7 @@ impl SysMemoryRegion {
         check_attributes(
             xml_sdf,
             node,
-            &["name", "size", "page_size", "phys_addr", "prefill_path"],
+            &["name", "size", "page_size", "phys_addr", "prefill_path", "backed"],
         )?;
 
         let name = checked_lookup(xml_sdf, node, "name")?;
