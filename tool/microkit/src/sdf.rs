@@ -210,6 +210,16 @@ impl SysIrq {
             SysIrqKind::MSI { vector, .. } => vector,
         }
     }
+
+    pub fn is_sgi(&self, arch: Arch) -> bool {
+        match (arch, &self.kind) {
+            /* SGI/PPIs are <=32 */
+            (Arch::Aarch64, SysIrqKind::Conventional { irq, .. }) => *irq <= 32,
+            (Arch::Aarch64, _) => false,
+            (Arch::Riscv64, _) => todo!(),
+            (Arch::X86_64, _) => todo!(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
