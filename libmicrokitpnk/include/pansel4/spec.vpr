@@ -1,0 +1,63 @@
+//
+// Copyright 2026, UNSW
+//
+// SPDX-License-Identifier: BSD-2-Clause
+//
+
+///////////////////////////////////////////////////////////////////////////////
+// panseL4: MessageInfo type                                                 //
+///////////////////////////////////////////////////////////////////////////////
+// The following definitions let us state that a given integer is a valid
+// MessageInfo_t value, without having to directly interact with the bitfield
+// generation in the seL4 kernel code.
+
+domain AbsMsgInfo {
+  function IsAbsMsgInfo(x: Int): Bool
+  function label_of(x: Int): Int
+  function capsUnwrapped_of(x: Int): Int 
+  function extraCaps_of(x: Int): Int
+  function length_of(x: Int): Int
+
+  axiom bounded64_AbsMsgInfo {
+    forall m: Int ::
+      { IsAbsMsgInfo(m) }
+      IsAbsMsgInfo(m) ==> bounded64(m)
+  }
+
+  axiom label_of_AbsMsgInfo {
+    forall m: Int ::
+      { label_of(m), IsAbsMsgInfo(m) }
+      IsAbsMsgInfo(m) ==> (0 <= label_of(m) && label_of(m) < 4503599627370496)
+  }
+
+  axiom capsUnwrapped_of_AbsMsgInfo {
+    forall m: Int ::
+      { capsUnwrapped_of(m), IsAbsMsgInfo(m) }
+      IsAbsMsgInfo(m) ==> (0 <= capsUnwrapped_of(m) && capsUnwrapped_of(m) < 8)
+  }
+
+  axiom extraCaps_of_AbsMsgInfo {
+    forall m: Int ::
+      { extraCaps_of(m), IsAbsMsgInfo(m) }
+      IsAbsMsgInfo(m) ==> (0 <= extraCaps_of(m) && extraCaps_of(m) < 4)
+  }
+
+  axiom length_of_AbsMsgInfo {
+    forall m: Int ::
+      { length_of(m), IsAbsMsgInfo(m) }
+      IsAbsMsgInfo(m) ==> (0 <= length_of(m) && length_of(m) < 128)
+  }
+
+  function AbsMsgInfo_IRQAckIRQ(): Int
+
+  axiom AbsMsgInfo_IRQAckIRQ_AbsMsgInfo {
+    IsAbsMsgInfo(AbsMsgInfo_IRQAckIRQ())
+  }
+}
+
+define f_IsAbsMsgInfo(heap, gv, m) (IsAbsMsgInfo(m))
+define f_label_of(heap, gv, m) (label_of(m))
+define f_capsUnwrapped_of(heap, gv, m) (capsUnwrapped_of(m))
+define f_extraCaps_of(heap, gv, m) (extraCaps_of(m))
+define f_length_of(heap, gv, m) (length_of(m))
+define f_AbsMsgInfo_IRQAckIRQ(heap, gv) (AbsMsgInfo_IRQAckIRQ())

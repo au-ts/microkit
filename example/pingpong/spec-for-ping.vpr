@@ -1,0 +1,439 @@
+//
+// Copyright 2026, UNSW
+//
+// SPDX-License-Identifier: BSD-2-Clause
+//
+
+///////////////////////////////////////////////////////////////////////////////
+// user: the uesr ghost state                                                //
+///////////////////////////////////////////////////////////////////////////////
+
+field has_the_ball: Int
+field ping_count: Int
+
+define user_acc_ghost_state(state)
+(
+  acc(state.has_the_ball) &&
+  acc(state.ping_count)
+)
+
+define f_user_acc_ghost_state(heap, gv, state)
+  (user_acc_ghost_state(state))
+
+///////////////////////////////////////////////////////////////////////////////
+// user: guarantees                                                          //
+///////////////////////////////////////////////////////////////////////////////
+// Guarantees provided by the PD on externally visible events. A guarantee
+// states that the PD will not emit a specific kind of Microkit event, unless
+// the corresponding guarantee holds for the PD's current ghost state. Locally
+// these become proof obligations that the user/verifier must show to hold
+// whenever the corresponding event takes place.
+
+define user_guarantee_microkit_notify(ch, state)
+(
+    // Checked to hold whenever this PD triggers a `microkit_notify(ch)` event.
+    state.has_the_ball == 1
+)
+
+define user_guarantee_microkit_irq_ack(ch, state)
+(
+    // Checked to hold whenever this PD triggers a `microkit_irq_ack(ch)` event.
+    true
+)
+
+define user_guarantee_microkit_ppcall(ch, msginfo, state)
+(
+    // Checked to hold whenever this PD triggers a
+    // `microkit_ppcall(ch,msginfo)` event.
+    true
+)
+
+define user_guarantee_Recv(state)
+(
+    // Checked to hold whenever this PD triggers a `Recv` event.
+    state.has_the_ball == 0
+)
+
+define user_guarantee_ReplyRecv(reply_tag, state)
+(
+    // Checked to hold whenever this PD triggers a `ReplyRecv` event. This
+    // happens only when the Microkit handler loop executes after a return
+    // from `protected`.
+    true
+)
+
+define user_guarantee_NBSendRecv(signal_cap, signal_msg, state)
+(
+    // Checked to hold whenever this PD triggers an `NBSendRecv` event. This
+    // happens when a handler loop iteration starts, and the previous iteration
+    // used a `microkit_deferred_notify` or `microkit_deferred_irq_ack` call.
+    true
+)
+
+define user_guarantee_shared_load8(address, state)
+(
+    // Checked to hold whenever this PD triggers a read event to shared memory
+    // on the given address. 
+    true
+)
+
+define user_guarantee_shared_load16(address, state)
+(
+    // Checked to hold whenever this PD triggers a read event to shared memory
+    // on the given address. 
+    true
+)
+
+define user_guarantee_shared_load32(address, state)
+(
+    // Checked to hold whenever this PD triggers a read event to shared memory
+    // on the given address. 
+    true
+)
+
+define user_guarantee_shared_load64(address, state)
+(
+    // Checked to hold whenever this PD triggers a read event to shared memory
+    // on the given address. 
+    true
+)
+
+define user_guarantee_shared_store8(address, value, state)
+(
+    // Checked to hold whenever this PD triggers a write event to shared memory
+    // on the given address. 
+    true
+)
+
+define user_guarantee_shared_store16(address, value, state)
+(
+    // Checked to hold whenever this PD triggers a write event to shared memory
+    // on the given address. 
+    true
+)
+
+define user_guarantee_shared_store32(address, value, state)
+(
+    // Checked to hold whenever this PD triggers a write event to shared memory
+    // on the given address. 
+    true
+)
+
+define user_guarantee_shared_store64(address, value, state)
+(
+    // Checked to hold whenever this PD triggers a write event to shared memory
+    // on the given address. 
+    true
+)
+
+define f_user_guarantee_microkit_notify(heap, gv, ch, state)
+  (user_guarantee_microkit_notify(ch, state))
+
+define f_user_guarantee_microkit_irq_ack(heap, gv, ch, state)
+  (user_guarantee_microkit_irq_ack(ch, state))
+
+define f_user_guarantee_microkit_ppcall(heap, gv, ch, msginfo, state)
+  (user_guarantee_microkit_ppcall(ch, msginfo, state))
+
+define f_user_guarantee_Recv(heap, gv, state)
+  (user_guarantee_Recv(state))
+
+define f_user_guarantee_ReplyRecv(heap, gv, reply_tag, state)
+  (user_guarantee_ReplyRecv(reply_tag, state))
+
+define f_user_guarantee_NBSendRecv(heap, gv, signal_cap, signal_msg, state)
+  (user_guarantee_NBSendRecv(signal_cap, signal_msg, state))
+
+define f_user_guarantee_shared_load8(heap, gv, address, state)
+  (user_guarantee_shared_load8(address, state))
+
+define f_user_guarantee_shared_load16(heap, gv, address, state)
+  (user_guarantee_shared_load16(address, state))
+
+define f_user_guarantee_shared_load32(heap, gv, address, state)
+  (user_guarantee_shared_load32(address, state))
+
+define f_user_guarantee_shared_load64(heap, gv, address, state)
+  (user_guarantee_shared_load64(address, state))
+
+define f_user_guarantee_shared_store8(heap, gv, address, value, state)
+  (user_guarantee_shared_store8(address, value, state))
+
+define f_user_guarantee_shared_store16(heap, gv, address, value, state)
+  (user_guarantee_shared_store16(address, value, state))
+
+define f_user_guarantee_shared_store32(heap, gv, address, value, state)
+  (user_guarantee_shared_store32(address, value, state))
+
+define f_user_guarantee_shared_store64(heap, gv, address, value, state)
+  (user_guarantee_shared_store64(address, value, state))
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: transitions                                                         //
+///////////////////////////////////////////////////////////////////////////////
+
+define user_transition_microkit_notify(ch, state)
+(
+    // Describes the possible state transitions allowed after this PD triggers
+    // a microkit_notify(ch) event
+    (
+        ch == 5 &&
+        state.has_the_ball == 0 &&
+        state.ping_count == old(state.ping_count) + 1
+    )
+    ||
+    (
+        ch != 5 &&
+        state.has_the_ball == old(state.has_the_ball) &&
+        state.ping_count == old(state.ping_count)
+    ) 
+)
+
+define user_transition_microkit_irq_ack(ch, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // triggers a `microkit_irq_ack(ch)` event
+    true
+)
+
+define user_transition_microkit_ppcall(ch, msginfo, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // triggers a `microkit_ppcall(ch,msginfo)` event. The transition occurs
+    // as soon as the event triggers, not when the called protected procedure
+    // actually returns.
+    true
+)
+
+define user_transition_Recv(state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // triggers a `Recv` event. The transition occurs as soon as the event
+    // triggers, not when the kernel provides the response.
+    state.has_the_ball == 1 &&
+    state.ping_count == old(state.ping_count)
+)
+
+define user_transition_ReplyRecv(reply_tag, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // triggers a `ReplyRecv` event. The transition occurs as soon as the event
+    // triggers (the reply is sent), not when the kernel provides the response
+    // to the `Recv`.
+    true
+)
+
+define user_transition_NBSendRecv(signal_cap, signal_msg, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // triggers an `NBSendRecv` event. The transition occurs as soon as the
+    // event triggers (`NBSend`), not when the kernel provides the response
+    // to the `Recv`.
+    true
+)
+
+define user_transition_shared_load8(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // reads from a given shared memory address.
+    true
+)
+
+define user_transition_shared_load16(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // reads from a given shared memory address.
+    true
+)
+
+define user_transition_shared_load32(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // reads from a given shared memory address.
+    true
+)
+
+define user_transition_shared_load64(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // reads from a given shared memory address.
+    true
+)
+
+
+define user_transition_shared_store8(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // writes to a given shared memory address.
+    true
+)
+
+define user_transition_shared_store16(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // writes to a given shared memory address.
+    true
+)
+
+define user_transition_shared_store32(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // writes to a given shared memory address.
+    true
+)
+
+define user_transition_shared_store64(address, value, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // writes to a given shared memory address.
+    true
+)
+
+define f_user_transition_microkit_notify(heap, gv, ch, state)
+  (user_transition_microkit_notify(ch, state))
+
+define f_user_transition_microkit_irq_ack(heap, gv, ch, state)
+  (user_transition_microkit_irq_ack(ch, state))
+
+define f_user_transition_microkit_ppcall(heap, gv, ch, msginfo, state)
+  (user_transition_microkit_ppcall(ch, msginfo, state))
+
+define f_user_transition_Recv(heap, gv, state)
+  (user_transition_Recv(state))
+
+define f_user_transition_ReplyRecv(heap, gv, reply_tag, state)
+  (user_transition_ReplyRecv(reply_tag, state))
+
+define f_user_transition_NBSendRecv(heap, gv, signal_cap, signal_msg, state)
+  (user_transition_NBSendRecv(signal_cap, signal_msg, state))
+
+define f_user_transition_shared_load8(heap, gv, address, value, state)
+  (user_transition_shared_load8(address, value, state))
+
+define f_user_transition_shared_load16(heap, gv, address, value, state)
+  (user_transition_shared_load16(address, value, state))
+
+define f_user_transition_shared_load32(heap, gv, address, value, state)
+  (user_transition_shared_load32(address, value, state))
+
+define f_user_transition_shared_load64(heap, gv, address, value, state)
+  (user_transition_shared_load64(address, value, state))
+
+define f_user_transition_shared_store8(heap, gv, address, value, state)
+  (user_transition_shared_store8(address, value, state))
+
+define f_user_transition_shared_store16(heap, gv, address, value, state)
+  (user_transition_shared_store16(address, value, state))
+
+define f_user_transition_shared_store32(heap, gv, address, value, state)
+  (user_transition_shared_store32(address, value, state))
+
+define f_user_transition_shared_store64(heap, gv, address, value, state)
+  (user_transition_shared_store64(address, value, state))
+
+///////////////////////////////////////////////////////////////////////////////
+// user: rely                                                                //
+///////////////////////////////////////////////////////////////////////////////
+// Assumptions that the PD makes about the environment.
+// These become assumptions in the proof, and unsubstantiated assumptions can
+// lead to unsoundness. Be careful!
+
+define f_user_rely_init(heap, gv, state)
+(
+    // Assumed to hold when entering `uep_init()`.
+    state.has_the_ball == 1 &&
+    state.ping_count == 0
+)
+
+define f_user_rely_receive(heap, gv, pp, pf, ns, state) (
+    // Assumed to hold whenever this PD receives a response on its endpoint.
+    // This happens after a `Recv`, `NBSendRecv` or `ReplyRecv` event, when
+    // the protection domain waits for a response.
+    true
+)
+
+define user_rely_ppcall(response, state)
+(
+    true
+)
+
+define f_user_rely_ppcall(heap, gv, response, state)
+  (user_rely_ppcall(response, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: pre- and postconditions                                             //
+///////////////////////////////////////////////////////////////////////////////
+
+define f_user_local_microkit_notify_pre(heap, gv, ch, state)
+(
+    // Checked to hold every time this PD makes a microkit_notify(ch) call
+    true
+)
+
+define f_user_local_microkit_notify_post(heap, gv, ch, state)
+(
+    // Checked to hold every time a microkit_notify(ch) call returns in this PD
+    true
+)
+
+define f_user_local_microkit_irq_ack_pre(heap, gv, ch, state)
+(
+    // Checked to hold every time this PD makes a `microkit_irq_ack(ch)` call
+    true
+)
+
+define f_user_local_microkit_irq_ack_post(heap, gv, ch, state)
+(
+    // Checked to hold every time a `microkit_irq_ack(ch)` call returns
+    true
+)
+
+define f_user_local_microkit_ppcall_pre(heap, gv, ch, msginfo, state)
+(
+    // Checked to hold every time this PD makes a
+    // `microkit_ppcall(ch, msginfo)` call
+    true
+)
+
+define f_user_local_microkit_ppcall_post(heap, gv, ch, msginfo, response, state)
+(
+    // Checked to hold every time a `microkit_ppcall(ch,msginfo)` call returns.
+    // This is quite useful, as it allows one to tie the user_rely_ppcall
+    // guarantee together with the internal state of the protection domain.
+    true
+)
+
+// NB pre/postconditions are not available for shared_{load/store}XX methods
+// since these are virtual methods without a method body. Hence, postconditions
+// would not be checked, but would introduce assumptions.
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: loop invariants                                                     //
+///////////////////////////////////////////////////////////////////////////////
+// Loop invariants for Microkit's internal loops.
+// The preservation of these invariants becomes a proof obligation that the
+// user/verifier must show.
+
+define f_user_handler_loop_entry(heap,gv,state)
+(
+    gv.microkit_have_signal == 0 &&
+    state.has_the_ball == 0
+)
+
+define f_user_handler_loop_invariant(heap, gv, have_reply, state)
+(
+    have_reply == 0 &&
+    gv.microkit_have_signal == 0 &&
+    state.has_the_ball == 0
+)
+
+define f_user_notified_loop_invariant(heap, gv, channel_index, state)
+(
+    (channel_index <= 5 ==> state.has_the_ball == 1) &&
+    (channel_index > 5 ==> state.has_the_ball == 0)
+)
+

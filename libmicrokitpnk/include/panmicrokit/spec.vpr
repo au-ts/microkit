@@ -1,0 +1,307 @@
+//
+// Copyright 2026, UNSW
+//
+// SPDX-License-Identifier: BSD-2-Clause
+//
+
+///////////////////////////////////////////////////////////////////////////////
+// panmicrokit: the handler loop's ghost state                               //
+///////////////////////////////////////////////////////////////////////////////
+// When a PD is resumed after waiting for an endpoint, it will receive one of
+// the following:
+// 1. a protected procedure call,
+// 2. a fault, or
+// 3. a bunch of notifications.
+// The Microkit ghost state `mkGhost()` lets us express the correctness
+// condition of the main handler loop, which states that
+// 1. If a protected procedure call is received, the `protected(-,-)` entry
+// point will be called.
+// 2. If a fault is received, the corresponding `fault(-)` entry point will
+// be called.
+// 3. If a bunch of notifications is received, `notified(-)` will be called
+// for each channel exactly once.
+// The following functions help us relate the abstract Microkit response with
+// the concrete `response` bitstring returend by the kernel. This is the
+// `mk_oracle_correspondence`.
+
+domain GhostStates {
+  function mkGhost(): Ref
+  function userGhost(): Ref
+}
+field pending_protected_call: Int
+field pending_fault_call: Int
+field pending_notified: Set[Int]
+
+define mk_valid_pending_protected(pp)
+  (pp == -1 || mk_is_protected_source(pp))
+
+define mk_valid_pending_fault(pf)
+  (pf == -1 || mk_is_child(pf))
+
+define mk_valid_pending_notified(ns)
+  (forall ch: Int :: { ch in ns }
+    ch in ns ==> mk_is_notified_source(ch))
+
+define mk_state_wf(pp, pf, ns)
+(
+  mk_valid_pending_protected(pp) &&
+  mk_valid_pending_fault(pf) &&
+  mk_valid_pending_notified(ns) &&
+  (pp != -1 ==> pf == -1 && ns == Set[Int]()) &&
+  (pf != -1 ==> pp == -1 && ns == Set[Int]()) &&
+  (ns != Set[Int]() ==> pp == -1 && pf == -1)
+)
+
+define mk_response_bit_set(response, ch)
+  (builtin_lshr(response,ch) % 2 == 1)
+
+define mk_is_notification_response(response)
+(
+  bounded64(response) &&
+  !mk_response_bit_set(response, 62) &&
+  !mk_response_bit_set(response, 63)
+)
+
+define mk_is_protected_response(response)
+(
+  bounded64(response) &&
+  mk_response_bit_set(response,63) &&
+  !mk_response_bit_set(response,62)
+)
+
+define mk_is_fault_response(response)
+(
+  bounded64(response) &&
+  !mk_response_bit_set(response,63) &&
+  mk_response_bit_set(response,62)
+)
+
+define mk_protected_channel_of_response(response)
+  (response % 64)
+
+define mk_fault_pd_of_response(response)
+  (response % 256)
+
+define mk_oracle_correspondence(response,pp,pf,ns)
+(
+  mk_state_wf(pp,pf,ns) &&
+  (
+    (
+      mk_is_protected_response(response) &&
+      pp == mk_protected_channel_of_response(response) &&
+      pf == -1 &&
+      ns == Set[Int]()
+    )
+    ||
+    (
+      mk_is_fault_response(response) &&
+      pp == -1 &&
+      pf == mk_fault_pd_of_response(response) &&
+      ns == Set[Int]()
+    )
+    ||
+    (
+      mk_is_notification_response(response) &&
+      pp == -1 &&
+      pf == -1 &&
+      ns != Set[Int]() &&
+      (
+        forall ch: Int :: { ch in ns }
+        0 <= ch && ch < 64 ==>
+          (ch in ns <==> mk_response_bit_set(response, ch))
+      )
+    )
+  )
+)
+
+define mk_no_pending_tasks(ctx)
+(
+  // The handler loop is correct if this assertion holds at the end of each
+  // handler loop iteration.
+  acc(ctx.pending_protected_call) &&
+  acc(ctx.pending_fault_call) &&
+  acc(ctx.pending_notified) &&
+  ctx.pending_protected_call == -1 &&
+  ctx.pending_fault_call == -1 &&
+  ctx.pending_notified == Set[Int]()
+)
+
+define f_mkGhost(heap,gv) (mkGhost())
+
+define f_userGhost(heap,gv) (userGhost())
+
+define f_mk_valid_pending_protected(heap,gv,pp)
+  (mk_valid_pending_protected(pp))
+
+define f_mk_valid_pending_fault(heap,gv,pf)
+ (mk_valid_pending_fault(pf))
+
+define f_mk_valid_pending_notified(heap,gv,ns)
+ (mk_valid_pending_notified(ns))
+
+define f_mk_state_wf(heap,gv,pp,pf,ns)
+  (mk_state_wf(pp,pf,ns))
+
+define f_mk_is_notification_response(heap,gv,response)
+  (mk_is_notification_response(response))
+
+define f_mk_is_protected_response(heap,gv,response)
+  (mk_is_protected_response(response))
+
+define f_mk_is_fault_response(heap,gv,response)
+  (mk_is_fault_response(response))
+
+define f_mk_protected_channel_of_response(heap,gv,response)
+  (mk_protected_channel_of_response(response))
+
+define f_mk_fault_pd_of_response(heap,gv,response)
+  (mk_fault_pd_of_response(response))
+
+define f_mk_response_bit_set(heap,gv,response,ch)
+  (mk_response_bit_set(response,ch))
+
+define f_mk_oracle_correspondence(heap,gv,response,pp,pf,ns)
+  (mk_oracle_correspondence(response,pp,pf,ns))
+
+define f_mk_no_pending_tasks(heap,gv,ctx)
+  (mk_no_pending_tasks(ctx))
+
+
+///////////////////////////////////////////////////////////////////////////////
+// panmicrokit: the IRQ badge                                                //
+///////////////////////////////////////////////////////////////////////////////
+// As a workaround for `seL4/issues/1536`, the handler loop acknowledges all
+// mapped IRQs on startup. We need to assert that the `microkit_patched_irqs`
+// variable's value actually corresponds to a bitstring of existing IRQs.
+
+define mk_is_patched_irqs(badge)
+(
+  forall ch: Int ::
+  (0 <= ch && ch < 64) ==>
+  (mk_is_irq_channel(ch) <==> (builtin_lshr(badge, ch) % 2 == 1))
+)
+
+define f_mk_is_patched_irqs(heap,gv,badge)
+  (mk_is_patched_irqs(badge))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// panmicrokit: common entry point pre/postconditions                        //
+///////////////////////////////////////////////////////////////////////////////
+// The user entry points `uep_notified`, `uep_protected`, `uep_fault` are
+// defined in user code, but need to satisfy some common pre/postconditions
+// relating to the handler loop ghost state.
+// We provide self-contained definitions of these here, to make sure that user
+// code does not deal with or modify the handler loop ghost state in unexpected
+// ways.
+
+define mk_notified_preconditions(ch) 
+(
+  user_acc_ghost_state(userGhost()) &&
+  acc(mkGhost().pending_notified) &&
+  ch in mkGhost().pending_notified
+)
+
+define mk_notified_postconditions(ch) 
+(
+  user_acc_ghost_state(userGhost()) &&
+  acc(mkGhost().pending_notified) &&
+  mkGhost().pending_notified == old(mkGhost().pending_notified) setminus Set(ch)
+)
+
+define mk_protected_preconditions(ch) 
+(
+  user_acc_ghost_state(userGhost()) &&
+  acc(mkGhost().pending_protected_call) &&
+  mkGhost().pending_protected_call == ch
+)
+
+define mk_protected_postconditions(ch) 
+(
+  user_acc_ghost_state(userGhost()) &&
+  acc(mkGhost().pending_protected_call) &&
+  mkGhost().pending_protected_call == -1
+)
+
+
+define mk_fault_preconditions(ch) 
+(
+  user_acc_ghost_state(userGhost()) &&
+  acc(mkGhost().pending_fault_call) &&
+  mkGhost().pending_fault_call == ch
+)
+
+define mk_fault_postconditions(ch) 
+(
+  user_acc_ghost_state(userGhost()) &&
+  acc(mkGhost().pending_fault_call) &&
+  mkGhost().pending_fault_call == -1
+)
+
+define f_mk_notified_preconditions(heap,gv,ch)
+  (mk_notified_preconditions(ch))
+
+define f_mk_notified_postconditions(heap,gv,ch)
+  (mk_notified_postconditions(ch))
+
+define f_mk_protected_preconditions(heap,gv,ch)
+  (mk_protected_preconditions(ch))
+
+define f_mk_protected_postconditions(heap,gv,ch)
+  (mk_protected_postconditions(ch))
+
+define f_mk_fault_preconditions(heap,gv,ch)
+  (mk_fault_preconditions(ch))
+
+define f_mk_fault_postconditions(heap,gv,ch)
+  (mk_fault_postconditions(ch))
+
+
+///////////////////////////////////////////////////////////////////////////////
+// panmicrokit: tactics                                                      //
+///////////////////////////////////////////////////////////////////////////////
+// The user can use the following tactics by `inhale`ing them. They preserve
+// soundness and help proofs go through.
+
+define apply_mk_notified_postconditions(ch) 
+(
+  // Inhaling this tactic performs the handler loop state transition, allowing
+  // the user to conclude the common `notified` postcondition.  
+  mkGhost().pending_notified == old(mkGhost().pending_notified) setminus Set(ch)
+)
+
+define apply_mk_protected_postconditions()
+(
+  // Inhaling this tactic performs the handler loop state transition, allowing
+  // the user to conclude the common `protected` postcondition.  
+  mkGhost().pending_protected_call == -1
+)
+
+define apply_mk_fault_postconditions()
+(
+  // Inhaling this tactic performs the handler loop state transition, allowing
+  // the user to conclude the common `fault` postcondition.  
+  mkGhost().pending_fault_call == -1
+)
+
+define apply_set_bv64_lshr_suffix_nonzero(i,n,the_set)
+(
+  // Inhaling this tactic lets one apply the word lemma
+  // `apply_bv64_lshr_suffix_nonzero` to a whole set of values at once.
+  forall m: Int ::
+  { m in the_set }
+  m in the_set ==> apply_bv64_lshr_suffix_nonzero(i, n, m)
+)
+
+define f_apply_mk_notified_postconditions(heap,gv,ch) 
+  (apply_mk_notified_postconditions(ch))
+
+define f_apply_mk_protected_postconditions(heap,gv)
+  (apply_mk_protected_postconditions())
+
+define f_apply_mk_fault_postconditions(heap,gv)
+  (apply_mk_fault_postconditions())
+
+define f_apply_set_bv64_lshr_suffix_nonzero(heap,gv,i,n,the_set)
+  (apply_set_bv64_lshr_suffix_nonzero(i,n,the_set))

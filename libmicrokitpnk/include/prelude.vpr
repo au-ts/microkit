@@ -1,0 +1,265 @@
+//
+// Copyright 2026, UNSW
+//
+// SPDX-License-Identifier: BSD-2-Clause
+//
+
+///////////////////////////////////////////////////////////////////////////////
+// panseL4 / panmicrokit prelude                                             //
+///////////////////////////////////////////////////////////////////////////////
+
+domain IArray  {
+  function slot(a: IArray, i: Int): Ref 
+  function alen(a: IArray): Int 
+  function first(r: Ref): IArray 
+  function second(r: Ref): Int 
+  axiom all_diff {
+    (forall a: IArray, i: Int ::
+      { slot(a, i) }
+      first(slot(a, i)) == a && second(slot(a, i)) == i)
+  }
+  axiom len_nonneg {
+    (forall a: IArray :: { alen(a) } alen(a) >= 0)
+  }
+}
+
+domain BitVectorDomain64 {
+  // We axiomatize bit vector operations directly. This is currently minimal,
+  // containing just enough axioms to let us verify the correctness of the
+  // panmicrokit handler loop.
+
+  function not(a: BitVectorDomain64): BitVectorDomain64
+  function bv64_xor(a: BitVectorDomain64, b: BitVectorDomain64): BitVectorDomain64
+  function bv64_and(a: BitVectorDomain64, b: BitVectorDomain64): BitVectorDomain64
+  function bv64_or(a: BitVectorDomain64, b: BitVectorDomain64): BitVectorDomain64
+  function bv64_shl(a: BitVectorDomain64, b: BitVectorDomain64): BitVectorDomain64
+  function bv64_lshr(a: BitVectorDomain64, b: BitVectorDomain64): BitVectorDomain64
+  function bv64_ashr(a: BitVectorDomain64, b: BitVectorDomain64): BitVectorDomain64
+  function bv64_from_int(i: Int): BitVectorDomain64
+  function bv64_to_int(i: BitVectorDomain64): Int
+
+  function apply_bv64_from_to_bounded(i: Int): Bool
+  axiom bv64_from_to_bounded {
+    forall i: Int :: { apply_bv64_from_to_bounded(i) }
+      (bounded64(i)) ==>
+        bv64_to_int(bv64_from_int(i)) == i
+  }
+
+  function apply_bv64_from_to_id(bv: BitVectorDomain64): Bool
+  axiom bv64_from_to_id {
+    forall bv: BitVectorDomain64 :: { bv64_to_int(bv) }
+      bv64_from_int(bv64_to_int(bv)) == bv
+  }
+
+  function apply_bv64_to_bounded(bv: BitVectorDomain64): Bool
+  axiom bv64_to_bounded {
+    forall bv: BitVectorDomain64 :: { apply_bv64_to_bounded(bv) }
+      bounded64(bv64_to_int(bv))
+  }
+
+  function apply_bv64_and_bool(i: Int, j: Int): Bool
+  axiom bv64_and_bool {
+    forall i: Int, j: Int :: { apply_bv64_and_bool(i, j) }
+      bounded64(i) &&
+      bounded64(j) &&
+      (i == 0 || i == 1) &&
+      (j == 0 || j == 1)
+      ==>
+        bv64_to_int(
+          bv64_and(
+            bv64_from_int(i),
+            bv64_from_int(j)
+          )
+        )
+        ==
+        ((i != 0 && j != 0) ? 1 : 0)
+  }
+
+  function apply_bv64_lshr0_sem(i: Int): Bool
+  axiom bv64_lshr0_sem {
+    forall i: Int :: { apply_bv64_lshr0_sem(i) }
+      bounded64(i) ==>
+        bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(0))) == i
+  }
+
+  function apply_bv64_lshr1_sem(i: Int): Bool
+  axiom bv64_lshr1_sem {
+    forall i: Int :: { apply_bv64_lshr1_sem(i) }
+      bounded64(i) ==>
+        bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(1))) == i / 2
+  }
+
+  function apply_bv64_lshr_closed(i: Int): Bool
+  axiom bv64_lshr_closed {
+    forall i: Int :: { apply_bv64_lshr_closed(i) }
+      bounded64(i) ==>
+        bounded64(bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(1))))
+  }
+
+  function apply_bv64_lshr_compose(i: Int, n: Int, m: Int): Bool
+  axiom bv64_lshr_compose {
+    forall i: Int, n: Int, m: Int ::
+      { apply_bv64_lshr_compose(i, n, m) }
+      bounded64(i) &&
+      0 <= n && n <= 64 &&
+      0 <= m && m <= 64 - n ==>
+        bv64_lshr(bv64_lshr(bv64_from_int(i), bv64_from_int(n)), bv64_from_int(m)) ==
+        bv64_lshr(bv64_from_int(i), bv64_from_int(n + m))
+  }
+
+  function apply_bv64_lshr63_bit(i: Int): Bool
+  axiom bv64_lshr63_bit {
+    forall i: Int :: { apply_bv64_lshr63_bit(i) }
+      bounded64(i) ==>
+        bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(63))) ==
+        (bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(63))) % 2)
+  }
+
+  function apply_bv64_lshr64_zero(i: Int): Bool
+  axiom bv64_lshr64_zero {
+    forall i: Int :: { apply_bv64_lshr64_zero(i) }
+      bounded64(i) ==>
+        bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(64))) == 0
+  }
+
+  function apply_bv64_lshr_suffix_nonzero(i: Int, n: Int, m: Int): Bool
+  axiom bv64_lshr_suffix_nonzero {
+    forall i: Int, n: Int, m: Int ::
+      { apply_bv64_lshr_suffix_nonzero(i, n, m) }
+      bounded64(i) &&
+      0 <= n && n <= m && m < 64 &&
+      bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(m))) % 2 == 1
+      ==>
+      bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(n))) != 0
+  }
+}
+
+define f_apply_bv64_from_to_bounded(heap, gv, i) (apply_bv64_from_to_bounded(i))
+define f_apply_bv64_from_to_id(heap, gv, i) (apply_bv64_from_to_id(i))
+define f_apply_bv64_and_bool(heap, gv, i, j) (apply_bv64_and_bool(i,j))
+define f_apply_bv64_lshr0_sem(heap, gv, i) (apply_bv64_lshr0_sem(i))
+define f_apply_bv64_lshr1_sem(heap, gv, i) (apply_bv64_lshr1_sem(i))
+define f_apply_bv64_lshr_closed(heap, gv, i) (apply_bv64_lshr_closed(i))
+define f_apply_bv64_lshr_compose(heap, gv, i, n, m) (apply_bv64_lshr_compose(i,n,m))
+define f_apply_bv64_lshr63_bit(heap, gv, i) (apply_bv64_lshr63_bit(i))
+define f_apply_bv64_lshr64_zero(heap, gv, i) (apply_bv64_lshr64_zero(i))
+define f_apply_bv64_lshr_suffix_nonzero(heap, gv, i, n, m) (apply_bv64_lshr_suffix_nonzero(i,n,m))
+
+// FIXME: workaround for transpiler issue #15, use instead of `x >>> y` in annotations
+define builtin_lshr(x,y) (bv64_to_int(bv64_lshr(bv64_from_int(x), bv64_from_int(y))))
+define f_builtin_lshr(heap,gv,x,y) (bv64_to_int(bv64_lshr(bv64_from_int(x), bv64_from_int(y))))
+
+field local_mem: Int
+field shared_mem: Int
+
+function bounded8(x: Int): Bool {
+  0 <= x && x < 4 * 64
+}
+
+function bounded16(x: Int): Bool {
+  0 <= x && x < 4 * 16384
+}
+
+function bounded32(x: Int): Bool {
+  0 <= x && x < 4 * 1073741824
+}
+
+function bounded64(x: Int): Bool {
+  0 <= x && x < 4 * 4611686018427387904
+}
+
+function bounded(x: Int): Bool {
+  bounded64(x)
+}
+
+
+method shared_load8(heap: IArray, gv: Ref, address: Int)
+  returns (value: Int)
+  requires mem_readable(address)
+  requires user_acc_ghost_state(userGhost())
+  requires user_guarantee_shared_load8(address, userGhost())
+  ensures bounded8(value)
+  ensures user_acc_ghost_state(userGhost())
+  ensures user_transition_shared_load8(address, value, userGhost())
+
+method shared_load16(heap: IArray, gv: Ref, address: Int)
+  returns (value: Int)
+  requires mem_readable(address)
+  requires mem_readable(address+1)
+  requires user_acc_ghost_state(userGhost())
+  requires user_guarantee_shared_load16(address, userGhost())
+  ensures bounded16(value)
+  ensures user_acc_ghost_state(userGhost())
+  ensures user_transition_shared_load16(address, value, userGhost())
+
+method shared_load32(heap: IArray, gv: Ref, address: Int)
+  returns (value: Int)
+  requires mem_readable(address)
+  requires mem_readable(address+1)
+  requires mem_readable(address+2)
+  requires mem_readable(address+3)
+  requires user_acc_ghost_state(userGhost())
+  requires user_guarantee_shared_load32(address, userGhost())
+  ensures bounded32(value)
+  ensures user_acc_ghost_state(userGhost())
+  ensures user_transition_shared_load32(address, value, userGhost())
+
+method shared_load64(heap: IArray, gv: Ref, address: Int)
+  returns (value: Int)
+  requires mem_readable(address)
+  requires mem_readable(address+1)
+  requires mem_readable(address+2)
+  requires mem_readable(address+3)
+  requires mem_readable(address+4)
+  requires mem_readable(address+5)
+  requires mem_readable(address+6)
+  requires mem_readable(address+7)
+  requires user_acc_ghost_state(userGhost())
+  requires user_guarantee_shared_load64(address, userGhost())
+  ensures bounded64(value)
+  ensures user_acc_ghost_state(userGhost())
+  ensures user_transition_shared_load64(address, value, userGhost())
+
+
+method shared_store8(heap: IArray, gv: Ref, address: Int, value: Int)
+  requires bounded8(value)
+  requires mem_writeable(address)
+  requires user_acc_ghost_state(userGhost())
+  requires user_guarantee_shared_store8(address, value, userGhost())
+  ensures user_acc_ghost_state(userGhost())
+  ensures user_transition_shared_store8(address, value, userGhost())
+
+method shared_store16(heap: IArray, gv: Ref, address: Int, value: Int)
+  requires bounded16(value)
+  requires mem_writeable(address)
+  requires mem_writeable(address+1)
+  requires user_acc_ghost_state(userGhost())
+  requires user_guarantee_shared_store16(address, value, userGhost())
+  ensures user_acc_ghost_state(userGhost())
+  ensures user_transition_shared_store16(address, value, userGhost())
+
+method shared_store32(heap: IArray, gv: Ref, address: Int, value: Int)
+  requires bounded32(value)
+  requires mem_writeable(address)
+  requires mem_writeable(address+1)
+  requires mem_writeable(address+2)
+  requires mem_writeable(address+3)
+  requires user_acc_ghost_state(userGhost())
+  requires user_guarantee_shared_store32(address, value, userGhost())
+  ensures user_acc_ghost_state(userGhost())
+  ensures user_transition_shared_store32(address, value, userGhost())
+
+method shared_store64(heap: IArray, gv: Ref, address: Int, value: Int)
+  requires bounded64(value)
+  requires mem_writeable(address)
+  requires mem_writeable(address+1)
+  requires mem_writeable(address+2)
+  requires mem_writeable(address+3)
+  requires mem_writeable(address+4)
+  requires mem_writeable(address+5)
+  requires mem_writeable(address+6)
+  requires mem_writeable(address+7)
+  requires user_acc_ghost_state(userGhost())
+  requires user_guarantee_shared_store64(address, value, userGhost())
+  ensures user_acc_ghost_state(userGhost())
+  ensures user_transition_shared_store64(address, value, userGhost())

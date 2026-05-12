@@ -1,0 +1,345 @@
+/*
+ * Copyright 2026, UNSW
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+/* TODO: Currently compatible with ARCH=riscv64 only! */
+
+#define LIBSEL4_FFI_OFFSET @base
+// requires 5*@biw space below this offset
+// must be 8-byte aligned
+
+#define panseL4_Bool 1
+
+// TODO: replace with named struct once supported
+#define panseL4_Response {1, 1}
+#define panseL4_Response_tag(x) x.0
+#define panseL4_Response_badge(x) x.1
+
+#define panseL4_Word 1
+#define panseL4_MessageInfo_t 1
+#define panseL4_CPtr 1
+#define panseL4_TCB 1
+
+#define panseL4_Error 1
+#define panseL4_NoError 0
+
+#define panseL4_MsgMaxLength 120
+
+// the following come from the AbsMsgInfo domain in spec.vpr
+/@ extern function IsAbsMsgInfo(x: Int): Bool @/
+/@ extern function label_of(x: Int): Int @/
+/@ extern function capsUnwrapped_of(x: Int): Int @/
+/@ extern function extraCaps_of(x: Int): Int @/
+/@ extern function length_of(x: Int): Int @/
+/@ extern function AbsMsgInfo_IRQAckIRQ(): Int @/
+
+// the following come from the Microkit tool's CapDL export
+/@ extern function pansel4_has_cap(x: Int): Bool @/
+/@ extern function pansel4_has_endpoint_cap(x: Int): Bool @/
+/@ extern function pansel4_has_notification_cap(x: Int): Bool @/
+/@ extern function pansel4_has_reply_cap(x: Int): Bool @/
+/@ extern function pansel4_has_page_table_cap(x: Int): Bool @/
+/@ extern function pansel4_has_irq_handler_cap(x: Int): Bool @/
+/@ extern function pansel4_has_tcb_cap(x: Int): Bool @/
+/@ extern function pansel4_has_vcpu_cap(x: Int): Bool @/
+/@ extern function pansel4_has_ioport_cap(x: Int): Bool @/
+/@ extern function pansel4_has_arm_smc_cap(x: Int): Bool @/
+
+/@ method ffiouter_seL4_MessageInfo_new(c: Int, c2: Int, a: Int, a2: Int)
+   requires acc(heap[LIBSEL4_FFI_OFFSET])
+   requires acc(heap[LIBSEL4_FFI_OFFSET+1])
+   requires acc(heap[LIBSEL4_FFI_OFFSET+2])
+   requires acc(heap[LIBSEL4_FFI_OFFSET+3])
+   requires 0 <= heap[LIBSEL4_FFI_OFFSET] && heap[LIBSEL4_FFI_OFFSET] < 4503599627370496
+   requires 0 <= heap[LIBSEL4_FFI_OFFSET+1] && heap[LIBSEL4_FFI_OFFSET+1] < 8
+   requires 0 <= heap[LIBSEL4_FFI_OFFSET+2] && heap[LIBSEL4_FFI_OFFSET+2] < 4
+   requires 0 <= heap[LIBSEL4_FFI_OFFSET+3] && heap[LIBSEL4_FFI_OFFSET+3] < 128
+   ensures acc(heap[LIBSEL4_FFI_OFFSET])
+   ensures acc(heap[LIBSEL4_FFI_OFFSET+1])
+   ensures acc(heap[LIBSEL4_FFI_OFFSET+2])
+   ensures acc(heap[LIBSEL4_FFI_OFFSET+3])
+   ensures bounded64(heap[LIBSEL4_FFI_OFFSET])
+   ensures IsAbsMsgInfo(heap[LIBSEL4_FFI_OFFSET])
+   ensures label_of(heap[LIBSEL4_FFI_OFFSET]) == old(heap[LIBSEL4_FFI_OFFSET])
+   ensures capsUnwrapped_of(heap[LIBSEL4_FFI_OFFSET]) == old(heap[LIBSEL4_FFI_OFFSET + 1])
+   ensures extraCaps_of(heap[LIBSEL4_FFI_OFFSET]) == old(heap[LIBSEL4_FFI_OFFSET + 2])
+   ensures length_of(heap[LIBSEL4_FFI_OFFSET]) == old(heap[LIBSEL4_FFI_OFFSET + 3])
+@/
+fun panseL4_MessageInfo_t panseL4_MessageInfo_new(1 label, 1 capsUnwrapped, 1 extraCaps, 1 length) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
+    /@ requires 0 <= label && label < 4503599627370496 @/
+    /@ requires 0 <= capsUnwrapped && capsUnwrapped < 8 @/
+    /@ requires 0 <= extraCaps && extraCaps < 4 @/
+    /@ requires 0 <= length && length < 128 @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) && bounded64(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
+    /@ ensures IsAbsMsgInfo(retval) @/
+    /@ ensures label_of(retval) == label @/
+    /@ ensures capsUnwrapped_of(retval) == capsUnwrapped @/
+    /@ ensures extraCaps_of(retval) == extraCaps @/
+    /@ ensures length_of(retval) == length @/
+    st LIBSEL4_FFI_OFFSET, label;
+    st LIBSEL4_FFI_OFFSET + 1*@biw, capsUnwrapped;
+    st LIBSEL4_FFI_OFFSET + 2*@biw, extraCaps;
+    st LIBSEL4_FFI_OFFSET + 3*@biw, length;
+    @outer_seL4_MessageInfo_new(0, 0, LIBSEL4_FFI_OFFSET, 0);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+/@ method ffiouter_seL4_MessageInfo_IRQAckIRQ(c: Int, c2: Int, a: Int, a2: Int)
+   requires acc(heap[LIBSEL4_FFI_OFFSET])
+   ensures acc(heap[LIBSEL4_FFI_OFFSET])
+   ensures heap[LIBSEL4_FFI_OFFSET] == AbsMsgInfo_IRQAckIRQ()
+@/
+fun panseL4_MessageInfo_t panseL4_MessageInfo_IRQAckIRQ() {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures retval == AbsMsgInfo_IRQAckIRQ() @/
+    @outer_seL4_MessageInfo_IRQAckIRQ(0, 0, LIBSEL4_FFI_OFFSET, 0);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+/@ method ffiouter_seL4_MessageInfo_get_label(c: Int, c2: Int, a: Int, a2: Int)
+   requires IsAbsMsgInfo(a2)
+   requires acc(heap[LIBSEL4_FFI_OFFSET])
+   ensures acc(heap[LIBSEL4_FFI_OFFSET])
+   ensures heap[LIBSEL4_FFI_OFFSET] == label_of(a2)
+@/
+fun 1 panseL4_MessageInfo_get_label(panseL4_MessageInfo_t msginfo) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires IsAbsMsgInfo(msginfo) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures retval == label_of(msginfo) @/
+    @outer_seL4_MessageInfo_get_label(0, 0, LIBSEL4_FFI_OFFSET, msginfo);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+/@ method ffiouter_seL4_MessageInfo_get_length(c: Int, c2: Int, a: Int, a2: Int)
+   requires IsAbsMsgInfo(a2)
+   requires acc(heap[LIBSEL4_FFI_OFFSET])
+   ensures acc(heap[LIBSEL4_FFI_OFFSET])
+   ensures heap[LIBSEL4_FFI_OFFSET] == length_of(a2)
+@/
+fun 1 panseL4_MessageInfo_get_length(panseL4_MessageInfo_t msginfo) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires IsAbsMsgInfo(msginfo) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures retval == length_of(msginfo) @/
+    @outer_seL4_MessageInfo_get_length(0, 0, LIBSEL4_FFI_OFFSET, msginfo);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+/@ method ffiouter_seL4_SetMR(c: Int, c2: Int, a: Int, a2: Int)
+   requires 0 <= c2 && c2 < panseL4_MsgMaxLength
+@/
+fun panseL4_SetMR(1 mr, 1 value) {
+    /@ requires 0 <= mr && mr < panseL4_MsgMaxLength @/
+    @outer_seL4_SetMR(0, mr, 0, value);
+    return 0;
+}
+
+/@ method ffiouter_seL4_GetMR(c: Int, c2: Int, a: Int, a2: Int)
+   requires acc(heap[LIBSEL4_FFI_OFFSET])
+   requires 0 <= a2 && a2 < panseL4_MsgMaxLength
+   ensures acc(heap[LIBSEL4_FFI_OFFSET])
+   ensures bounded64(heap[LIBSEL4_FFI_OFFSET])
+@/
+fun 1 panseL4_GetMR(1 mr) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires 0 <= mr && mr < panseL4_MsgMaxLength @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    @outer_seL4_GetMR(0, 0, LIBSEL4_FFI_OFFSET, mr);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+/@ method ffiouter_seL4_Signal(c: Int, c2: Int, a: Int, a2: Int)
+   requires pansel4_has_cap(a2)
+   requires pansel4_has_endpoint_cap(a2) || pansel4_has_notification_cap(a2)
+@/
+fun panseL4_Signal(panseL4_CPtr dest) {
+    /@ requires pansel4_has_cap(dest) @/
+    /@ requires pansel4_has_endpoint_cap(dest) || pansel4_has_notification_cap(dest) @/
+    @outer_seL4_Signal(0, 0, 0, dest);
+    return 0;
+}
+
+/@ method ffiouter_seL4_IRQHandler_Ack(c: Int, c2: Int, a: Int, a2: Int)
+   requires acc(heap[LIBSEL4_FFI_OFFSET])
+   requires pansel4_has_cap(a2)
+   requires pansel4_has_irq_handler_cap(a2)
+   ensures acc(heap[LIBSEL4_FFI_OFFSET])
+   ensures bounded64(heap[LIBSEL4_FFI_OFFSET])
+@/
+fun panseL4_Error panseL4_IRQHandler_Ack(panseL4_CPtr service) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires pansel4_has_cap(service) @/
+    /@ requires pansel4_has_irq_handler_cap(service) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    @outer_seL4_IRQHandler_Ack(0, 0, LIBSEL4_FFI_OFFSET, service);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+/@ method ffiouter_seL4_Recv(c: Int, c2: Int, a: Int, a2: Int)
+   requires acc(heap[LIBSEL4_FFI_OFFSET])
+   requires acc(heap[LIBSEL4_FFI_OFFSET+1])
+   requires pansel4_has_cap(c2)
+   requires pansel4_has_endpoint_cap(c2) || pansel4_has_notification_cap(c2)
+   requires pansel4_has_notification_cap(c2) || pansel4_has_cap(a2)
+   requires pansel4_has_notification_cap(c2) || pansel4_has_reply_cap(a2)
+   ensures acc(heap[LIBSEL4_FFI_OFFSET])
+   ensures IsAbsMsgInfo(heap[LIBSEL4_FFI_OFFSET])
+   ensures acc(heap[LIBSEL4_FFI_OFFSET+1])
+   ensures bounded64(heap[LIBSEL4_FFI_OFFSET+1])
+@/
+fun panseL4_Response panseL4_Recv(panseL4_CPtr src, panseL4_CPtr reply) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ requires pansel4_has_cap(src) @/
+    /@ requires pansel4_has_endpoint_cap(src) || pansel4_has_notification_cap(src) @/
+    /@ requires pansel4_has_notification_cap(src) || pansel4_has_cap(reply) @/
+    /@ requires pansel4_has_notification_cap(src) || pansel4_has_reply_cap(reply) @/
+    /@ ensures IsAbsMsgInfo(panseL4_Response_tag(retval)) @/
+    /@ ensures bounded64(panseL4_Response_badge(retval)) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    @outer_seL4_Recv(0, src, LIBSEL4_FFI_OFFSET, reply);
+    var panseL4_Response ret = lds panseL4_Response LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+/@ method ffiouter_seL4_ReplyRecv(c: Int, c2: Int, a: Int, a2: Int)
+   requires acc(heap[LIBSEL4_FFI_OFFSET])
+   requires acc(heap[LIBSEL4_FFI_OFFSET+1])
+   requires pansel4_has_cap(c2)
+   requires pansel4_has_endpoint_cap(c2) || pansel4_has_notification_cap(c2)
+   requires IsAbsMsgInfo(a2)
+   requires pansel4_has_cap(heap[LIBSEL4_FFI_OFFSET])
+   requires pansel4_has_reply_cap(heap[LIBSEL4_FFI_OFFSET])
+   ensures acc(heap[LIBSEL4_FFI_OFFSET])
+   ensures IsAbsMsgInfo(heap[LIBSEL4_FFI_OFFSET])
+   ensures acc(heap[LIBSEL4_FFI_OFFSET+1])
+   ensures bounded64(heap[LIBSEL4_FFI_OFFSET+1])
+@/
+fun panseL4_Response panseL4_ReplyRecv(panseL4_CPtr src, panseL4_MessageInfo_t msginfo, panseL4_CPtr reply) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ requires pansel4_has_cap(src) @/
+    /@ requires pansel4_has_endpoint_cap(src) || pansel4_has_notification_cap(src) @/
+    /@ requires IsAbsMsgInfo(msginfo) @/
+    /@ requires pansel4_has_cap(reply) @/
+    /@ requires pansel4_has_reply_cap(reply) @/
+    /@ ensures IsAbsMsgInfo(panseL4_Response_tag(retval)) @/
+    /@ ensures bounded64(panseL4_Response_badge(retval)) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    st LIBSEL4_FFI_OFFSET, reply;
+    @outer_seL4_ReplyRecv(0, src, LIBSEL4_FFI_OFFSET, msginfo);
+    var panseL4_Response ret = lds panseL4_Response LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+/@ method ffiouter_seL4_NBSendRecv(c: Int, c2: Int, a: Int, a2: Int)
+   requires acc(heap[LIBSEL4_FFI_OFFSET])
+   requires acc(heap[LIBSEL4_FFI_OFFSET+1])
+   requires pansel4_has_cap(c2)
+   requires pansel4_has_endpoint_cap(c2) || pansel4_has_notification_cap(c2)
+   requires IsAbsMsgInfo(a2)
+   requires pansel4_has_cap(heap[LIBSEL4_FFI_OFFSET])
+   requires pansel4_has_endpoint_cap(heap[LIBSEL4_FFI_OFFSET]) || pansel4_has_notification_cap(heap[LIBSEL4_FFI_OFFSET])
+   requires pansel4_has_cap(heap[LIBSEL4_FFI_OFFSET+1])
+   requires pansel4_has_notification_cap(heap[LIBSEL4_FFI_OFFSET]) || pansel4_has_reply_cap(heap[LIBSEL4_FFI_OFFSET+1])
+   ensures acc(heap[LIBSEL4_FFI_OFFSET])
+   ensures IsAbsMsgInfo(heap[LIBSEL4_FFI_OFFSET])
+   ensures acc(heap[LIBSEL4_FFI_OFFSET+1])
+   ensures bounded64(heap[LIBSEL4_FFI_OFFSET+1])
+@/
+fun panseL4_Response panseL4_NBSendRecv(panseL4_CPtr dest, panseL4_MessageInfo_t msginfo, panseL4_CPtr src, panseL4_CPtr reply) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ requires pansel4_has_cap(dest) @/
+    /@ requires pansel4_has_endpoint_cap(dest) || pansel4_has_notification_cap(dest) @/
+    /@ requires IsAbsMsgInfo(msginfo) @/
+    /@ requires pansel4_has_cap(src) @/
+    /@ requires pansel4_has_endpoint_cap(src) || pansel4_has_notification_cap(src) @/
+    /@ requires pansel4_has_cap(reply) @/
+    /@ requires pansel4_has_notification_cap(src) || pansel4_has_reply_cap(reply) @/
+    /@ ensures IsAbsMsgInfo(panseL4_Response_tag(retval)) @/
+    /@ ensures bounded64(panseL4_Response_badge(retval)) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    st LIBSEL4_FFI_OFFSET, src;
+    st LIBSEL4_FFI_OFFSET + 1*@biw, reply;
+    @outer_seL4_NBSendRecv(0, dest, LIBSEL4_FFI_OFFSET, msginfo);
+    var panseL4_Response ret = lds panseL4_Response LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+/@ method ffiouter_seL4_Call(c: Int, c2: Int, a: Int, a2: Int)
+   requires acc(heap[LIBSEL4_FFI_OFFSET])
+   requires pansel4_has_cap(c2)
+   requires pansel4_has_endpoint_cap(c2)
+   requires IsAbsMsgInfo(a2)
+   ensures acc(heap[LIBSEL4_FFI_OFFSET])
+   ensures IsAbsMsgInfo(heap[LIBSEL4_FFI_OFFSET])
+@/
+fun panseL4_MessageInfo_t panseL4_Call(panseL4_CPtr dest, panseL4_MessageInfo_t msginfo) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires pansel4_has_cap(dest) @/
+    /@ requires pansel4_has_endpoint_cap(dest) @/
+    /@ requires IsAbsMsgInfo(msginfo) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures IsAbsMsgInfo(retval) @/
+    @outer_seL4_Call(0, dest, LIBSEL4_FFI_OFFSET, msginfo);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+// Specialized version of panseL4_TCB_WriteRegisters for starting a thread at a
+// given program counter value. TODO: write a proper implementation of
+// panseL4_TCB_WriteRegisters(..) itself.
+/@ method ffiouter_seL4_TCB_WriteRegisters_spec(c: Int, c2: Int, a: Int, a2: Int)
+   requires acc(heap[LIBSEL4_FFI_OFFSET])
+   requires pansel4_has_cap(c2)
+   requires pansel4_has_tcb_cap(c2)
+   ensures acc(heap[LIBSEL4_FFI_OFFSET])
+   ensures bounded64(heap[LIBSEL4_FFI_OFFSET])
+@/
+fun panseL4_Error panseL4_TCB_WriteRegisters_spec(panseL4_TCB tcb, 1 entry_point) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires pansel4_has_cap(tcb) @/
+    /@ requires pansel4_has_tcb_cap(tcb) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    @outer_seL4_TCB_WriteRegisters_spec(0, tcb, LIBSEL4_FFI_OFFSET, entry_point);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}
+
+/@ method ffiouter_seL4_TCB_Suspend(c: Int, c2: Int, a: Int, a2: Int)
+   requires acc(heap[LIBSEL4_FFI_OFFSET])
+   requires pansel4_has_cap(a2)
+   requires pansel4_has_tcb_cap(a2)
+   ensures acc(heap[LIBSEL4_FFI_OFFSET])
+   ensures bounded64(heap[LIBSEL4_FFI_OFFSET])
+@/
+fun panseL4_Error panseL4_TCB_Suspend(panseL4_TCB tcb) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires pansel4_has_cap(tcb) @/
+    /@ requires pansel4_has_tcb_cap(tcb) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    @outer_seL4_TCB_Suspend(0, 0, LIBSEL4_FFI_OFFSET, tcb);
+    var ret = lds 1 LIBSEL4_FFI_OFFSET;
+    return ret;
+}

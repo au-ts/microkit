@@ -1,0 +1,213 @@
+/*
+ * Copyright 2026, UNSW
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+// basic types
+#define microkit_channel 1
+#define microkit_child 1
+#define microkit_ioport 1
+
+// messageinfo types (TODO synonyms won't do if we need different pre/postconds)
+#define microkit_msginfo panseL4_MessageInfo_t
+#define microkit_msginfo_get_label panseL4_MessageInfo_get_label
+#define microkit_msginfo_get_count panseL4_MessageInfo_get_length
+
+// fault_reply types
+#define microkit_fault_reply_option {1, microkit_msginfo}
+#define microkit_fault_reply_nothing <false, 0>
+#define microkit_fault_reply(x) <true, x>
+
+// messsage registers (TODO synonyms won't do if we need different pre/postconds)
+#define microkit_mr_set panseL4_SetMR
+#define microkit_mr_get panseL4_GetMR
+
+#define MONITOR_EP 5
+#define TCB_CAP 6
+#define BASE_OUTPUT_NOTIFICATION_CAP 10
+#define BASE_ENDPOINT_CAP 74
+#define BASE_IRQ_CAP 138
+#define BASE_TCB_CAP 202
+
+/@ method ffimicrokit_report_debug(c: Int, c2: Int, a: Int, a2: Int) @/
+/@ method ffimicrokit_report_error(c: Int, c2: Int, a: Int, a2: Int) @/
+
+/@ extern function mk_is_protected_source(x: Int): Bool @/
+/@ extern function mk_is_ppcall_target(x: Int): Bool @/
+/@ extern function mk_is_notified_source(x: Int): Bool @/
+/@ extern function mk_is_notify_target(x: Int): Bool @/
+/@ extern function mk_is_irq_channel(x: Int): Bool @/
+/@ extern function mk_is_child(x: Int): Bool @/
+
+
+/@ extern function userGhost(): Ref @/
+/@ extern function user_acc_ghost_state(state: Ref): Bool @/
+
+/@ extern function user_local_microkit_notify_pre(ch: Int, state: Ref): Bool @/
+/@ extern function user_local_microkit_notify_post(ch: Int, state: Ref): Bool @/
+/@ extern function user_guarantee_microkit_notify(ch: Int, state: Ref): Bool @/
+/@ extern function user_transition_microkit_notify(ch: Int, state: Ref): Bool @/
+
+/@ extern function user_local_microkit_irq_ack_pre(ch: Int, state: Ref): Bool @/
+/@ extern function user_local_microkit_irq_ack_post(ch: Int, state: Ref): Bool @/
+/@ extern function user_guarantee_microkit_irq_ack(ch: Int, state: Ref): Bool @/
+/@ extern function user_transition_microkit_irq_ack(ch: Int, state: Ref): Bool @/
+
+/@ extern function user_local_microkit_ppcall_pre(ch: Int, msginfo: Int, state: Ref): Bool @/
+/@ extern function user_local_microkit_ppcall_post(ch: Int, msginfo: Int, tag: Int, state: Ref): Bool @/
+/@ extern function user_guarantee_microkit_ppcall(ch: Int, msginfo: Int, state: Ref): Bool @/
+/@ extern function user_transition_microkit_ppcall(ch: Int, msginfo: Int, state: Ref): Bool @/
+
+/@ extern function user_rely_ppcall(tag: Int, state: Ref): Bool @/
+
+
+export fun microkit_notify(microkit_channel ch) {
+    /@ requires mk_is_notify_target(ch) @/
+
+    /@ requires user_acc_ghost_state(userGhost()) @/
+    /@ requires user_local_microkit_notify_pre(ch, userGhost()) @/
+    /@ requires user_guarantee_microkit_notify(ch, userGhost()) @/
+
+    /@ ensures user_acc_ghost_state(userGhost()) @/
+    /@ ensures user_local_microkit_notify_post(ch, userGhost()) @/
+    /@ ensures user_transition_microkit_notify(ch, userGhost()) @/
+
+    panseL4_Signal(BASE_OUTPUT_NOTIFICATION_CAP + ch);
+    /@ exhale user_acc_ghost_state(userGhost()) @/
+    /@ inhale user_acc_ghost_state(userGhost()) @/
+    /@ assume user_transition_microkit_notify(ch, userGhost()) @/
+    return 0;
+}
+
+export fun microkit_irq_ack(microkit_channel ch) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires mk_is_irq_channel(ch) @/
+
+    /@ requires user_acc_ghost_state(userGhost()) @/
+    /@ requires user_local_microkit_irq_ack_pre(ch, userGhost()) @/
+    /@ requires user_guarantee_microkit_irq_ack(ch, userGhost()) @/
+
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+
+    /@ ensures user_acc_ghost_state(userGhost()) @/
+    /@ ensures user_local_microkit_irq_ack_post(ch, userGhost()) @/
+    /@ ensures user_transition_microkit_irq_ack(ch, userGhost()) @/
+
+    panseL4_IRQHandler_Ack(BASE_IRQ_CAP + ch);
+    /@ exhale user_acc_ghost_state(userGhost()) @/
+    /@ inhale user_acc_ghost_state(userGhost()) @/
+    /@ assume user_transition_microkit_irq_ack(ch, userGhost()) @/
+    return 0;
+}
+
+export fun panseL4_Error microkit_pd_stop(microkit_child pd) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires mk_is_child(pd) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    var panseL4_Error err = panseL4_TCB_Suspend(BASE_TCB_CAP + pd);
+    if (err != panseL4_NoError) {
+        @microkit_report_error(0, 1, 0, err);
+    }
+    return err;
+}
+
+export fun panseL4_Error microkit_pd_restart(microkit_child pd, 1 entry_point) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires mk_is_child(pd) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    var panseL4_Error err = panseL4_TCB_WriteRegisters_spec(BASE_TCB_CAP + pd, entry_point);
+    if (err != panseL4_NoError) {
+        @microkit_report_error(0, 2, 0, err);
+    }
+    return err;
+}
+
+export fun microkit_msginfo microkit_ppcall(microkit_channel ch, microkit_msginfo msginfo) {
+    /@ requires mk_is_ppcall_target(ch) @/
+    /@ requires IsAbsMsgInfo(msginfo) @/
+
+    /@ requires user_acc_ghost_state(userGhost()) @/
+    /@ requires user_local_microkit_ppcall_pre(ch, msginfo, userGhost()) @/
+    /@ requires user_guarantee_microkit_ppcall(ch, msginfo, userGhost()) @/
+
+    /@ ensures user_acc_ghost_state(userGhost()) @/
+    /@ ensures user_local_microkit_ppcall_post(ch, msginfo, retval, userGhost()) @/
+    /@ ensures user_transition_microkit_ppcall(ch, msginfo, userGhost()) @/
+
+    // perform nondeterministic ghost state transition
+    /@ exhale user_acc_ghost_state(userGhost()) @/
+    /@ inhale user_acc_ghost_state(userGhost()) @/
+    /@ assume user_transition_microkit_ppcall(ch, msginfo, userGhost()) @/
+    // wait for response from remote PD
+    var microkit_msginfo tag = panseL4_Call(BASE_ENDPOINT_CAP + ch, msginfo);
+    // rely on behavior of remote PD to finish the verification
+    /@ assume user_rely_ppcall(tag, userGhost()) @/
+    return tag;
+}
+
+export fun microkit_msginfo microkit_msginfo_new(1 label, 1 count) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
+    /@ requires 0 <= label && label < 4503599627370496 @/
+    /@ requires 0 <= count && count < 128 @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
+    /@ ensures IsAbsMsgInfo(retval) @/
+    /@ ensures label_of(retval) == label @/
+    /@ ensures length_of(retval) == count @/
+    var microkit_msginfo tag = panseL4_MessageInfo_new(label, 0, 0, count);
+    return tag;
+}
+
+export fun microkit_deferred_notify(microkit_channel ch) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
+    /@ requires acc(gv.microkit_have_signal) @/
+    /@ requires acc(gv.microkit_signal_msg) @/
+    /@ requires acc(gv.microkit_signal_cap) @/
+    /@ requires !gv.microkit_have_signal @/
+    /@ requires mk_is_notify_target(ch) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
+    /@ ensures acc(gv.microkit_have_signal) @/
+    /@ ensures acc(gv.microkit_signal_msg) @/
+    /@ ensures acc(gv.microkit_signal_cap) @/
+    /@ ensures gv.microkit_have_signal @/
+    /@ ensures IsAbsMsgInfo(gv.microkit_signal_msg) @/
+    /@ ensures pansel4_has_cap(gv.microkit_signal_cap) @/
+    /@ ensures pansel4_has_notification_cap(gv.microkit_signal_cap) @/ 
+    microkit_have_signal = true;
+    microkit_signal_msg = panseL4_MessageInfo_new(0, 0, 0, 0);
+    microkit_signal_cap = BASE_OUTPUT_NOTIFICATION_CAP + ch;
+    return 0;
+}
+
+export fun microkit_deferred_irq_ack(microkit_channel ch) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ requires acc(gv.microkit_have_signal) @/
+    /@ requires acc(gv.microkit_signal_msg) @/
+    /@ requires acc(gv.microkit_signal_cap) @/
+    /@ requires !gv.microkit_have_signal @/
+    /@ requires mk_is_irq_channel(ch) @/
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
+    /@ ensures acc(gv.microkit_have_signal) @/
+    /@ ensures acc(gv.microkit_signal_msg) @/
+    /@ ensures acc(gv.microkit_signal_cap) @/
+    /@ ensures gv.microkit_have_signal @/
+    /@ ensures IsAbsMsgInfo(gv.microkit_signal_msg) @/
+    /@ ensures pansel4_has_cap(gv.microkit_signal_cap) @/
+    /@ ensures pansel4_has_irq_handler_cap(gv.microkit_signal_cap) @/
+    microkit_have_signal = true;
+    microkit_signal_msg = panseL4_MessageInfo_IRQAckIRQ();
+    microkit_signal_cap = BASE_IRQ_CAP + ch;
+    return 0;
+}

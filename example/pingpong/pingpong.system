@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright 2026, UNSW
+
+ SPDX-License-Identifier: BSD-2-Clause
+-->
+<system>
+    <protection_domain name="ping">
+        <program_image path="ping.elf" />
+    </protection_domain>
+    <protection_domain name="pong">
+        <program_image path="pong.elf" />
+    </protection_domain>
+    <channel>
+        <end pd="ping" id="5" />
+        <end pd="pong" id="2" />
+    </channel>
+</system>

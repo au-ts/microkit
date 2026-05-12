@@ -1,0 +1,73 @@
+/*
+ * Copyright 2026, UNSW
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+/@ extern function mk_notified_preconditions(ch: Int): Bool @/
+/@ extern function mk_notified_postconditions(ch: Int): Bool @/
+/@ extern function apply_mk_notified_postconditions(ch: Int): Bool @/
+/@ extern function mk_protected_preconditions(ch: Int): Bool @/
+/@ extern function mk_protected_postconditions(ch: Int): Bool @/
+/@ extern function apply_mk_protected_postconditions(): Bool @/
+/@ extern function mk_fault_preconditions(ch: Int): Bool @/
+/@ extern function mk_fault_postconditions(ch: Int): Bool @/
+/@ extern function apply_mk_fault_postconditions(): Bool @/
+
+/@ extern field has_the_ball: Int @/
+/@ extern field ping_count: Int @/
+
+fun uep_init() {
+    /@ requires acc(userGhost().has_the_ball) @/
+    /@ requires acc(userGhost().ping_count) @/
+    /@ requires userGhost().has_the_ball == 1 @/
+    /@ requires userGhost().ping_count == 0 @/
+    /@ ensures acc(userGhost().has_the_ball) @/
+    /@ ensures acc(userGhost().ping_count) @/
+    /@ ensures userGhost().has_the_ball == 0 @/
+    /@ ensures userGhost().ping_count == 1 @/
+    @microkit_report_debug(0, 0, 0, 1);
+    microkit_notify(5);
+    return 0;
+}
+
+fun uep_notified(microkit_channel ch) {
+    /@ requires mk_notified_preconditions(ch) @/
+    /@ requires ch != 5 || userGhost().has_the_ball == 1 @/
+    /@ ensures mk_notified_postconditions(ch) @/
+    /@ ensures ch == 5 || userGhost().has_the_ball == old(userGhost().has_the_ball) @/
+    /@ ensures ch != 5 || userGhost().has_the_ball == 0 @/
+    if (ch == 5) {
+        @microkit_report_debug(0, 0, 0, 2);
+        microkit_notify(5);
+    }
+    /@ inhale apply_mk_notified_postconditions(ch) @/
+    return 0;
+}
+
+fun microkit_fault_reply_option uep_fault(microkit_child child, microkit_msginfo msginfo) {
+    /@ requires mk_fault_preconditions(child) @/
+    /@ ensures retval.0 == 0 @/
+    /@ ensures mk_fault_postconditions(child) @/
+    @microkit_report_debug(0, 0, 0, 4);
+    /@ inhale apply_mk_fault_postconditions() @/
+    return microkit_fault_reply_nothing;
+}
+
+fun uep_protected(microkit_channel ch, microkit_msginfo msginfo) {
+    /@ requires mk_protected_preconditions(ch) @/
+    /@ requires acc(heap[0]) @/
+    /@ requires acc(heap[1]) @/
+    /@ requires acc(heap[2]) @/
+    /@ requires acc(heap[3]) @/
+    /@ ensures mk_protected_postconditions(ch) @/
+    /@ ensures acc(heap[0]) @/
+    /@ ensures acc(heap[1]) @/
+    /@ ensures acc(heap[2]) @/
+    /@ ensures acc(heap[3]) @/
+    /@ ensures IsAbsMsgInfo(retval) @/
+    @microkit_report_debug(0, 0, 0, 3);
+    var 1 res = panseL4_MessageInfo_new(0,0,0,0);
+    /@ inhale apply_mk_protected_postconditions() @/
+    return res;
+}
