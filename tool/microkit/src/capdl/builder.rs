@@ -28,8 +28,8 @@ use crate::{
     },
     elf::ElfFile,
     sdf::{
-        ChannelEnd, CpuCore, ProtectionDomain, SysIrq, SysIrqKind, SysMap, SysMapPerms,
-        SysMemoryRegion, SystemDescription, BUDGET_DEFAULT, MONITOR_PD_NAME, MONITOR_PRIORITY,
+        Channel, ChannelEnd, CpuCore, ProtectionDomain, SysIrq, SysIrqKind, SysMap, SysMapPerms,
+        SysMemoryRegion, BUDGET_DEFAULT, MONITOR_PD_NAME, MONITOR_PRIORITY,
     },
     sel4::{Arch, ArmRiscvIrqTrigger, Config, FullSystemState, PageSize},
     util::{ranges_overlap, round_down, round_up},
@@ -396,14 +396,15 @@ pub fn build_capdl_spec(
     kernel_config: &Config,
     elfs: &BTreeMap<String, ElfFile>,
     core_protection_domains: &BTreeMap<String, ProtectionDomain>,
+    all_protection_domains: &BTreeMap<String, ProtectionDomain>,
     memory_regions: &[SysMemoryRegion],
-    system: &SystemDescription,
+    channels: &Vec<Channel>,
     full_system_state: &FullSystemState,
-    cpu_id: u8,
+    cpu: CpuCore,
 ) -> Result<CapDLSpecContainer, String> {
     let mut spec_container = CapDLSpecContainer::new();
-    println!("MICROKIT SPEC| Setting spec cpu id to: {}", cpu_id);
-    spec_container.spec.cpu_id = cpu_id;
+    println!("MICROKIT SPEC| Setting spec cpu id to: {}", cpu.0);
+    spec_container.spec.cpu_id = cpu.0;
     // *********************************
     // Step 1. Create the monitor's spec.
     // *********************************
@@ -728,7 +729,7 @@ pub fn build_capdl_spec(
         let pd_ntfn_cap = capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0);
         let mut pd_ep_obj_id: Option<ObjectId> = None;
         pd_name_to_ntfn_id.insert(pd.name.clone(), pd_ntfn_obj_id);
-        if pd.needs_ep(&system.channels) {
+        if pd.needs_ep(channels) {
             pd_ep_obj_id = Some(capdl_util_make_endpoint_obj(
                 &mut spec_container,
                 &pd.name,
@@ -1036,10 +1037,10 @@ pub fn build_capdl_spec(
     // Step 4. Create channels
     // ********************************
 
-    // Seperate the channels into same-core and cross-core channels
+    // Separate the channels into same-core and cross-core channels
 
     let (same_core_channels, cross_core_channels): (Vec<_>, Vec<_>) =
-        system.channels.iter().partition(|channel| {
+        channels.iter().partition(|channel| {
             // If both the channels end points are within the protection domain
             // list supplied for this core, then partition into same_core channels,
             // otherwise into cross_core
@@ -1097,7 +1098,8 @@ pub fn build_capdl_spec(
             &mut spec_container,
             kernel_config,
             &recv.pd,
-            CpuCore(cpu_id),
+            // always 0 on multikernel
+            CpuCore(0),
             recv_ntfn_obj_id,
             &recv_irq,
         );
@@ -1114,7 +1116,7 @@ pub fn build_capdl_spec(
     }
 
     for &(send, recv) in cross_core_sender_channels.iter() {
-        let recv_pd = &system.protection_domains[&recv.pd];
+        let recv_pd = &all_protection_domains[&recv.pd];
 
         let send_cspace_id = *pd_name_to_cspace_id.get(&send.pd).unwrap();
         let send_cap_idx = PD_BASE_OUTPUT_NOTIFICATION_CAP + send.id;

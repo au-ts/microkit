@@ -715,15 +715,15 @@ fn main() -> Result<(), String> {
 
             println!("This is multikernel idx: {} and this is sytems elfs: {:?} and this is the core local pds: {:?}", multikernel_idx, system_elfs.keys(), core_local_pds.keys());
 
-            // @kwinter: Fix the full system state, don't just unwrap it in here, and also why is Rust forcing a double clone here?
             let mut spec_container = build_capdl_spec(
                 &kernel_config,
                 &system_elfs,
                 &core_local_pds,
+                &system.protection_domains,
                 &memory_regions_for_core,
-                &system,
+                &system.channels,
                 &full_system_state,
-                multikernel_idx as u8,
+                CpuCore(multikernel_idx as u8),
             )?;
 
             // @kwinter: Is this fine to move to after we build the spec? We need the calculated cross core channels
