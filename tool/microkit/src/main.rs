@@ -29,10 +29,11 @@ use microkit_tool::util::{
     get_full_path, human_size_strict, json_str, json_str_as_bool, json_str_as_u64, round_down,
     round_up,
 };
+use microkit_tool::viper;
 use microkit_tool::{DisjointMemoryRegion, MemoryRegion};
 use std::collections::HashMap;
 use std::fs::{self, metadata};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const MAX_BUILD_ITERATION: usize = 3;
 
@@ -699,6 +700,26 @@ fn main() -> Result<(), String> {
                 let serialised = serde_json::to_string_pretty(&spec_container.spec).unwrap();
                 fs::write(capdl_json, &serialised).unwrap();
             };
+
+            if let Some(viper_output_prefix) = args.viper_output_prefix {
+                for view in viper::get_combined_views(&spec_container, &system) {
+                    let mut output =
+                        String::from(
+                            format!(
+                                "// exported invariants for PD {} in {}\n",
+                                view.pd_name,
+                                &args.sdf_path.display(),
+                            )
+                        );
+                    view.export(&mut output);
+                    let path = PathBuf::from(format!("{}{}.vpr", viper_output_prefix, view.pd_name));
+                    // fs::write(&path, output).map_err(|source| {
+                    //     MainError::CannotWriteFile { path, source }
+                    //     .to_string()
+                    // })?;
+                    fs::write(&path, output).expect("TODO")
+                }
+            }
 
             write_report(&spec_container, &kernel_config, &args.report_path);
             system_built = true;
