@@ -707,6 +707,7 @@ def build_sel4(
 
     # Use the preprocessor to convert the seL4 object size constants to readable JSON
     # for the tool.
+    include_dir = sdk_dir / "board" / board.name / config.name / "include"
     object_sizes_header = tool_dir / "object_sizes.h"
     dest = sdk_dir / "board" / board.name / config.name / "object_sizes.json"
     preprocessor = "clang" if (llvm) else f"{target_triple}-cpp"
