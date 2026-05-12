@@ -12,16 +12,13 @@ use std::{
 };
 
 use sel4_capdl_initializer_types::{
-    object, CapTableEntry, Fill, FillEntry, FillEntryContent, NamedObject, Object, ObjectId, Spec,
-    Word,
+    object, CapTableEntry, Fill, FillEntry, FillEntryContent, IrqMultikernelSetTargetCore,
+    NamedObject, Object, ObjectId, Spec, Word,
 };
 
 use crate::{
     capdl::{
-        irq::{
-            capdl_util_make_sgi_signal_obj, create_irq_handler_cap, create_irq_handler_cap_no_ntfn,
-            make_irq_sgi_signal_cap,
-        },
+        irq::{capdl_util_make_sgi_signal_obj, create_irq_handler_cap, make_irq_sgi_signal_cap},
         memory::{create_vspace, create_vspace_ept, map_page},
         spec::{capdl_obj_physical_size_bits, ElfContent},
         util::*,
@@ -136,6 +133,7 @@ impl CapDLSpecContainer {
             spec: Spec {
                 objects: Vec::new(),
                 irqs: Vec::new(),
+                multikernel_irq_set_target_cores: Vec::new(),
                 asid_slots: Vec::new(),
                 root_objects: Range {
                     start: 0.into(),
@@ -1211,30 +1209,15 @@ pub fn build_capdl_spec(
     // core 0, we need to also setup every other pd's irq's. Iterate through the rest
     // of the pd's in the system's IRQ's.
 
-    if cpu_id == 0 {
-        let other_core_pds: BTreeMap<String, ProtectionDomain> = system
-            .protection_domains
-            .clone()
-            .into_iter()
-            .filter(|(_, pd)| pd.cpu != CpuCore(cpu_id))
-            .collect();
-        for other_core_pd in other_core_pds.values() {
-            for irq in other_core_pd.irqs.iter() {
-                // Create a IRQ handler cap, but don't bind any ntfn to it.
-                // This handler cap will be used just to setup the GIC for this
-                // interrupt and affinity. The other core's kernel will need
-                // to create another irq handler and bind a notification to receive
-                // the interrupts.
-                println!(
-                    "Creating an irq handler for irq {} on core {}",
-                    irq.id, cpu_id
-                );
-                let _irq_handle_cap = create_irq_handler_cap_no_ntfn(
-                    &mut spec_container,
-                    kernel_config,
-                    &other_core_pd.name,
-                    other_core_pd.cpu,
-                    irq,
+    if cpu == CpuCore(0) {
+        for pd in all_protection_domains.values().filter(|&pd| pd.cpu != cpu) {
+            /* only system irqs on other cores, not SGIs/PPIs ('32') */
+            for sysirq in pd.irqs.iter().filter(|si| !si.is_sgi(kernel_config.arch)) {
+                spec_container.spec.multikernel_irq_set_target_cores.push(
+                    IrqMultikernelSetTargetCore {
+                        irq: Word(sysirq.irq_num()),
+                        target_cpu: pd.cpu.0,
+                    },
                 );
             }
         }
