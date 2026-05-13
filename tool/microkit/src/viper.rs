@@ -160,9 +160,10 @@ pub fn get_cap_view(
                 view.page_table_caps.push(slot);
             }
             Cap::ArmIrqHandler(_) |
-            Cap::RiscvIrqHandler(_) |
+            Cap::IrqHandler(_) |
             Cap::IrqIOApicHandler(_) |
-            Cap::IrqMsiHandler(_) => {
+            Cap::IrqMsiHandler(_) |
+            Cap::RiscvIrqHandler(_) => {
                 view.irq_handler_caps.push(slot);
             }
             Cap::Tcb(_) => {
@@ -177,7 +178,18 @@ pub fn get_cap_view(
             Cap::ArmSmc(_) => {
                 view.arm_smc_caps.push(slot);
             }
-            _ => {}
+
+            Cap::AsidPool(_) |
+            Cap::CNode(_) |
+            Cap::DomainSet(_) |
+            Cap::Frame(_) |
+            Cap::SchedContext(_) |
+            Cap::Untyped(_) => {
+                /* ^ The caps above can occupy CSpace slots, but Viper
+                 * verification currently has no use for them, so we
+                 * intentionally do not emit anything here.
+                 */
+            }
         }
     }
 
