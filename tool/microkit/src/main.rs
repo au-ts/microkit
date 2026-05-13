@@ -33,7 +33,7 @@ use microkit_tool::viper;
 use microkit_tool::{DisjointMemoryRegion, MemoryRegion};
 use std::collections::HashMap;
 use std::fs::{self, metadata};
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 
 const MAX_BUILD_ITERATION: usize = 3;
 
@@ -701,7 +701,15 @@ fn main() -> Result<(), String> {
                 fs::write(capdl_json, &serialised).unwrap();
             };
 
-            if let Some(viper_output_prefix) = args.viper_output_prefix {
+            if let Some(viper_output_dir) = args.viper_output_dir {
+                // NB returns Ok if the directory already exists, that's fine
+                fs::create_dir_all(&viper_output_dir).unwrap_or_else(|source| {
+                    eprintln!(
+                        "ERROR: cannot write Viper output directory {}: {source}",
+                        &viper_output_dir.display()
+                    );
+                    std::process::exit(1);
+                });
                 for view in viper::get_combined_views(&spec_container, &system) {
                     let mut output =
                         String::from(
@@ -712,13 +720,16 @@ fn main() -> Result<(), String> {
                             )
                         );
                     view.export(&mut output);
-                    let path = PathBuf::from(format!("{}{}.vpr", viper_output_prefix, view.pd_name));
-                    // fs::write(&path, output).map_err(|source| {
-                    //     MainError::CannotWriteFile { path, source }
-                    //     .to_string()
-                    // })?;
-                    fs::write(&path, output).expect("TODO")
+                    let path = viper_output_dir.join(format!("{}.vpr", view.pd_name));
+                    fs::write(&path, output).unwrap_or_else(|source| {
+                        eprintln!(
+                            "ERROR: cannot write Viper output file {}: {source}",
+                            &path.display()
+                        );
+                        std::process::exit(1);
+                    });
                 }
+
             }
 
             write_report(&spec_container, &kernel_config, &args.report_path);

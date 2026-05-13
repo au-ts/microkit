@@ -29,7 +29,7 @@ pub fn print_help(sdk: &Sdk) {
     );
     println!("  --config CONFIG");
     println!("  --capdl-json CAPDL_SPEC (JSON format)");
-    println!("  --viper-output PREFIX");
+    println!("  --viper-output DIRECTORY_PATH");
     println!("  --search-path [SEARCH_PATH ...]");
 }
 
@@ -70,7 +70,7 @@ pub struct Args {
     pub config: String,
     pub report_path: PathBuf,
     pub capdl_json_path: Option<PathBuf>,
-    pub viper_output_prefix: Option<String>,
+    pub viper_output_dir: Option<PathBuf>,
     pub output_path: PathBuf,
     pub search_paths: Vec<PathBuf>,
     pub requested_image_type: RequestedImageType,
@@ -169,7 +169,7 @@ impl Args {
         let mut output_path = PathBuf::from("loader.img");
         let mut report_path = PathBuf::from("report.txt");
         let mut capdl_json_path = None;
-        let mut viper_output_prefix = None;
+        let mut viper_output_dir = None;
         let mut search_paths = Vec::new();
 
         let mut sdf_path = None;
@@ -209,7 +209,7 @@ impl Args {
                     search_paths.extend(params.into_iter().map(PathBuf::from));
                 }
                 "--viper-output" => {
-                    viper_output_prefix = Some(consume_parameter(&mut args, "--viper-output")?);
+                    viper_output_dir = Some(consume_parameter(&mut args, "--viper-output")?.into());
                 }
                 "--image-type" => {
                     let value = consume_parameter(&mut args, "--image-type")?;
@@ -268,7 +268,7 @@ impl Args {
             config,
             report_path,
             capdl_json_path,
-            viper_output_prefix,
+            viper_output_dir,
             output_path,
             search_paths,
             requested_image_type,
