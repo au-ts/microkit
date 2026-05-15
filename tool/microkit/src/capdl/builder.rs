@@ -82,7 +82,7 @@ const PD_INPUT_CAP_IDX: u64 = 1;
 const PD_FAULT_EP_CAP_IDX: u64 = 2;
 const PD_VSPACE_CAP_IDX: u64 = 3;
 const PD_REPLY_CAP_IDX: u64 = 4;
-const PD_SECOND_REPLY_CAP_IDX: u64 = 8;
+
 // Valid only if the PD is passive.
 const PD_MONITOR_EP_CAP_IDX: u64 = 5;
 // Valid only in benchmark configuration.
@@ -843,11 +843,8 @@ pub fn build_capdl_spec(
         // Step 3-8 Create Reply obj + cap and insert into CSpace
         let pd_reply_obj_id = capdl_util_make_reply_obj(&mut spec_container, &pd.name);
         let pd_reply_cap = capdl_util_make_reply_cap(pd_reply_obj_id);
-        let pd_sreply_cap = capdl_util_make_reply_cap(pd_reply_obj_id);
         caps_to_insert_to_pd_cspace
             .push(capdl_util_make_cte(PD_REPLY_CAP_IDX as u32, pd_reply_cap));
-        caps_to_insert_to_pd_cspace
-            .push(capdl_util_make_cte(PD_SECOND_REPLY_CAP_IDX as u32, pd_sreply_cap));
         // Step 3-9 Create spec and caps to IRQs
         for irq in pd.irqs.iter() {
             // Create a IRQ handler cap and insert into the requested CSpace's slot.

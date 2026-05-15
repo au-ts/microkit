@@ -84,20 +84,20 @@ static void handler_loop(void)
             idx++;
         } while (irqs_to_ack != 0);
     }
-    int reply_cap = REPLY_CAP;
     for (;;) {
         seL4_Word badge;
         seL4_MessageInfo_t tag;
         
-        microkit_dbg_putc(reply_cap + 48);
-        microkit_dbg_putc('\n');
         if (have_reply) {
-            tag = seL4_ReplyRecv(INPUT_CAP, reply_tag, &badge, reply_cap);
+            // microkit_dbg_puts("before a replyrecv\n");
+            tag = seL4_ReplyRecv(INPUT_CAP, reply_tag, &badge, REPLY_CAP);
         } else if (microkit_have_signal) {
-            tag = seL4_NBSendRecv(microkit_signal_cap, microkit_signal_msg, INPUT_CAP, &badge, reply_cap);
+            // microkit_dbg_puts("there is a signal for not\n");
+            tag = seL4_NBSendRecv(microkit_signal_cap, microkit_signal_msg, INPUT_CAP, &badge, REPLY_CAP);
             microkit_have_signal = seL4_False;
         } else {
-            tag = seL4_Recv(INPUT_CAP, &badge, reply_cap);
+            // microkit_dbg_puts("before a recv\n");
+            tag = seL4_Recv(INPUT_CAP, &badge, REPLY_CAP);
         }
 
         uint64_t is_endpoint = badge >> 63;
@@ -109,12 +109,6 @@ static void handler_loop(void)
             seL4_Bool reply_to_fault = fault(badge & PD_MASK, tag, &reply_tag);
             if (reply_to_fault) {
                 have_reply = true;
-            } else {
-                if (reply_cap == 4) {
-                    reply_cap = 8;
-                } else {
-                    reply_cap = 4;
-                }
             }
         } else if (is_endpoint) {
             have_reply = true;
