@@ -735,7 +735,8 @@ static void monitor(void)
             /* This is a request from our PD to become passive */
             err = seL4_SchedContext_Bind(BASE_SCHED_CONTEXT_CAP + pd_id, BASE_NOTIFICATION_CAP + pd_id);
             if (err != seL4_NoError) {
-                puts("MON|ERROR: could not bind scheduling context to notification object\n");
+                putc(48 + pd_id);
+                puts(" MON|ERROR: could not bind scheduling context to notification object\n");
             } else {
                 puts("MON|INFO: PD '");
                 puts(pd_names[pd_id]);
