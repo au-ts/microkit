@@ -24,7 +24,7 @@ use crate::{
     },
     elf::ElfFile,
     sdf::{
-        CapMapType, CpuCore, SysMap, SysMapPerms, SystemDescription, BUDGET_DEFAULT,
+        CapMapType, CpuCore, SysMap, SysMapPerms, SystemDescription, SysIrqKind, BUDGET_DEFAULT,
         MONITOR_PD_NAME, MONITOR_PRIORITY,
     },
     sel4::{Arch, Config, PageSize, BootInfoId},
@@ -892,6 +892,9 @@ pub fn build_capdl_spec(
 
         // Step 4-9 Create spec and caps to IRQs
         for irq in pd.irqs.iter() {
+            if matches!(irq.kind, SysIrqKind::IOAPIC{ .. }) {
+                continue
+            }
             // Create a IRQ handler cap and insert into the requested CSpace's slot.
             let irq_handle_cap = create_irq_handler_cap(
                 &mut spec_container,
@@ -1120,6 +1123,15 @@ pub fn build_capdl_spec(
         let pd_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS as u64 - PD_ROOT_CAP_BITS as u64;
         let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, pd_guard_size as u8);
 
+        // Have a cap at slot 0 pointing to itself
+        let cnode_cap_self_ref = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, pd_guard_size.try_into().unwrap());
+        capdl_util_insert_cap_into_cspace(
+            &mut spec_container,
+            pd_cnode_obj_id,
+            0,
+            cnode_cap_self_ref,
+        );
+
         let pd_root_cnode_obj_id = capdl_util_make_cnode_obj(
             &mut spec_container,
             &(pd.name.clone() + "_root"),
@@ -1133,8 +1145,8 @@ pub fn build_capdl_spec(
         capdl_util_insert_cap_into_cspace(&mut spec_container, pd_root_cnode_obj_id, 0, pd_cnode_cap);
 
         // shadow cnode cap will be in the root CNode
-        let pd_shadow_guard_size = kernel_config.cap_address_bits - PD_ROOT_CAP_BITS as u64 - PD_ROOT_CAP_BITS as u64;
-        let pd_shadow_cnode_cap = capdl_util_make_cnode_cap(pd_root_cnode_obj_id, 0, pd_shadow_guard_size as u8);
+        let pd_shadow_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS as u64 - PD_ROOT_CAP_BITS as u64;
+        let pd_shadow_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, pd_shadow_guard_size as u8);
         pd_shadow_cspace_inner.insert(CapMapType::Cnode, pd_shadow_cnode_cap.clone());
 
         caps_to_bind_to_tcb.push(capdl_util_make_cte(
