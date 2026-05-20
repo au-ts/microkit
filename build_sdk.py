@@ -998,7 +998,7 @@ def main() -> None:
             for config in configs:
                 if not args.skip_sel4:
                     build_sel4(sel4_dir, tool_dir, sdk_dir, build_dir, board, config, args.llvm)
-                loader_printing = 1 if config.name == "debug" else 0
+                loader_printing = 1 if config.debug else 0
                 loader_defines = []
                 if not board.arch.is_x86():
                     loader_defines.append(("LINK_ADDRESS", hex(board.loader_link_address)))
