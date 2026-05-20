@@ -96,7 +96,11 @@ static inline uint64_t arm_smc64_call(uint32_t function_id, uint64_t arg0, uint6
     register uint64_t x2 asm("x2") = arg1;
     register uint64_t x3 asm("x3") = arg2;
     asm volatile(
+#ifdef CONFIG_ARM_HYPERVISOR_SUPPORT
         "smc #0\n"
+#else
+        "hvc #0\n"
+#endif
         : "=r"(x0)
         : "r"(x0), "r"(x1), "r"(x2), "r"(x3)
         : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17",
@@ -124,7 +128,11 @@ static inline uint32_t arm_smc32_call(uint32_t function_id, uint32_t arg0, uint3
     register uint64_t w2 asm("w2") = arg1;
     register uint64_t w3 asm("w3") = arg2;
     asm volatile(
+#ifdef CONFIG_ARM_HYPERVISOR_SUPPORT
         "smc #0\n"
+#else
+        "hvc #0\n"
+#endif
         : "=r"(w0)
         : "r"(w0), "r"(w1), "r"(w2), "r"(w3)
         : "w4", "w5", "w6", "w7", "w8", "w9", "w10", "w11", "w12", "w13", "w14", "w15", "w16", "w17",
