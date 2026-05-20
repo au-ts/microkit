@@ -57,7 +57,7 @@ DEFAULT_KERNEL_OPTIONS = {
 
 DEFAULT_KERNEL_OPTIONS_AARCH64 = {
     "KernelArmExportPCNTUser": True,
-    "KernelArmHypervisorSupport": True,
+    "KernelArmHypervisorSupport": False,
     "KernelArmVtimerUpdateVOffset": False,
     "KernelAllowSMCCalls": True,
 } | DEFAULT_KERNEL_OPTIONS
