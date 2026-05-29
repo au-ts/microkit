@@ -510,11 +510,11 @@ static inline void microkit_deferred_irq_ack(microkit_channel ch)
 
 // stuff for the userland pager below
 static inline int microkit_arm_page_map_ro(unsigned long frame_cap, unsigned long vspace, unsigned long vaddr) {
-    return seL4_ARM_Page_Map(frame_cap, vspace, vaddr, seL4_CapRights_new(1, 1, 1, 0), 0x03); // no write, 0x03 is default attributes.
+    return seL4_ARM_Page_Map(frame_cap, vspace, vaddr, seL4_CapRights_new(1, 1, 1, 0), seL4_ARM_Default_VMAttributes); // no write, 0x03 is default attributes.
 }
 
 static inline int microkit_arm_page_map_rw(unsigned long frame_cap, unsigned long vspace, unsigned long vaddr) {
-    return seL4_ARM_Page_Map(frame_cap, vspace, vaddr, seL4_CapRights_new(1, 1, 1, 1), 0x03); // all rights, 0x03 is default attributes.
+    return seL4_ARM_Page_Map(frame_cap, vspace, vaddr, seL4_CapRights_new(1, 1, 1, 1), seL4_ARM_Default_VMAttributes); // all rights, 0x03 is default attributes.
 }
 
 static inline int microkit_arm_page_unmap(unsigned long frame_cap) {

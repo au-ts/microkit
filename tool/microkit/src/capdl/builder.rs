@@ -117,7 +117,7 @@ pub const SLOT_SIZE: u64 = 1 << SLOT_BITS;
 // information for the pager
 pub const FRAME_BASE: u64 = 0x8000000000;
 pub const FRAME_METADATA_BASE: u64 = 0x2000000000; 
-pub const MAX_PDS: usize = 64;
+pub const MAX_PDS: usize = 1;
 
 #[repr(C)]
 struct FrameInfoRaw {
@@ -1084,8 +1084,8 @@ pub fn build_capdl_spec(
             if unbacked_mrs.contains(&map.mr) && pd.name != "pager" {
 
                 let mut vaddr = map.vaddr;
-                for i in 0..mr_name_to_mr.get(&map.mr).unwrap().page_count {
-                    // println!("making paging structure for pd {} vaddr {:x} with size {:x}\n", pd.name, vaddr, mr_name_to_mr.get(&map.mr).unwrap().page_size_bytes());
+                println!("will be making structures for {} things.", (mr_name_to_mr.get(&map.mr).unwrap().page_count * 1200));
+                for i in 0..(mr_name_to_mr.get(&map.mr).unwrap().page_count * 1200) { // this is 128000
                     create_page_structure_recursive(
                         top_pt_level_number(kernel_config), 
                         kernel_config, 
@@ -1223,7 +1223,7 @@ pub fn build_capdl_spec(
         let mut dest_offset = 0;
         // vector of tuple of frame cap, frame id and index of pd which owns frame.aaaaa
         for i in &unmapped_frames {
-            let current_frame_cap = capdl_util_make_frame_cap(i.1, true, true, true, false);
+            let current_frame_cap = capdl_util_make_frame_cap(i.1, true, true, true, true);
             // capdl_util_insert_cap_into_cspace(&mut spec_container, pd_id_to_cspace_id[&pager_idx], i.0 as u32, current_frame_cap.clone());
             capdl_util_insert_cap_into_cspace(&mut spec_container, pd_id_to_cspace_id[&pager_idx], i.0 as u32, current_frame_cap.clone());
             // frame_cap_counter += 1;
@@ -1237,9 +1237,7 @@ pub fn build_capdl_spec(
                 frame_base,
             ) {
                 Ok(_) => {
-                    println!("{:x} {}", frame_base, PageSize::Small as u64);
                     frame_base += (PageSize::Small as u64);
-                    println!("a frame has been sucessfully mapped to the pager\n");
                 }
                 Err(map_err_reason) => {
                     return Err(format!(
@@ -1291,9 +1289,7 @@ pub fn build_capdl_spec(
                 frame_metadata_addr,
             ) {
                 Ok(_) => {
-                    println!("{:x} {}", frame_metadata_addr, PageSize::Small as u64);
                     frame_metadata_addr += (PageSize::Small as u64);
-                    println!("a frame has been sucessfully mapped to the pager\n");
                 }
                 Err(map_err_reason) => {
                     return Err(format!(
@@ -1316,7 +1312,6 @@ pub fn build_capdl_spec(
         println!("NUMBER OF FRAMES: {}\n", unmapped_frames.len());
         // TODO: I also need to send vspace cap id's over, this should just be an array of size 128...
         elfs[pager_idx].write_symbol("vspaces", vspace_slots.iter().flat_map(|&f| f.to_ne_bytes()).collect::<Vec<_>>().as_slice());
-        println!("Rust struct size: {}", std::mem::size_of::<FrameInfoRaw>());
     }
 
     // *********************************
