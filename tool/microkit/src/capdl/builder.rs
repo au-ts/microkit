@@ -616,7 +616,7 @@ pub fn build_capdl_spec(
         let pd_vspace_obj = capdl_util_make_page_table_cap(pd_vspace_obj_id);
 
         pd_shadow_cspace_inner.insert(CapMapType::Tcb, pd_tcb_obj.clone());
-        pd_shadow_cspace_inner.insert(CapMapType::Vspace, pd_vspace_obj.clone());
+        pd_shadow_cspace_inner.insert(CapMapType::VSpace, pd_vspace_obj.clone());
 
         // In the benchmark configuration, we allow PDs to access their own TCB.
         // This is necessary for accessing kernel's benchmark API.
@@ -1021,7 +1021,7 @@ pub fn build_capdl_spec(
         );
         let pd_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS as u64;
         let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, pd_guard_size as u8);
-        pd_shadow_cspace_inner.insert(CapMapType::Cnode, pd_cnode_cap.clone());
+        pd_shadow_cspace_inner.insert(CapMapType::CSpace, pd_cnode_cap.clone());
         caps_to_bind_to_tcb.push(capdl_util_make_cte(
             TcbBoundSlot::CSpace as u32,
             pd_cnode_cap,

@@ -298,10 +298,10 @@ pub struct ProtectionDomain {
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
 pub enum CapMapType {
-    Tcb = 0,
+    Tcb,
     Sc,
-    Vspace,
-    Cnode,
+    VSpace,
+    CSpace,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1339,8 +1339,8 @@ impl CapMap {
         let cap_type = match xml_cap_type {
             "tcb" => CapMapType::Tcb,
             "sc" => CapMapType::Sc,
-            "vspace" => CapMapType::Vspace,
-            "cnode" => CapMapType::Cnode,
+            "vspace" => CapMapType::VSpace,
+            "cspace" => CapMapType::CSpace,
             _ => return Err(format!("Cap type: '{xml_cap_type}' is not supported.")),
         };
 
