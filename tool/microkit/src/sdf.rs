@@ -21,7 +21,7 @@ use crate::sel4::{
 };
 use crate::util::{get_full_path, ranges_overlap, round_up, str_to_bool};
 use crate::MAX_PDS;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -309,6 +309,8 @@ pub struct CapMap {
     pub cap_type: CapMapType,
     pub pd_name: String,
     pub dest_cspace_slot: u64,
+    /// Location in the parsed SDF file
+    text_pos: roxmltree::TextPos,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1361,6 +1363,7 @@ impl CapMap {
             cap_type,
             pd_name,
             dest_cspace_slot,
+            text_pos: xml_sdf.doc.text_pos_at(node.range().start),
         })
     }
 }
@@ -2141,26 +2144,30 @@ pub fn parse(
     // Ensure that there are no overlapping extra cap maps in the user caps region
     // and we are not mapping in the same cap from the same source more than once
     for pd in &pds {
-        let mut user_cap_slots = Vec::new();
-        let mut seen_pd_cap_maps: Vec<(CapMapType, String)> = Vec::new();
+        let mut user_cap_slots = HashMap::<u64, Vec<_>>::new();
 
         for cap_map in &pd.cap_maps {
-            if user_cap_slots.contains(&cap_map.dest_cspace_slot) {
-                return Err(format!(
-                    "Error: Overlapping cap slot: {} in protection domain: '{}'",
-                    cap_map.dest_cspace_slot, pd.name
-                ));
-            } else {
-                user_cap_slots.push(cap_map.dest_cspace_slot);
-            }
+            user_cap_slots
+                .entry(cap_map.dest_cspace_slot)
+                .and_modify(|v| v.push(cap_map))
+                .or_insert(vec![cap_map]);
+        }
 
-            if seen_pd_cap_maps.contains(&(cap_map.cap_type, cap_map.pd_name.clone())) {
+        for (slot, cap_maps) in user_cap_slots.iter() {
+            if cap_maps.len() > 1 {
+                let mut lines = String::new();
+                for mapping in cap_maps {
+                    lines.push_str(&format!(
+                        "\n  type {:?} from '{}' at '{}'",
+                        mapping.cap_type,
+                        mapping.pd_name,
+                        loc_string(&xml_sdf, mapping.text_pos)
+                    ));
+                }
                 return Err(format!(
-                    "Error: Duplicate cap mapping of type '{:?}'. Src PD: '{}', dest PD: '{}'.",
-                    cap_map.cap_type, cap_map.pd_name, pd.name
+                    "Error: overlapping user caps in slot {slot} of protection domain '{}':{}",
+                    pd.name, lines
                 ));
-            } else {
-                seen_pd_cap_maps.push((cap_map.cap_type, cap_map.pd_name.clone()))
             }
         }
     }
