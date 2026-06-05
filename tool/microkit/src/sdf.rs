@@ -1336,6 +1336,7 @@ impl VirtualMachine {
 impl CapMap {
     fn from_xml(xml_sdf: &XmlSystemDescription, node: &roxmltree::Node) -> Result<CapMap, String> {
         check_attributes(xml_sdf, node, &["type", "pd", "dest_cspace_slot"])?;
+        let text_pos = xml_sdf.doc.text_pos_at(node.range().start);
 
         let xml_cap_type = checked_lookup(xml_sdf, node, "type")?;
         let cap_type = match xml_cap_type {
@@ -1343,7 +1344,12 @@ impl CapMap {
             "sc" => CapMapType::Sc,
             "vspace" => CapMapType::VSpace,
             "cspace" => CapMapType::CSpace,
-            _ => return Err(format!("Cap type: '{xml_cap_type}' is not supported.")),
+            _ => {
+                return Err(format!(
+                    "Cap type: '{xml_cap_type}' is not supported at '{}'",
+                    loc_string(&xml_sdf, text_pos)
+                ))
+            }
         };
 
         let pd_name = checked_lookup(xml_sdf, node, "pd")?.to_string();
@@ -1363,7 +1369,7 @@ impl CapMap {
             cap_type,
             pd_name,
             dest_cspace_slot,
-            text_pos: xml_sdf.doc.text_pos_at(node.range().start),
+            text_pos,
         })
     }
 }

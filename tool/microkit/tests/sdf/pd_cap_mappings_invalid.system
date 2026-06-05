@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright 2026, UNSW
+
+ SPDX-License-Identifier: BSD-2-Clause
+-->
+<system>
+    <protection_domain name="pd_a">
+        <program_image path="test" />
+    </protection_domain>
+
+    <protection_domain name="pd_b">
+        <program_image path="test" />
+
+        <cap type="gerbils" pd="pd_a" dest_cspace_slot="4" />
+    </protection_domain>
+</system>
