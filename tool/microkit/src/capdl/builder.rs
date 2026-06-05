@@ -19,7 +19,7 @@ use crate::{
     capdl::{
         irq::create_irq_handler_cap,
         memory::{create_vspace, create_vspace_ept, map_page},
-        spec::{capdl_obj_physical_size_bits, ElfContent},
+        spec::{capdl_obj_physical_size_bits, BytesContent, ElfContent, FillContent},
         util::*,
     },
     elf::ElfFile,
@@ -111,7 +111,7 @@ const PD_SCHEDCONTEXT_EXTRA_SIZE_BITS: u64 = PD_SCHEDCONTEXT_EXTRA_SIZE.ilog2() 
 pub const SLOT_BITS: u64 = 5;
 pub const SLOT_SIZE: u64 = 1 << SLOT_BITS;
 
-pub type FrameFill = Fill<ElfContent>;
+pub type FrameFill = Fill<FillContent>;
 pub type CapDLNamedObject = NamedObject<FrameFill>;
 
 pub struct ExpectedAllocation {
@@ -145,6 +145,9 @@ impl CapDLSpecContainer {
                 untyped_covers: Vec::new(),
                 cached_orig_cap_slots: None,
                 log_level: None,
+                domain_idx_shift: None,
+                domain_schedule: None,
+                domain_set_start: None,
             },
             expected_allocations: HashMap::new(),
         }
@@ -237,12 +240,12 @@ impl CapDLSpecContainer {
                             start: dest_offset,
                             end: dest_offset + len_to_cpy,
                         },
-                        content: FillEntryContent::Data(ElfContent {
+                        content: FillEntryContent::Data(FillContent::ElfContent(ElfContent {
                             elf_id,
                             elf_seg_idx: seg_idx,
                             elf_seg_data_range: (section_offset as usize
                                 ..((section_offset + len_to_cpy) as usize)),
-                        }),
+                        })),
                     });
                 }
 
@@ -329,10 +332,12 @@ impl CapDLSpecContainer {
             prio: 0,
             max_prio: 0,
             resume: false,
+            fpu_disabled: false,
             ip: entry_point.into(),
             sp: 0.into(),
             gprs: Vec::new(),
             master_fault_ep: None,
+            domain: None,
         };
 
         let tcb_inner_obj = object::Tcb {
@@ -475,7 +480,7 @@ pub fn build_capdl_spec(
     )
     .unwrap();
 
-    // At this point, all of the required objects for the monitor have been created and it caps inserted into
+    // At this point, all of the required objects for the monitor have been created and its caps inserted into
     // the correct slot in the CSpace. We need to bind those objects into the TCB for the monitor to use them.
     // In addition, `add_elf_to_spec()` doesn't fill most the details in the TCB.
     // Now fill them in: stack ptr, priority, ipc buf vaddr, etc.
@@ -517,11 +522,39 @@ pub fn build_capdl_spec(
             let paddr = mr
                 .paddr()
                 .map(|base_paddr| Word(base_paddr + (frame_sequence * mr.page_size_bytes())));
+
+            let frame_fill = if let Some(prefill_bytes) = &mr.prefill_bytes {
+                let starting_byte_idx = frame_sequence * mr.page_size_bytes();
+                let remaining_bytes_to_fill = prefill_bytes.len() as u64 - starting_byte_idx;
+                let num_bytes_to_fill = min(mr.page_size_bytes(), remaining_bytes_to_fill);
+
+                let mut frame_bytes = vec![];
+                frame_bytes.extend_from_slice(
+                    &prefill_bytes[starting_byte_idx as usize
+                        ..(starting_byte_idx + num_bytes_to_fill) as usize],
+                );
+
+                FrameFill {
+                    entries: [FillEntry {
+                        range: Range {
+                            start: 0,
+                            end: num_bytes_to_fill,
+                        },
+                        content: FillEntryContent::Data(FillContent::BytesContent(BytesContent {
+                            bytes: frame_bytes,
+                        })),
+                    }]
+                    .to_vec(),
+                }
+            } else {
+                FrameFill {
+                    entries: [].to_vec(),
+                }
+            };
+
             frame_ids.push(capdl_util_make_frame_obj(
                 &mut spec_container,
-                Fill {
-                    entries: [].to_vec(),
-                },
+                frame_fill,
                 &format!("mr_{}_{:09}", mr.name, frame_sequence),
                 paddr,
                 frame_size_bits as u8,
@@ -932,20 +965,25 @@ pub fn build_capdl_spec(
                         capdl_util_make_vcpu_cap(vm_vcpu_obj_id),
                     ));
 
+                    // vCPU should default to CPU that the PD runs if not explicitly specified.
+                    let vcpu_affinity = vcpu.cpu.unwrap_or(pd.cpu);
                     // Finally create TCB, unlike PDs, VMs are suspended by default until resume'd by their parent.
                     let vm_vcpu_tcb_inner_obj = object::Tcb {
                         slots: caps_to_bind_to_vm_tcbs,
                         extra: Box::new(object::TcbExtraInfo {
                             ipc_buffer_addr: Word(0),
-                            affinity: Word(vcpu.cpu.0.into()),
+                            affinity: Word(vcpu_affinity.0.into()),
                             prio: virtual_machine.priority,
                             max_prio: virtual_machine.priority,
+                            // Given the use cases of VMs, for now we always give them FPU access.
+                            fpu_disabled: false,
                             resume: false,
                             // VMs do not have program images associated with them so these are always zero.
                             ip: Word(0),
                             sp: Word(0),
                             gprs: [].to_vec(),
                             master_fault_ep: None, // Not used on MCS kernel.
+                            domain: None,
                         }),
                     };
                     let vm_vcpu_tcb_obj_id = spec_container.add_root_object(NamedObject {
@@ -1009,6 +1047,7 @@ pub fn build_capdl_spec(
             pd_tcb.extra.master_fault_ep = None; // Not used on MCS kernel.
             pd_tcb.extra.prio = pd.priority;
             pd_tcb.extra.max_prio = pd.priority;
+            pd_tcb.extra.fpu_disabled = !pd.fpu;
             pd_tcb.extra.resume = true;
 
             pd_tcb.slots.extend(caps_to_bind_to_tcb);
