@@ -1025,6 +1025,7 @@ Additionally, it supports the following child elements:
 * `protection_domain`: (zero or more) Describes a child protection domain.
 * `virtual_machine`: (zero or one) Describes a child virtual machine.
 * `ioport`: (zero or more) Describes an I/O port, x86-64 only.
+* `cspace`: (zero or one) Describes ["extra" capabilities](#sdf-cspace) in the microkit-provided CSpace.
 
 The `program_image` element has the following attributes:
 
@@ -1124,6 +1125,28 @@ It supports the following attributes:
 * `prefill_path`: (optional) Path to a file containing data that the memory region will be filled with at initialisation.
 
 The `memory_region` element does not support any child elements.
+
+## `cspace` {#sdf-cspace}
+
+The `cspace` element represents the *Capability Space* of each protection domain.
+This is an advanced feature designed for users of Microkit who want more complex runtime behaviour than the system description file allows.
+For more details on how CSpaces and capabilities work, please see the ['Capability Spaces' section of the seL4 reference manual](https://sel4.systems/Info/Docs/seL4-manual-latest.pdf#chapter.3).
+
+It supports no attributes, but supports the following elements as children:
+
+* `cap_tcb`: A capability to a protection domain's Thread Control Block (TCB).
+* `cap_sc`: A capability to a protection domain's Scheduling Context (SC).
+* `cap_vspace`: A capability to a protection domain's VSpace.
+* `cap_cspace`: A capability to a protection domain's CSpace.
+
+All of the elements support the `slot` attribute, which is is an opaque identifier used to address the capability at runtime.
+To convert the `slot` to an `seL4_CPtr`, use the `seL4_CPtr cspace_cap_slot_to_cptr(seL4_Word slot)` function.
+
+See the 'cap_sharing' example packaged in your SDK or [on GitHub](https://github.com/seL4/microkit/tree/main/example/cap_sharing).
+
+The `cap_tcb`, `cap_sc`, `cap_vspace`, and `cap_cspace` elements all support the `pd` attribute.
+The `pd` attribute contains the name of the protection domain for who the TCB, SC, VSpace, or CSpace belongs to.
+
 
 ### Page sizes by architecture
 
