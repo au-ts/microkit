@@ -1151,7 +1151,7 @@ pub fn build_capdl_spec(
                 cap_map.pd_name, pd.name
             ))?;
 
-            let pd_shadow_cspace_inner = pd_shadow_cspace.get(pd_src_idx).unwrap();
+            let pd_shadow_cspace_inner = pd_shadow_cspace[pd_src_idx];
 
             let pd_obj = pd_shadow_cspace_inner
                 .get(&cap_map.cap_type)

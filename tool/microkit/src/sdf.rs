@@ -1347,7 +1347,7 @@ impl CapMap {
             _ => {
                 return Err(format!(
                     "Cap type: '{xml_cap_type}' is not supported at '{}'",
-                    loc_string(&xml_sdf, text_pos)
+                    loc_string(xml_sdf, text_pos)
                 ))
             }
         };
