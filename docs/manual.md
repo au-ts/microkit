@@ -1140,7 +1140,7 @@ It supports no attributes, but supports the following elements as children:
 * `cap_cspace`: A capability to a protection domain's CSpace.
 
 All of the elements support the `slot` attribute, which is is an opaque identifier used to address the capability at runtime.
-To convert the `slot` to an `seL4_CPtr`, use the `seL4_CPtr cspace_cap_slot_to_cptr(seL4_Word slot)` function.
+To convert the `slot` to an `seL4_CPtr`, use the `seL4_CPtr microkit_cspace_slot_to_cptr(seL4_Word slot)` function.
 
 See the 'cap_sharing' example packaged in your SDK or [on GitHub](https://github.com/seL4/microkit/tree/main/example/cap_sharing).
 
