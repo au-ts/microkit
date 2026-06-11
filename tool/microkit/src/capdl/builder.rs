@@ -118,6 +118,15 @@ pub struct ExpectedAllocation {
     pub paddr: u64,
 }
 
+struct PDShadowCspace {
+    cspace: ObjectId,
+    notification: ObjectId,
+    endpoint: Option<ObjectId>,
+    sched_context: ObjectId,
+    tcb: ObjectId,
+    vspace: ObjectId,
+}
+
 pub struct CapDLSpecContainer {
     pub spec: Spec<FrameFill>,
     /// Track allocations as we build the system for later use by the report.
@@ -578,16 +587,6 @@ pub fn build_capdl_spec(
     } else {
         None
     };
-
-    #[derive(Debug)]
-    struct PDShadowCspace {
-        cspace: ObjectId,
-        notification: ObjectId,
-        endpoint: Option<ObjectId>,
-        sched_context: ObjectId,
-        tcb: ObjectId,
-        vspace: ObjectId,
-    }
 
     // This object keeps track of object IDs for various 'important' / nameable kernel objects for
     // each PD so that we can make various references to them at later steps.
