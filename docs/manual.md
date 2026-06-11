@@ -1144,8 +1144,8 @@ To convert the `slot` to an `seL4_CPtr`, use the `seL4_CPtr microkit_cspace_slot
 
 See the 'cap_sharing' example packaged in your SDK or [on GitHub](https://github.com/seL4/microkit/tree/main/example/cap_sharing).
 
-The `cap_tcb`, `cap_sc`, `cap_vspace`, and `cap_cspace` elements all support the `pd` attribute.
-The `pd` attribute contains the name of the protection domain for who the TCB, SC, VSpace, or CSpace belongs to.
+All capability elements (currently) all support the `pd` attribute, the name of the protection domain that the capability is from.
+For instance, `<cap_tcb slot="1" pd="alpha">` will place the TCB of PD 'alpha' in the CSpace of the current PD.
 
 
 ### Page sizes by architecture
