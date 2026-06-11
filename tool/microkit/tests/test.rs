@@ -1016,4 +1016,13 @@ mod system {
             "Cap type: 'gerbils' is not supported at 'pd_cap_mappings_invalid.system:16:13'",
         )
     }
+
+    #[test]
+    fn test_cap_mappings_invalid_pd_ref() {
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_cap_mappings_invalid_pd_ref.system",
+            "Error: unknown PD name 'invalid': pd_cap_mappings_invalid_pd_ref.system:12:13",
+        )
+    }
 }
