@@ -1003,8 +1003,8 @@ mod system {
             &DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_cap_mappings_overlapping.system",
             r#"Error: overlapping user caps in slot 4 of protection domain 'pd_b':
-  type CSpace from 'pd_a' at 'pd_cap_mappings_overlapping.system:21:9'
-  type CSpace from 'pd_a' at 'pd_cap_mappings_overlapping.system:23:9'"#,
+  type CSpace from 'pd_a' at 'pd_cap_mappings_overlapping.system:24:13'
+  type CSpace from 'pd_a' at 'pd_cap_mappings_overlapping.system:26:13'"#,
         )
     }
 
@@ -1013,7 +1013,7 @@ mod system {
         check_error(
             &DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_cap_mappings_invalid.system",
-            "Cap type: 'gerbils' is not supported at 'pd_cap_mappings_invalid.system:15:9'",
+            "Cap type: 'gerbils' is not supported at 'pd_cap_mappings_invalid.system:16:13'",
         )
     }
 }

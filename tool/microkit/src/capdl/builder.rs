@@ -1161,7 +1161,7 @@ pub fn build_capdl_spec(
             capdl_util_insert_cap_into_cspace(
                 &mut spec_container,
                 pd_dest_cspace_id,
-                (PD_BASE_USER_CAPS + cap_map.dest_cspace_slot) as u32,
+                (PD_BASE_USER_CAPS + cap_map.slot) as u32,
                 pd_obj,
             );
         }

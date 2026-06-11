@@ -308,9 +308,17 @@ pub enum CapMapType {
 pub struct CapMap {
     pub cap_type: CapMapType,
     pub pd_name: String,
-    pub dest_cspace_slot: u64,
+    // The destination "slot" in the CSpace: note that this is "opaque" and
+    // can be shifted depending on the location in the CSpace to work as the CPtr,
+    // but here it is given as the index into the CNode.
+    pub slot: u64,
     /// Location in the parsed SDF file
     text_pos: roxmltree::TextPos,
+}
+
+#[derive(Debug)]
+pub struct CSpace {
+    cap_maps: Vec<CapMap>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -628,11 +636,11 @@ impl ProtectionDomain {
         let mut ioports = Vec::new();
         let mut setvars: Vec<SysSetVar> = Vec::new();
         let mut child_pds = Vec::new();
-        let mut cap_maps = Vec::new();
 
         let mut program_image = None;
         let mut program_image_for_symbols = None;
         let mut virtual_machine = None;
+        let mut cspace = None;
 
         // Default to minimum priority
         let priority = if let Some(xml_priority) = node.attribute("priority") {
@@ -1151,8 +1159,16 @@ impl ProtectionDomain {
 
                     virtual_machine = Some(vm);
                 }
-                "cap" => {
-                    cap_maps.push(CapMap::from_xml(xml_sdf, &child)?);
+                "cspace" => {
+                    if cspace.is_some() {
+                        return Err(value_error(
+                            xml_sdf,
+                            node,
+                            "cspace must only be specified once".to_string(),
+                        ));
+                    }
+
+                    cspace = Some(CSpace::from_xml(xml_sdf, &child)?);
                 }
                 _ => {
                     let pos = xml_sdf.doc.text_pos_at(child.range().start);
@@ -1192,7 +1208,7 @@ impl ProtectionDomain {
             irqs,
             ioports,
             setvars,
-            cap_maps,
+            cap_maps: cspace.map(|cspace| cspace.cap_maps).unwrap_or_default(),
             child_pds,
             virtual_machine,
             has_children,
@@ -1334,43 +1350,62 @@ impl VirtualMachine {
 }
 
 impl CapMap {
-    fn from_xml(xml_sdf: &XmlSystemDescription, node: &roxmltree::Node) -> Result<CapMap, String> {
-        check_attributes(xml_sdf, node, &["type", "pd", "dest_cspace_slot"])?;
-        let text_pos = xml_sdf.doc.text_pos_at(node.range().start);
-
-        let xml_cap_type = checked_lookup(xml_sdf, node, "type")?;
-        let cap_type = match xml_cap_type {
-            "tcb" => CapMapType::Tcb,
-            "sc" => CapMapType::Sc,
-            "vspace" => CapMapType::VSpace,
-            "cspace" => CapMapType::CSpace,
-            _ => {
-                return Err(format!(
-                    "Cap type: '{xml_cap_type}' is not supported at '{}'",
-                    loc_string(xml_sdf, text_pos)
-                ))
-            }
-        };
+    fn from_xml(
+        cap_type: CapMapType,
+        xml_sdf: &XmlSystemDescription,
+        node: &roxmltree::Node,
+    ) -> Result<CapMap, String> {
+        // At the moment the four cap maps we support all have the 'pd' element,
+        // so we can include it here. When that stops being the case we will
+        // have to rework this a bit.
+        check_attributes(xml_sdf, node, &["slot", "pd"])?;
 
         let pd_name = checked_lookup(xml_sdf, node, "pd")?.to_string();
-        let dest_cspace_slot =
-            sdf_parse_number(checked_lookup(xml_sdf, node, "dest_cspace_slot")?, node)?;
 
-        if dest_cspace_slot >= CAP_MAP_MAX_SLOT {
+        let slot = sdf_parse_number(checked_lookup(xml_sdf, node, "slot")?, node)?;
+
+        // TODO: Rework this so that we don't have a fixed upper limit.
+        if slot >= CAP_MAP_MAX_SLOT {
             return Err(value_error(
                 xml_sdf,
                 node,
-                format!("There are only {CAP_MAP_MAX_SLOT} destination cspace slots available.")
-                    .to_string(),
+                format!("There are only {CAP_MAP_MAX_SLOT} destination cspace slots available."),
             ));
         }
 
         Ok(CapMap {
             cap_type,
             pd_name,
-            dest_cspace_slot,
-            text_pos,
+            slot,
+            text_pos: xml_sdf.doc.text_pos_at(node.range().start),
         })
+    }
+}
+
+impl CSpace {
+    fn from_xml(xml_sdf: &XmlSystemDescription, node: &roxmltree::Node) -> Result<Self, String> {
+        check_attributes(xml_sdf, node, &[])?;
+
+        let mut cap_maps = vec![];
+
+        for child in node.children().filter(|c| c.is_element()) {
+            cap_maps.push(match child.tag_name().name() {
+                "cap_tcb" => CapMap::from_xml(CapMapType::Tcb, xml_sdf, &child)?,
+                "cap_sc" => CapMap::from_xml(CapMapType::Sc, xml_sdf, &child)?,
+                "cap_vspace" => CapMap::from_xml(CapMapType::VSpace, xml_sdf, &child)?,
+                "cap_cspace" => CapMap::from_xml(CapMapType::CSpace, xml_sdf, &child)?,
+                child_name => {
+                    let location = loc_string(xml_sdf, xml_sdf.doc.text_pos_at(child.range().start));
+                    if let Some(type_name) = child_name.strip_prefix("cap_") {
+                        return Err(format!("Cap type: '{type_name}' is not supported at '{location}'"));
+                    } else {
+                        return Err(format!("Element '{child_name}' is not supported in a <cspace> element at '{location}'"));
+                    }
+                }
+            })
+        }
+
+        Ok(CSpace { cap_maps })
     }
 }
 
@@ -2154,7 +2189,7 @@ pub fn parse(
 
         for cap_map in &pd.cap_maps {
             user_cap_slots
-                .entry(cap_map.dest_cspace_slot)
+                .entry(cap_map.slot)
                 .and_modify(|v| v.push(cap_map))
                 .or_insert(vec![cap_map]);
         }

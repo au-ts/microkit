@@ -12,6 +12,8 @@
     <protection_domain name="pd_b">
         <program_image path="test" />
 
-        <cap type="gerbils" pd="pd_a" dest_cspace_slot="4" />
+        <cspace>
+            <cap_gerbils slot="4" pd="pd_a" />
+        </cspace>
     </protection_domain>
 </system>

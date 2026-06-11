@@ -8,18 +8,22 @@
     <protection_domain name="pd_a">
         <program_image path="test" />
 
-        <!-- not a duplicate slot -->
-        <cap type="tcb"    pd="pd_a" dest_cspace_slot="1" />
+        <cspace>
+            <!-- not a duplicate slot -->
+            <cap_tcb slot="1" pd="pd_a" />
+        </cspace>
     </protection_domain>
 
     <protection_domain name="pd_b">
         <program_image path="test" />
 
-        <cap type="tcb"    pd="pd_a" dest_cspace_slot="1" />
-        <cap type="sc"     pd="pd_a" dest_cspace_slot="2" />
-        <cap type="vspace" pd="pd_a" dest_cspace_slot="3" />
-        <cap type="cspace" pd="pd_a" dest_cspace_slot="4" />
-        <!-- duplicate slot -->
-        <cap type="cspace" pd="pd_a" dest_cspace_slot="4" />
+        <cspace>
+            <cap_tcb    slot="1" pd="pd_a" />
+            <cap_sc     slot="2" pd="pd_a" />
+            <cap_vspace slot="3" pd="pd_a" />
+            <cap_cspace slot="4" pd="pd_a" />
+            <!-- duplicate slot -->
+            <cap_cspace slot="4" pd="pd_a" />
+        </cspace>
     </protection_domain>
 </system>
