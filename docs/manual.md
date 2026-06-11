@@ -1136,6 +1136,7 @@ It supports no attributes, but supports the following elements as children:
 
 * `cap_tcb`: A capability to a protection domain's Thread Control Block (TCB).
 * `cap_sc`: A capability to a protection domain's Scheduling Context (SC).
+  If the protection domain is passive, this is a capability to the notification's scheduling context.
 * `cap_vspace`: A capability to a protection domain's VSpace.
 * `cap_cspace`: A capability to a protection domain's CSpace.
 
