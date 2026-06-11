@@ -307,7 +307,15 @@ pub enum CapMapType {
 #[derive(Debug, PartialEq, Eq)]
 pub struct CapMap {
     pub cap_type: CapMapType,
+    // FIXME: This is quite a hack. Basically, we need to be able to reference
+    // arbitrary PDs, but to gather the index, we need to know all the PDs.
+    // However, at the time of parsing the cap maps, we are in the process
+    // of parsing all the PDs. In lieu of something better (in my - @midnightveil's
+    // opinion, making everything think in terms of PD names, and something
+    // that was necessary to do for the multikernel changes); the pd idx will
+    // be filled out later during SDF parse process.
     pub pd_name: String,
+    pub pd: Option<usize>,
     // The destination "slot" in the CSpace: note that this is "opaque" and
     // can be shifted depending on the location in the CSpace to work as the CPtr,
     // but here it is given as the index into the CNode.
@@ -1376,6 +1384,8 @@ impl CapMap {
         Ok(CapMap {
             cap_type,
             pd_name,
+            // FIXME: Hack, filled out later.
+            pd: None,
             slot,
             text_pos: xml_sdf.doc.text_pos_at(node.range().start),
         })
@@ -1989,6 +1999,26 @@ pub fn parse(
         }
 
         channels.push(ch);
+    }
+
+    // FIXME: No we post-fill the PD ids in the capmap elements.
+    let pd_names_to_id: HashMap<_, _> = pds
+        .iter()
+        .enumerate()
+        .map(|(idx, pd)| (pd.name.clone(), idx))
+        .collect();
+    for pd in pds.iter_mut() {
+        for cap_map in pd.cap_maps.iter_mut() {
+            let Some(&pd) = pd_names_to_id.get(&cap_map.pd_name) else {
+                return Err(format!(
+                    "Error: unknown PD name '{}': {}",
+                    cap_map.pd_name,
+                    loc_string(&xml_sdf, cap_map.text_pos)
+                ));
+            };
+
+            cap_map.pd = Some(pd);
+        }
     }
 
     // Now that we have parsed everything in the system description we can validate any
