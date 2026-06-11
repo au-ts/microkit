@@ -508,3 +508,16 @@ static inline void microkit_deferred_irq_ack(microkit_channel ch)
     microkit_signal_msg = seL4_MessageInfo_new(IRQAckIRQ, 0, 0, 0);
     microkit_signal_cap = (BASE_IRQ_CAP + ch);
 }
+
+/**
+ * Convert the "slot" identifier from the system file for the extra user caps
+ * <cspace> element into the seL4_CPtr at runtime.
+ **/
+static inline seL4_CPtr microkit_cspace_slot_to_cptr(seL4_Word slot)
+{
+    if (slot > MICROKIT_MAX_USER_CAPS) {
+        return seL4_CapNull;
+    }
+
+    return BASE_USER_CAPS + slot;
+}
