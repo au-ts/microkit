@@ -25,3 +25,20 @@ make BUILD_DIR=build MICROKIT_BOARD=<board> MICROKIT_CONFIG=<debug/release/bench
 ## Running
 
 See instructions for your board in the manual.
+
+You should see the following output:
+
+```
+INFO  [sel4_capdl_initializer::initialize] Starting CapDL initializer
+INFO  [sel4_capdl_initializer::initialize] Starting threads
+MON|INFO: Microkit Monitor started!
+|secondary| hello, world
+|primary  | hello, world
+|primary  | notifying secondary
+|secondary| notified
+|primary  | suspending secondary
+|primary  | notifying secondary (it should not print)
+|primary  | resuming secondary (it should then print)
+|secondary| notified
+|primary  | halting (success)...
+```
