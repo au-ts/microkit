@@ -702,10 +702,10 @@ pub fn build_capdl_spec(
             pd.budget,
             0x100 + pd_global_idx as u64,
         );
-
+        let pd_sc_cap = capdl_util_make_sc_cap(pd_sc_obj_id);
         caps_to_bind_to_tcb.push(capdl_util_make_cte(
             TcbBoundSlot::SchedContext as u32,
-            capdl_util_make_sc_cap(pd_sc_obj_id),
+            pd_sc_cap,
         ));
 
         // Step 3-5 Create fault Endpoint cap to parent/monitor
@@ -1016,9 +1016,10 @@ pub fn build_capdl_spec(
             caps_to_insert_to_pd_cspace,
         );
         let pd_guard_size = kernel_config.cap_address_bits - PD_CAP_BITS as u64;
+        let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, pd_guard_size as u8);
         caps_to_bind_to_tcb.push(capdl_util_make_cte(
             TcbBoundSlot::CSpace as u32,
-            capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, pd_guard_size as u8),
+            pd_cnode_cap,
         ));
 
         // Step 3-14 Set the TCB parameters and all the various caps that we need to bind to this TCB.
