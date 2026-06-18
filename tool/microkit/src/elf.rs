@@ -62,15 +62,15 @@ struct ElfSectionHeader64 {
 }
 
 #[repr(C, packed)]
-struct ElfProgramHeader64 {
-    type_: u32,
-    flags: u32,
-    offset: u64,
-    vaddr: u64,
-    paddr: u64,
-    filesz: u64,
-    memsz: u64,
-    align: u64,
+pub struct ElfProgramHeader64 {
+    pub type_: u32,
+    pub flags: u32,
+    pub offset: u64,
+    pub vaddr: u64,
+    pub paddr: u64,
+    pub filesz: u64,
+    pub memsz: u64,
+    pub align: u64,
 }
 
 #[repr(C, packed)]
@@ -100,7 +100,8 @@ struct ElfHeader64 {
 
 const ELF_MAGIC: &[u8; 4] = b"\x7FELF";
 
-const PHENT_TYPE_LOADABLE: u32 = 1;
+pub const PHENT_TYPE_LOADABLE: u32 = 1;
+pub const PHENT_TYPE_PHDR: u32 = 6;
 
 /// ELF program-header flags (`p_flags`)
 const PF_X: u32 = 0x1;
@@ -129,6 +130,7 @@ pub struct ElfSegment {
     pub virt_addr: u64,
     pub loadable: bool,
     attrs: u32,
+    prog_header_type_maybe: Option<u32>,
 }
 
 impl ElfSegment {
@@ -344,6 +346,7 @@ impl ElfFileReader {
                 virt_addr: phent.vaddr,
                 loadable: phent.type_ == PHENT_TYPE_LOADABLE,
                 attrs: flags,
+                prog_header_type_maybe: Some(phent.type_),
             };
 
             segments.push(segment)
@@ -509,6 +512,7 @@ impl ElfFile {
         execute: bool,
         vaddr: u64,
         data: ElfSegmentData,
+        prog_header_type: Option<u32>,
     ) {
         let r = if read { PF_R } else { 0 };
         let w = if write { PF_W } else { 0 };
@@ -520,12 +524,36 @@ impl ElfFile {
             virt_addr: vaddr,
             loadable: true,
             attrs: r | w | x,
+            prog_header_type_maybe: prog_header_type
         };
         self.segments.push(elf_segment);
     }
 
     pub fn loadable_segments(&self) -> Vec<&ElfSegment> {
         self.segments.iter().filter(|s| s.loadable).collect()
+    }
+
+    pub fn program_headers(&self, data_off_watermark: u64) -> Vec<ElfProgramHeader64> {
+        let mut table = vec![];
+        let mut local_data_off_watermark = data_off_watermark;
+        for seg in self.loadable_segments().iter() {
+            let ph = ElfProgramHeader64 {
+                type_: match seg.prog_header_type_maybe {
+                    Some(prog_header_type) => prog_header_type,
+                    None => PHENT_TYPE_LOADABLE,
+                },
+                flags: seg.attrs,
+                offset: local_data_off_watermark,
+                vaddr: seg.virt_addr,
+                paddr: seg.phys_addr,
+                filesz: seg.file_size(),
+                memsz: seg.mem_size(),
+                align: 0,
+            };
+            local_data_off_watermark += ph.filesz;
+            table.push(ph);
+        }
+        table
     }
 
     /// Re-create a minimal ELF file with all the program and section headers.
@@ -589,22 +617,14 @@ impl ElfFile {
             + (shnum as u64) * (shentsize as u64);
         let mut data_offs = [].to_vec();
 
+        println!("wallahi {}", data_off_watermark);
+
         // First write out the program headers table
-        for (i, seg) in self.loadable_segments().iter().enumerate() {
-            let ph_serialised = ElfProgramHeader64 {
-                type_: PHENT_TYPE_LOADABLE, // loadable
-                flags: seg.attrs,
-                offset: data_off_watermark,
-                vaddr: seg.virt_addr,
-                paddr: seg.phys_addr,
-                filesz: seg.file_size(),
-                memsz: seg.mem_size(),
-                align: 0,
-            };
+        for (i, ph) in self.program_headers(data_off_watermark).iter().enumerate() {
             data_offs.push(data_off_watermark);
 
             elf_file
-                .write_all(unsafe { struct_to_bytes(&ph_serialised) })
+                .write_all(unsafe { struct_to_bytes(ph) })
                 .unwrap_or_else(|_| {
                     panic!(
                         "Failed to write ELF program header #{} for '{}'",
@@ -613,7 +633,7 @@ impl ElfFile {
                     )
                 });
 
-            data_off_watermark += seg.file_size();
+            data_off_watermark += ph.filesz;
         }
 
         // Then the section headers table, which describe the same thing as the program headers.
