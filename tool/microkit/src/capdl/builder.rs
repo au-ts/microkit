@@ -608,7 +608,6 @@ pub fn build_capdl_spec(
     for mr in system.memory_regions.iter() {
         mr_name_to_mr.insert(&mr.name, &mr);
         if (!mr.backed) {
-            println!("HERE111111\n");
             unbacked_mrs.insert(&mr.name);
         }
         let mut frame_ids = Vec::new();
