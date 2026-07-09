@@ -1095,6 +1095,8 @@ The `io_address_space` element describes an address space used to isolate a give
 It supports the following attributes:
 * `name`: A unique name for the IO address space
 * `peripheral_id`: A unique identifier. This must match the identifier used by the hardware IOMMU or SMMU to identify devices.
+* `domain_id`: A unique domain identifier, synonymous with an ASID. This is not optional due to current
+                constraints with x86 only providing certain information at runtime.
 
 The `io_address_space` element supports the following elements as children:
 
