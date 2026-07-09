@@ -34,6 +34,12 @@ const DEFAULT_AARCH64_KERNEL_CONFIG: sel4::Config = sel4::Config {
     device_regions: None,
     normal_regions: None,
     object_sizes: None,
+    address_space_constants: sel4::AddressSpaceConstants {
+        page_table_index_bits: 9,
+        vspace_index_bits: Some(10),
+        io_page_table_index_bits: None,
+        vspace_user_top: 0xffffffffff,
+    },
 };
 
 const DEFAULT_X86_64_KERNEL_CONFIG: sel4::Config = sel4::Config {
@@ -59,6 +65,12 @@ const DEFAULT_X86_64_KERNEL_CONFIG: sel4::Config = sel4::Config {
     device_regions: None,
     normal_regions: None,
     object_sizes: None,
+    address_space_constants: sel4::AddressSpaceConstants {
+        page_table_index_bits: 9,
+        vspace_index_bits: None,
+        io_page_table_index_bits: Some(9),
+        vspace_user_top: 0x7fffffffefff,
+    },
 };
 
 fn check_success(kernel_config: &sel4::Config, test_name: &str) {
