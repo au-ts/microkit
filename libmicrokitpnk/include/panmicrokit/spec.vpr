@@ -261,8 +261,22 @@ define f_mk_fault_postconditions(heap,gv,ch)
 ///////////////////////////////////////////////////////////////////////////////
 // panmicrokit: tactics                                                      //
 ///////////////////////////////////////////////////////////////////////////////
-// The user can use the following tactics by `inhale`ing them. They preserve
+// The user can use the following tactics by `assert`ing them. They preserve
 // soundness and help proofs go through.
+
+define apply_set_bv64_lshr_suffix_nonzero(i,n,the_set)
+(
+  // Asserting this tactic lets one apply the word lemma
+  // `apply_bv64_lshr_suffix_nonzero` to a whole set of values at once.
+  forall m: Int ::
+  { m in the_set }
+  m in the_set ==> apply_bv64_lshr_suffix_nonzero(i, n, m)
+)
+
+define f_apply_set_bv64_lshr_suffix_nonzero(heap,gv,i,n,the_set)
+  (apply_set_bv64_lshr_suffix_nonzero(i,n,the_set))
+
+// The user can use the following tactics by `inhale`ing them.
 
 define apply_mk_notified_postconditions(ch) 
 (
@@ -285,15 +299,6 @@ define apply_mk_fault_postconditions()
   mkGhost().pending_fault_call == -1
 )
 
-define apply_set_bv64_lshr_suffix_nonzero(i,n,the_set)
-(
-  // Inhaling this tactic lets one apply the word lemma
-  // `apply_bv64_lshr_suffix_nonzero` to a whole set of values at once.
-  forall m: Int ::
-  { m in the_set }
-  m in the_set ==> apply_bv64_lshr_suffix_nonzero(i, n, m)
-)
-
 define f_apply_mk_notified_postconditions(heap,gv,ch) 
   (apply_mk_notified_postconditions(ch))
 
@@ -303,5 +308,3 @@ define f_apply_mk_protected_postconditions(heap,gv)
 define f_apply_mk_fault_postconditions(heap,gv)
   (apply_mk_fault_postconditions())
 
-define f_apply_set_bv64_lshr_suffix_nonzero(heap,gv,i,n,the_set)
-  (apply_set_bv64_lshr_suffix_nonzero(i,n,the_set))

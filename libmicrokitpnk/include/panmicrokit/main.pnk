@@ -184,7 +184,7 @@ fun handler_loop() {
     var 1 irq_index = 0;
     var panseL4_Word irqs_to_ack_orig = patched_microkit_irqs;
     var panseL4_Word irqs_to_ack = patched_microkit_irqs;
-    /@ inhale apply_bv64_lshr0_sem(irqs_to_ack_orig) @/
+    /@ assert apply_bv64_lshr0_sem(irqs_to_ack_orig) @/
     while (irqs_to_ack != 0) {
         /@ invariant (0 <= irq_index) &&
                      irq_index <= 64 &&
@@ -192,12 +192,12 @@ fun handler_loop() {
                      irqs_to_ack == builtin_lshr(irqs_to_ack_orig, irq_index) &&
                      mk_is_patched_irqs(irqs_to_ack_orig)
         @/
-        /@ inhale apply_bv64_lshr64_zero(irqs_to_ack_orig) @/
+        /@ assert apply_bv64_lshr64_zero(irqs_to_ack_orig) @/
         if (irqs_to_ack & 1) {
             microkit_irq_ack(irq_index);
         }
-        /@ inhale apply_bv64_lshr_closed(irqs_to_ack) @/
-        /@ inhale apply_bv64_lshr_compose(irqs_to_ack_orig, irq_index, 1) @/
+        /@ assert apply_bv64_lshr_closed(irqs_to_ack) @/
+        /@ assert apply_bv64_lshr_compose(irqs_to_ack_orig, irq_index, 1) @/
         irqs_to_ack = irqs_to_ack >>> 1;
         irq_index = irq_index + 1;
     }
@@ -256,12 +256,12 @@ fun handler_loop() {
         } else {
             if (is_endpoint) {
                 have_reply = true;
-                /@ inhale apply_bv64_lshr63_bit(badge) @/
+                /@ assert apply_bv64_lshr63_bit(badge) @/
                 reply_tag = uep_protected(badge & CHANNEL_MASK, tag);
             } else {
                 var 1 channel_index = 0;
                 var 1 badge_orig = badge;
-                /@ inhale apply_bv64_lshr0_sem(badge_orig) @/
+                /@ assert apply_bv64_lshr0_sem(badge_orig) @/
                 while (badge != 0) {
                     /@ invariant acc(mkGhost().pending_notified) &&
                                  0 <= channel_index &&
@@ -284,16 +284,16 @@ fun handler_loop() {
                                  user_acc_ghost_state(userGhost()) &&
                                  user_notified_loop_invariant(channel_index, userGhost())
                     @/
-                    /@ inhale apply_bv64_lshr64_zero(badge_orig) @/
+                    /@ assert apply_bv64_lshr64_zero(badge_orig) @/
                     if (badge & 1) {
                         uep_notified(channel_index);
                     }
-                    /@ inhale apply_bv64_lshr_closed(badge) @/
-                    /@ inhale apply_bv64_lshr_compose(badge_orig, channel_index, 1) @/
+                    /@ assert apply_bv64_lshr_closed(badge) @/
+                    /@ assert apply_bv64_lshr_compose(badge_orig, channel_index, 1) @/
                     badge = badge >>> 1;
                     channel_index = channel_index + 1;
                 }
-                /@ inhale apply_set_bv64_lshr_suffix_nonzero(badge_orig,channel_index,mkGhost().pending_notified) @/ 
+                /@ assert apply_set_bv64_lshr_suffix_nonzero(badge_orig,channel_index,mkGhost().pending_notified) @/
             }
         }
         /@ assert mk_no_pending_tasks(mkGhost()) @/

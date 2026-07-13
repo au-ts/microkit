@@ -23,6 +23,18 @@ domain IArray  {
   }
 }
 
+function apply_bv64_from_to_bounded(i: Int): Bool { true }
+function apply_bv64_from_to_id(bv: BitVectorDomain64): Bool { true }
+function apply_bv64_to_bounded(bv: BitVectorDomain64): Bool { true }
+function apply_bv64_and_bool(i: Int, j: Int): Bool { true }
+function apply_bv64_lshr0_sem(i: Int): Bool { true }
+function apply_bv64_lshr1_sem(i: Int): Bool { true }
+function apply_bv64_lshr_closed(i: Int): Bool { true }
+function apply_bv64_lshr_compose(i: Int, n: Int, m: Int): Bool { true }
+function apply_bv64_lshr63_bit(i: Int): Bool { true }
+function apply_bv64_lshr64_zero(i: Int): Bool { true }
+function apply_bv64_lshr_suffix_nonzero(i: Int, n: Int, m: Int): Bool { true }
+
 domain BitVectorDomain64 {
   // We axiomatize bit vector operations directly. This is currently minimal,
   // containing just enough axioms to let us verify the correctness of the
@@ -38,26 +50,22 @@ domain BitVectorDomain64 {
   function bv64_from_int(i: Int): BitVectorDomain64
   function bv64_to_int(i: BitVectorDomain64): Int
 
-  function apply_bv64_from_to_bounded(i: Int): Bool
   axiom bv64_from_to_bounded {
     forall i: Int :: { apply_bv64_from_to_bounded(i) }
       (bounded64(i)) ==>
         bv64_to_int(bv64_from_int(i)) == i
   }
 
-  function apply_bv64_from_to_id(bv: BitVectorDomain64): Bool
   axiom bv64_from_to_id {
     forall bv: BitVectorDomain64 :: { bv64_to_int(bv) }
       bv64_from_int(bv64_to_int(bv)) == bv
   }
 
-  function apply_bv64_to_bounded(bv: BitVectorDomain64): Bool
   axiom bv64_to_bounded {
     forall bv: BitVectorDomain64 :: { apply_bv64_to_bounded(bv) }
       bounded64(bv64_to_int(bv))
   }
 
-  function apply_bv64_and_bool(i: Int, j: Int): Bool
   axiom bv64_and_bool {
     forall i: Int, j: Int :: { apply_bv64_and_bool(i, j) }
       bounded64(i) &&
@@ -75,28 +83,24 @@ domain BitVectorDomain64 {
         ((i != 0 && j != 0) ? 1 : 0)
   }
 
-  function apply_bv64_lshr0_sem(i: Int): Bool
   axiom bv64_lshr0_sem {
     forall i: Int :: { apply_bv64_lshr0_sem(i) }
       bounded64(i) ==>
         bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(0))) == i
   }
 
-  function apply_bv64_lshr1_sem(i: Int): Bool
   axiom bv64_lshr1_sem {
     forall i: Int :: { apply_bv64_lshr1_sem(i) }
       bounded64(i) ==>
         bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(1))) == i / 2
   }
 
-  function apply_bv64_lshr_closed(i: Int): Bool
   axiom bv64_lshr_closed {
     forall i: Int :: { apply_bv64_lshr_closed(i) }
       bounded64(i) ==>
         bounded64(bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(1))))
   }
 
-  function apply_bv64_lshr_compose(i: Int, n: Int, m: Int): Bool
   axiom bv64_lshr_compose {
     forall i: Int, n: Int, m: Int ::
       { apply_bv64_lshr_compose(i, n, m) }
@@ -107,7 +111,6 @@ domain BitVectorDomain64 {
         bv64_lshr(bv64_from_int(i), bv64_from_int(n + m))
   }
 
-  function apply_bv64_lshr63_bit(i: Int): Bool
   axiom bv64_lshr63_bit {
     forall i: Int :: { apply_bv64_lshr63_bit(i) }
       bounded64(i) ==>
@@ -115,14 +118,12 @@ domain BitVectorDomain64 {
         (bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(63))) % 2)
   }
 
-  function apply_bv64_lshr64_zero(i: Int): Bool
   axiom bv64_lshr64_zero {
     forall i: Int :: { apply_bv64_lshr64_zero(i) }
       bounded64(i) ==>
         bv64_to_int(bv64_lshr(bv64_from_int(i), bv64_from_int(64))) == 0
   }
 
-  function apply_bv64_lshr_suffix_nonzero(i: Int, n: Int, m: Int): Bool
   axiom bv64_lshr_suffix_nonzero {
     forall i: Int, n: Int, m: Int ::
       { apply_bv64_lshr_suffix_nonzero(i, n, m) }
