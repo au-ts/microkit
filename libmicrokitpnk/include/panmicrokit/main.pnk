@@ -12,17 +12,18 @@
 
 /@ extern function mk_is_patched_irqs(badge: Int): Bool @/
 
-/@ extern field pending_protected_call: Int @/ 
-/@ extern field pending_fault_call: Int @/ 
-/@ extern field pending_notified: Set[Int] @/ 
+/@ extern field pending_protected_call: Int @/
+/@ extern field pending_fault_call: Int @/
+/@ extern field pending_notified: Set[Int] @/
+/@ extern field reply_required : Bool @/
 
-/@ extern function mkGhost(): Ref @/ 
-/@ extern function mk_state_wf(pp: Int, pf: Int, ns: Set[Int]): Bool @/ 
+/@ extern function mkGhost(): Ref @/
+/@ extern function mk_state_wf(pp: Int, pf: Int, ns: Set[Int]): Bool @/
 /@ extern function mk_oracle_correspondence(response: Int, pp: Int, pf: Int, ns: Set[Int]): Bool @/
 /@ extern function mk_no_pending_tasks(ctx: Ref): Bool @/
 /@ extern function mk_response_bit_set(response: Int, ch: Int): Bool @/
 
-/@ extern function builtin_lshr(x: Int, y: Int): Int @/ 
+/@ extern function builtin_lshr(x: Int, y: Int): Int @/
 /@ extern function apply_bv64_lshr0_sem(x: Int): Bool @/
 /@ extern function apply_bv64_lshr63_bit(x: Int): Bool @/
 /@ extern function apply_bv64_lshr64_zero(x: Int): Bool @/
@@ -240,7 +241,8 @@ fun handler_loop() {
         /@ inhale acc(mkGhost().pending_protected_call) @/
         /@ inhale acc(mkGhost().pending_fault_call) @/
         /@ inhale acc(mkGhost().pending_notified) @/
-        /@ assume mk_oracle_correspondence(badge, mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified) @/
+        /@ inhale acc(mkGhost().reply_required) @/
+        /@ assume mk_oracle_correspondence(badge, mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified, mkGhost().reply_required) @/
         /@ assume user_rely_receive(mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified, userGhost()) @/
         have_reply = false;
 

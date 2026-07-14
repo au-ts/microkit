@@ -31,6 +31,13 @@ domain GhostStates {
 field pending_protected_call: Int
 field pending_fault_call: Int
 field pending_notified: Set[Int]
+field reply_required : Bool
+// NB: `reply_required` does not mean that the `replyTCB` state of the reply
+// object corresponding to the `REPLY_CAP` has `ThreadState_BlockedOnReply`!
+// This is pure Microkit protocol state, which means that the current Microkit
+// request permits and requires a reply (or the user explicitly relinquishing
+// the need in a fault entry point) before the handler loop may perform another
+// ordinary receive.
 
 define mk_valid_pending_protected(pp)
   (pp == -1 || mk_is_protected_source(pp))
@@ -42,15 +49,18 @@ define mk_valid_pending_notified(ns)
   (forall ch: Int :: { ch in ns }
     ch in ns ==> mk_is_notified_source(ch))
 
-define mk_state_wf(pp, pf, ns)
+define mk_state_wf(pp, pf, ns, rr)
 (
   mk_valid_pending_protected(pp) &&
   mk_valid_pending_fault(pf) &&
   mk_valid_pending_notified(ns) &&
-  (pp != -1 ==> pf == -1 && ns == Set[Int]()) &&
-  (pf != -1 ==> pp == -1 && ns == Set[Int]()) &&
-  (ns != Set[Int]() ==> pp == -1 && pf == -1)
+  (pp != -1 ==> pf == -1 && ns == Set[Int]() && rr) &&
+  (pf != -1 ==> pp == -1 && ns == Set[Int]() && rr) &&
+  (ns != Set[Int]() ==> pp == -1 && pf == -1 && !rr)
 )
+
+// The functions below serve to relate the abstract Microkit response with
+// the concrete `response` bitstring returend by the kernel.
 
 define mk_response_bit_set(response, ch)
   (builtin_lshr(response,ch) % 2 == 1)
@@ -82,9 +92,9 @@ define mk_protected_channel_of_response(response)
 define mk_fault_pd_of_response(response)
   (response % 256)
 
-define mk_oracle_correspondence(response,pp,pf,ns)
+define mk_oracle_correspondence(response,pp,pf,ns,rr)
 (
-  mk_state_wf(pp,pf,ns) &&
+  mk_state_wf(pp,pf,ns,rr) &&
   (
     (
       mk_is_protected_response(response) &&
@@ -139,8 +149,8 @@ define f_mk_valid_pending_fault(heap,gv,pf)
 define f_mk_valid_pending_notified(heap,gv,ns)
  (mk_valid_pending_notified(ns))
 
-define f_mk_state_wf(heap,gv,pp,pf,ns)
-  (mk_state_wf(pp,pf,ns))
+define f_mk_state_wf(heap,gv,pp,pf,ns,rr)
+  (mk_state_wf(pp,pf,ns,rr))
 
 define f_mk_is_notification_response(heap,gv,response)
   (mk_is_notification_response(response))
@@ -160,8 +170,8 @@ define f_mk_fault_pd_of_response(heap,gv,response)
 define f_mk_response_bit_set(heap,gv,response,ch)
   (mk_response_bit_set(response,ch))
 
-define f_mk_oracle_correspondence(heap,gv,response,pp,pf,ns)
-  (mk_oracle_correspondence(response,pp,pf,ns))
+define f_mk_oracle_correspondence(heap,gv,response,pp,pf,ns,rr)
+  (mk_oracle_correspondence(response,pp,pf,ns,rr))
 
 define f_mk_no_pending_tasks(heap,gv,ctx)
   (mk_no_pending_tasks(ctx))
@@ -223,7 +233,6 @@ define mk_protected_postconditions(ch)
   acc(mkGhost().pending_protected_call) &&
   mkGhost().pending_protected_call == -1
 )
-
 
 define mk_fault_preconditions(ch) 
 (
