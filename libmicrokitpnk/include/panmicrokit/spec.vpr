@@ -124,6 +124,21 @@ define mk_oracle_correspondence(response,pp,pf,ns,rr)
   )
 )
 
+define mk_received_tasks(response, ctx)
+(
+    acc(ctx.pending_protected_call) &&
+    acc(ctx.pending_fault_call) &&
+    acc(ctx.pending_notified) &&
+    acc(ctx.reply_required) &&
+    mk_oracle_correspondence(
+      response,
+      ctx.pending_protected_call,
+      ctx.pending_fault_call,
+      ctx.pending_notified,
+      ctx.reply_required
+    )
+)
+
 define mk_no_pending_tasks(ctx)
 (
   // The handler loop is correct if this assertion holds at the end of each
@@ -131,6 +146,7 @@ define mk_no_pending_tasks(ctx)
   acc(ctx.pending_protected_call) &&
   acc(ctx.pending_fault_call) &&
   acc(ctx.pending_notified) &&
+  acc(ctx.reply_required) &&
   ctx.pending_protected_call == -1 &&
   ctx.pending_fault_call == -1 &&
   ctx.pending_notified == Set[Int]()
@@ -172,6 +188,9 @@ define f_mk_response_bit_set(heap,gv,response,ch)
 
 define f_mk_oracle_correspondence(heap,gv,response,pp,pf,ns,rr)
   (mk_oracle_correspondence(response,pp,pf,ns,rr))
+
+define f_mk_received_tasks(heap,gv,response,ctx)
+  (mk_received_tasks(response,ctx))
 
 define f_mk_no_pending_tasks(heap,gv,ctx)
   (mk_no_pending_tasks(ctx))

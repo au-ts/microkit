@@ -21,6 +21,7 @@
 /@ extern function mk_state_wf(pp: Int, pf: Int, ns: Set[Int]): Bool @/
 /@ extern function mk_oracle_correspondence(response: Int, pp: Int, pf: Int, ns: Set[Int]): Bool @/
 /@ extern function mk_no_pending_tasks(ctx: Ref): Bool @/
+/@ extern function mk_received_tasks(response: Int, ctx: Ref): Bool @/
 /@ extern function mk_response_bit_set(response: Int, ch: Int): Bool @/
 
 /@ extern function builtin_lshr(x: Int, y: Int): Int @/
@@ -67,6 +68,7 @@ fun panseL4_Response mk_Recv() {
     /@ requires pansel4_has_notification_cap(INPUT_CAP) || pansel4_has_reply_cap(REPLY_CAP) @/
 
     // ghost state transition preconditions:
+    /@ requires mk_no_pending_tasks(mkGhost()) @/
     /@ requires user_acc_ghost_state(userGhost()) @/
     /@ requires user_guarantee_Recv(userGhost()) @/
 
@@ -77,14 +79,30 @@ fun panseL4_Response mk_Recv() {
     /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
 
     // ghost state transition postconditions:
+    /@ ensures mk_received_tasks(panseL4_Response_badge(retval), mkGhost()) @/
     /@ ensures user_acc_ghost_state(userGhost()) @/
     /@ ensures user_transition_Recv(userGhost()) @/
+    /@ ensures user_rely_receive(
+                mkGhost().pending_protected_call,
+                mkGhost().pending_fault_call,
+                mkGhost().pending_notified,
+                userGhost())
+    @/
 
     var panseL4_Response response = panseL4_Recv(INPUT_CAP,REPLY_CAP);
     // perform a nondeterministic ghost state machine transition
     /@ exhale user_acc_ghost_state(userGhost()) @/
     /@ inhale user_acc_ghost_state(userGhost()) @/
     /@ assume user_transition_Recv(userGhost()) @/
+
+    /@ exhale mk_no_pending_tasks(mkGhost()) @/
+    /@ inhale mk_received_tasks(panseL4_Response_badge(response), mkGhost()) @/
+    /@ assume user_rely_receive(
+                mkGhost().pending_protected_call,
+                mkGhost().pending_fault_call,
+                mkGhost().pending_notified,
+                userGhost())
+    @/
     return response;
 }
 
@@ -99,6 +117,7 @@ fun panseL4_Response mk_ReplyRecv(panseL4_MessageInfo_t reply_tag) {
     /@ requires pansel4_has_reply_cap(REPLY_CAP) @/
 
     // ghost state transition preconditions:
+    /@ requires mk_no_pending_tasks(mkGhost()) @/
     /@ requires user_acc_ghost_state(userGhost()) @/
     /@ requires user_guarantee_ReplyRecv(reply_tag, userGhost()) @/
 
@@ -109,14 +128,30 @@ fun panseL4_Response mk_ReplyRecv(panseL4_MessageInfo_t reply_tag) {
     /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
 
     // ghost state transition postconditions:
+    /@ ensures mk_received_tasks(panseL4_Response_badge(retval), mkGhost()) @/
     /@ ensures user_acc_ghost_state(userGhost()) @/
     /@ ensures user_transition_ReplyRecv(reply_tag, userGhost()) @/
+    /@ ensures user_rely_receive(
+                mkGhost().pending_protected_call,
+                mkGhost().pending_fault_call,
+                mkGhost().pending_notified,
+                userGhost())
+    @/
 
     var panseL4_Response response = panseL4_ReplyRecv(INPUT_CAP,reply_tag,REPLY_CAP);
     // perform a nondeterministic ghost state machine transition
     /@ exhale user_acc_ghost_state(userGhost()) @/
     /@ inhale user_acc_ghost_state(userGhost()) @/
     /@ assume user_transition_ReplyRecv(reply_tag, userGhost()) @/
+
+    /@ exhale mk_no_pending_tasks(mkGhost()) @/
+    /@ inhale mk_received_tasks(panseL4_Response_badge(response), mkGhost()) @/
+    /@ assume user_rely_receive(
+                mkGhost().pending_protected_call,
+                mkGhost().pending_fault_call,
+                mkGhost().pending_notified,
+                userGhost())
+    @/
     return response;
 }
 
@@ -136,6 +171,7 @@ fun panseL4_Response mk_NBSendRecv() {
     /@ requires pansel4_has_notification_cap(INPUT_CAP) || pansel4_has_reply_cap(REPLY_CAP) @/
 
     // ghost state transition preconditions:
+    /@ requires mk_no_pending_tasks(mkGhost()) @/
     /@ requires user_acc_ghost_state(userGhost()) @/
     /@ requires user_guarantee_NBSendRecv(gv.microkit_signal_cap, gv.microkit_signal_msg, userGhost()) @/
 
@@ -146,8 +182,15 @@ fun panseL4_Response mk_NBSendRecv() {
     /@ ensures acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
 
     // ghost state transition postconditions:
+    /@ ensures mk_received_tasks(panseL4_Response_badge(retval), mkGhost()) @/
     /@ ensures user_acc_ghost_state(userGhost()) @/
     /@ ensures user_transition_NBSendRecv(gv.microkit_signal_cap, gv.microkit_signal_msg, userGhost()) @/
+    /@ ensures user_rely_receive(
+                mkGhost().pending_protected_call,
+                mkGhost().pending_fault_call,
+                mkGhost().pending_notified,
+                userGhost())
+    @/
 
     /@ ensures acc(gv.microkit_signal_cap) @/
     /@ ensures acc(gv.microkit_signal_msg) @/
@@ -158,6 +201,15 @@ fun panseL4_Response mk_NBSendRecv() {
     /@ exhale user_acc_ghost_state(userGhost()) @/
     /@ inhale user_acc_ghost_state(userGhost()) @/
     /@ assume user_transition_NBSendRecv(gv.microkit_signal_cap, gv.microkit_signal_msg, userGhost()) @/
+
+    /@ exhale mk_no_pending_tasks(mkGhost()) @/
+    /@ inhale mk_received_tasks(panseL4_Response_badge(response), mkGhost()) @/
+    /@ assume user_rely_receive(
+                mkGhost().pending_protected_call,
+                mkGhost().pending_fault_call,
+                mkGhost().pending_notified,
+                userGhost())
+    @/
     return response;
 }
 
@@ -170,6 +222,7 @@ fun handler_loop() {
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
+    /@ requires mk_no_pending_tasks(mkGhost()) @/
     /@ requires bounded64(gv.patched_microkit_irqs) @/
     /@ requires mk_is_patched_irqs(gv.patched_microkit_irqs) @/
     /@ requires (gv.microkit_have_signal == 0) || IsAbsMsgInfo(gv.microkit_signal_msg) @/
@@ -213,6 +266,7 @@ fun handler_loop() {
                      acc(heap[LIBSEL4_FFI_OFFSET+1]) &&
                      acc(heap[LIBSEL4_FFI_OFFSET+2]) &&
                      acc(heap[LIBSEL4_FFI_OFFSET+3]) &&
+                     mk_no_pending_tasks(mkGhost()) &&
                      (gv.microkit_have_signal == 0 || bounded64(gv.microkit_signal_cap)) &&
                      (gv.microkit_have_signal == 0 || IsAbsMsgInfo(gv.microkit_signal_msg)) &&
                      (gv.microkit_have_signal == 0 || pansel4_has_cap(gv.microkit_signal_cap)) &&
@@ -238,12 +292,6 @@ fun handler_loop() {
         }
         var panseL4_MessageInfo_t tag = panseL4_Response_tag(response);
         var 1 badge = panseL4_Response_badge(response);
-        /@ inhale acc(mkGhost().pending_protected_call) @/
-        /@ inhale acc(mkGhost().pending_fault_call) @/
-        /@ inhale acc(mkGhost().pending_notified) @/
-        /@ inhale acc(mkGhost().reply_required) @/
-        /@ assume mk_oracle_correspondence(badge, mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified, mkGhost().reply_required) @/
-        /@ assume user_rely_receive(mkGhost().pending_protected_call, mkGhost().pending_fault_call, mkGhost().pending_notified, userGhost()) @/
         have_reply = false;
 
         var 1 is_endpoint = badge >>> 63;
@@ -333,6 +381,7 @@ fun main() {
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
+    /@ requires mk_no_pending_tasks(mkGhost()) @/
     /@ requires user_acc_ghost_state(userGhost()) @/
     /@ requires user_rely_init(userGhost()) @/
     patched_microkit_irqs = microkit_get_constant(0);
