@@ -23,6 +23,7 @@
 /@ extern function mk_no_pending_tasks(ctx: Ref): Bool @/
 /@ extern function mk_received_tasks(response: Int, ctx: Ref): Bool @/
 /@ extern function mk_response_bit_set(response: Int, ch: Int): Bool @/
+/@ extern function mk_init(state: Ref): Bool @/
 
 /@ extern function builtin_lshr(x: Int, y: Int): Int @/
 /@ extern function apply_bv64_lshr0_sem(x: Int): Bool @/
@@ -69,6 +70,7 @@ fun panseL4_Response mk_Recv() {
 
     // ghost state transition preconditions:
     /@ requires mk_no_pending_tasks(mkGhost()) @/
+    /@ requires !mkGhost().reply_required @/
     /@ requires user_acc_ghost_state(userGhost()) @/
     /@ requires user_guarantee_Recv(userGhost()) @/
 
@@ -118,6 +120,7 @@ fun panseL4_Response mk_ReplyRecv(panseL4_MessageInfo_t reply_tag) {
 
     // ghost state transition preconditions:
     /@ requires mk_no_pending_tasks(mkGhost()) @/
+    /@ requires mkGhost().reply_required @/
     /@ requires user_acc_ghost_state(userGhost()) @/
     /@ requires user_guarantee_ReplyRecv(reply_tag, userGhost()) @/
 
@@ -172,6 +175,7 @@ fun panseL4_Response mk_NBSendRecv() {
 
     // ghost state transition preconditions:
     /@ requires mk_no_pending_tasks(mkGhost()) @/
+    /@ requires !mkGhost().reply_required @/
     /@ requires user_acc_ghost_state(userGhost()) @/
     /@ requires user_guarantee_NBSendRecv(gv.microkit_signal_cap, gv.microkit_signal_msg, userGhost()) @/
 
@@ -222,7 +226,7 @@ fun handler_loop() {
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
-    /@ requires mk_no_pending_tasks(mkGhost()) @/
+    /@ requires mk_init(mkGhost()) @/
     /@ requires bounded64(gv.patched_microkit_irqs) @/
     /@ requires mk_is_patched_irqs(gv.patched_microkit_irqs) @/
     /@ requires (gv.microkit_have_signal == 0) || IsAbsMsgInfo(gv.microkit_signal_msg) @/
@@ -275,6 +279,7 @@ fun handler_loop() {
                          pansel4_has_endpoint_cap(gv.microkit_signal_cap) ||
                          pansel4_has_notification_cap(gv.microkit_signal_cap)
                      ) &&
+                     (mkGhost().reply_required == (have_reply != 0)) &&
                      (have_reply == 0 || IsAbsMsgInfo(reply_tag)) &&
                      user_acc_ghost_state(userGhost()) &&
                      user_handler_loop_invariant(have_reply, userGhost())
@@ -381,7 +386,7 @@ fun main() {
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+1]) @/
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+2]) @/
     /@ requires acc(heap[LIBSEL4_FFI_OFFSET+3]) @/
-    /@ requires mk_no_pending_tasks(mkGhost()) @/
+    /@ requires mk_init(mkGhost()) @/
     /@ requires user_acc_ghost_state(userGhost()) @/
     /@ requires user_rely_init(userGhost()) @/
     patched_microkit_irqs = microkit_get_constant(0);
