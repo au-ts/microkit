@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright 2026, UNSW
+
+ SPDX-License-Identifier: BSD-2-Clause
+-->
+<system>
+
+    <memory_region name="control" size="0x1_000" />
+    <memory_region name="command" size="0x1_000" />
+
+    <protection_domain name="keypad">
+        <program_image path="keypad.elf" />
+        <map mr="control" vaddr="0x2_000_000" perms="rw" cached="false" />
+        <map mr="command" vaddr="0x2_002_000" perms="rw" cached="false" />
+    </protection_domain>
+    <protection_domain name="pump">
+        <program_image path="pump.elf" />
+        <map mr="control" vaddr="0x2_000_000" perms="rw" cached="false" />
+        <map mr="command" vaddr="0x2_002_000" perms="r" cached="false" />
+    </protection_domain>
+    <channel>
+        <end pd="keypad" id="1" notify="false" />
+        <end pd="pump" id="42" />
+    </channel>
+</system>

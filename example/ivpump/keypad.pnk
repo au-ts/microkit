@@ -1,0 +1,64 @@
+/*
+ * Copyright 2026, UNSW
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#define CONTROL_ADDR 33554432
+#define COMMAND_ADDR 33562624
+
+/@ extern field input: Seq[Int] @/
+/@ extern field has_control: Bool @/
+/@ extern field issued_cmds: Seq[Int] @/
+
+/@ extern function mk_notified_preconditions(ch: Int): Bool @/
+/@ extern function mk_notified_postconditions(ch: Int): Bool @/
+/@ extern function apply_is_userland(x: Bool): Bool @/
+/@ extern function Seq(): Seq[Int] @/
+/@ extern function Seq1(ch: Int): Seq[Int] @/
+
+fun uep_init() {
+    @microkit_report_debug(0, 0, 0, 1);
+    return 0;
+}
+
+fun uep_notified(microkit_channel ch) {
+    /@ requires user_acc_ghost_state(userGhost()) @/
+    /@ requires userGhost().input == Seq1(ch) @/
+    /@ requires !userGhost().has_control @/
+    /@ requires mk_notified_preconditions(ch) @/
+    /@ ensures user_acc_ghost_state(userGhost()) @/
+    /@ ensures userGhost().input == Seq() @/
+    /@ ensures !userGhost().has_control @/
+    /@ ensures mk_notified_postconditions(ch)@/
+    /@ assert apply_is_userland(true) @/
+    @microkit_report_debug(0, 0, 0, 2);
+    var 1 control = 1;
+    while (control != 0) {
+        /@ invariant user_acc_ghost_state(userGhost()) &&
+                     userGhost().input == Seq1(ch) &&
+                     (userGhost().has_control == (control == 0))
+        @/
+        !ldw control, CONTROL_ADDR;
+    }
+    !stw COMMAND_ADDR, ch;
+    !stw CONTROL_ADDR, 1;
+    return 0;
+}
+
+fun microkit_fault_reply_option uep_fault(microkit_child child, microkit_msginfo msginfo) {
+    /@ ensures retval.0 == 0 @/
+    @microkit_report_debug(0, 0, 0, 4);
+    return microkit_fault_reply_nothing;
+}
+
+fun uep_protected(microkit_channel ch, microkit_msginfo msginfo) {
+    /@ requires acc(heap[0]) @/
+    /@ requires acc(heap[1]) @/
+    /@ requires acc(heap[2]) @/
+    /@ requires acc(heap[3]) @/
+    /@ ensures IsAbsMsgInfo(retval) @/
+    @microkit_report_debug(0, 0, 0, 3);
+    var 1 res = panseL4_MessageInfo_new(0,0,0,0);
+    return res;
+}

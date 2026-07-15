@@ -1,0 +1,58 @@
+/*
+ * Copyright 2026, UNSW
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#define CONTROL_ADDR 33554432
+#define COMMAND_ADDR 33562624
+
+/@ extern function mk_notified_preconditions(ch: Int): Bool @/
+/@ extern function mk_notified_postconditions(ch: Int): Bool @/
+/@ extern function apply_is_userland(x: Bool): Bool @/
+
+fun uep_init() {
+    @microkit_report_debug(0, 0, 0, 1);
+    microkit_notify(42);
+    while (true) {
+        var 1 control = 0;
+        while (control != 1) {
+            !ldw control, CONTROL_ADDR;
+        }
+        var 1 command = 0;
+        !ldw command, COMMAND_ADDR;
+        !stw CONTROL_ADDR, 0;
+
+        // simulate a keypad notify so we don't get bored
+        var 1 delay = 10000000;
+        while (delay > 0) {
+            delay = delay - 1;
+        }
+        microkit_notify(42);
+    }
+    return 0;
+}
+
+fun uep_notified(microkit_channel ch) {
+    /@ requires mk_notified_preconditions(ch) @/
+    /@ ensures mk_notified_postconditions(ch)@/
+    /@ assert apply_is_userland(true) @/
+    return 0;
+}
+
+fun microkit_fault_reply_option uep_fault(microkit_child child, microkit_msginfo msginfo) {
+    /@ ensures retval.0 == 0 @/
+    @microkit_report_debug(0, 0, 0, 4);
+    return microkit_fault_reply_nothing;
+}
+
+fun uep_protected(microkit_channel ch, microkit_msginfo msginfo) {
+    /@ requires acc(heap[0]) @/
+    /@ requires acc(heap[1]) @/
+    /@ requires acc(heap[2]) @/
+    /@ requires acc(heap[3]) @/
+    /@ ensures IsAbsMsgInfo(retval) @/
+    @microkit_report_debug(0, 0, 0, 3);
+    var 1 res = panseL4_MessageInfo_new(0,0,0,0);
+    return res;
+}
