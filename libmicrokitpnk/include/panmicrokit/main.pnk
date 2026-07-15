@@ -43,13 +43,13 @@
 /@ extern function user_rely_init(state: Ref): Bool @/
 /@ extern function user_rely_receive(pp: Int,pf: Int,ns: Set[Int], state: Ref): Bool @/
 
-/@ extern function user_guarantee_Recv(state: Ref): Bool @/
+/@ extern function user_guard_Recv(state: Ref): Bool @/
 /@ extern function user_transition_Recv(state: Ref): Bool @/
 
-/@ extern function user_guarantee_ReplyRecv(reply_tag: Int, state: Ref): Bool @/
+/@ extern function user_guard_ReplyRecv(reply_tag: Int, state: Ref): Bool @/
 /@ extern function user_transition_ReplyRecv(reply_tag: Int, state: Ref): Bool @/
 
-/@ extern function user_guarantee_NBSendRecv(signal_cap: Int, signal_msg: Int, state: Ref): Bool @/
+/@ extern function user_guard_NBSendRecv(signal_cap: Int, signal_msg: Int, state: Ref): Bool @/
 /@ extern function user_transition_NBSendRecv(signal_cap: Int, signal_msg: Int, state: Ref): Bool @/
 
 /@ extern function user_handler_loop_entry(): Bool @/
@@ -79,7 +79,7 @@ fun panseL4_Response mk_Recv() {
     /@ requires mk_no_pending_tasks(mkGhost()) @/
     /@ requires !mkGhost().reply_required @/
     /@ requires user_acc_ghost_state(userGhost()) @/
-    /@ requires user_guarantee_Recv(userGhost()) @/
+    /@ requires user_guard_Recv(userGhost()) @/
 
     // panseL4_Recv postconditions:
     /@ ensures IsAbsMsgInfo(panseL4_Response_tag(retval)) @/
@@ -129,7 +129,7 @@ fun panseL4_Response mk_ReplyRecv(panseL4_MessageInfo_t reply_tag) {
     /@ requires mk_no_pending_tasks(mkGhost()) @/
     /@ requires mkGhost().reply_required @/
     /@ requires user_acc_ghost_state(userGhost()) @/
-    /@ requires user_guarantee_ReplyRecv(reply_tag, userGhost()) @/
+    /@ requires user_guard_ReplyRecv(reply_tag, userGhost()) @/
 
     // panseL4_ReplyRecv postconditions:
     /@ ensures IsAbsMsgInfo(panseL4_Response_tag(retval)) @/
@@ -184,7 +184,7 @@ fun panseL4_Response mk_NBSendRecv() {
     /@ requires mk_no_pending_tasks(mkGhost()) @/
     /@ requires !mkGhost().reply_required @/
     /@ requires user_acc_ghost_state(userGhost()) @/
-    /@ requires user_guarantee_NBSendRecv(gv.microkit_signal_cap, gv.microkit_signal_msg, userGhost()) @/
+    /@ requires user_guard_NBSendRecv(gv.microkit_signal_cap, gv.microkit_signal_msg, userGhost()) @/
 
     // panseL4_NBSendRecv postconditions:
     /@ ensures IsAbsMsgInfo(panseL4_Response_tag(retval)) @/

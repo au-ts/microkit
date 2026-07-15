@@ -46,17 +46,17 @@
 
 /@ extern function user_local_microkit_notify_pre(ch: Int, state: Ref): Bool @/
 /@ extern function user_local_microkit_notify_post(ch: Int, state: Ref): Bool @/
-/@ extern function user_guarantee_microkit_notify(ch: Int, state: Ref): Bool @/
+/@ extern function user_guard_microkit_notify(ch: Int, state: Ref): Bool @/
 /@ extern function user_transition_microkit_notify(ch: Int, state: Ref): Bool @/
 
 /@ extern function user_local_microkit_irq_ack_pre(ch: Int, state: Ref): Bool @/
 /@ extern function user_local_microkit_irq_ack_post(ch: Int, state: Ref): Bool @/
-/@ extern function user_guarantee_microkit_irq_ack(ch: Int, state: Ref): Bool @/
+/@ extern function user_guard_microkit_irq_ack(ch: Int, state: Ref): Bool @/
 /@ extern function user_transition_microkit_irq_ack(ch: Int, state: Ref): Bool @/
 
 /@ extern function user_local_microkit_ppcall_pre(ch: Int, msginfo: Int, state: Ref): Bool @/
 /@ extern function user_local_microkit_ppcall_post(ch: Int, msginfo: Int, tag: Int, state: Ref): Bool @/
-/@ extern function user_guarantee_microkit_ppcall(ch: Int, msginfo: Int, state: Ref): Bool @/
+/@ extern function user_guard_microkit_ppcall(ch: Int, msginfo: Int, state: Ref): Bool @/
 /@ extern function user_transition_microkit_ppcall(ch: Int, msginfo: Int, state: Ref): Bool @/
 
 /@ extern function user_rely_ppcall(tag: Int, state: Ref): Bool @/
@@ -67,7 +67,7 @@ export fun microkit_notify(microkit_channel ch) {
 
     /@ requires user_acc_ghost_state(userGhost()) @/
     /@ requires user_local_microkit_notify_pre(ch, userGhost()) @/
-    /@ requires user_guarantee_microkit_notify(ch, userGhost()) @/
+    /@ requires user_guard_microkit_notify(ch, userGhost()) @/
 
     /@ ensures user_acc_ghost_state(userGhost()) @/
     /@ ensures user_local_microkit_notify_post(ch, userGhost()) @/
@@ -86,7 +86,7 @@ export fun microkit_irq_ack(microkit_channel ch) {
 
     /@ requires user_acc_ghost_state(userGhost()) @/
     /@ requires user_local_microkit_irq_ack_pre(ch, userGhost()) @/
-    /@ requires user_guarantee_microkit_irq_ack(ch, userGhost()) @/
+    /@ requires user_guard_microkit_irq_ack(ch, userGhost()) @/
 
     /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
 
@@ -129,7 +129,7 @@ export fun microkit_msginfo microkit_ppcall(microkit_channel ch, microkit_msginf
 
     /@ requires user_acc_ghost_state(userGhost()) @/
     /@ requires user_local_microkit_ppcall_pre(ch, msginfo, userGhost()) @/
-    /@ requires user_guarantee_microkit_ppcall(ch, msginfo, userGhost()) @/
+    /@ requires user_guard_microkit_ppcall(ch, msginfo, userGhost()) @/
 
     /@ ensures user_acc_ghost_state(userGhost()) @/
     /@ ensures user_local_microkit_ppcall_post(ch, msginfo, retval, userGhost()) @/
