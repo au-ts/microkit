@@ -264,3 +264,26 @@ method shared_store64(heap: IArray, gv: Ref, address: Int, value: Int)
   requires user_guarantee_shared_store64(address, value, userGhost())
   ensures user_acc_ghost_state(userGhost())
   ensures user_transition_shared_store64(address, value, userGhost())
+
+
+function apply_is_userland(x: Bool): Bool {
+  x
+}
+define f_apply_is_userland(heap, gv, x) (apply_is_userland(x))
+
+domain Userland {
+  // This domain provides a somewhat safer way for user code to discharge
+  // Microkit postconditions, without having to inhale arbitrary properties
+  // from user code. This is a temporary solution, since the mechainsm will no
+  // longer be required once we move the notified loop out of the main handler
+  // loop into userland.
+  // One can annotate panseL4 with this predicate to prevent Microkit user code
+  // from violating abstraction boundaries by making raw kernel calls.
+  function isUserland(): Bool
+  axiom ax_userland {
+    forall x: Bool ::
+      {apply_is_userland(x)}
+        (apply_is_userland(x)) ==> (isUserland() == x)
+  }
+}
+define f_isUserland(heap,gv) (isUserland())

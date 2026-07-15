@@ -234,49 +234,49 @@ define f_mk_is_patched_irqs(heap,gv,badge)
 // code does not deal with or modify the handler loop ghost state in unexpected
 // ways.
 
+define f_mk_explicit_notified_postconditions(heap,gv,ch)
+  (mk_explicit_notified_postconditions(ch))
+
 define mk_notified_preconditions(ch)
 (
-  user_acc_ghost_state(userGhost()) &&
   acc(mkGhost().pending_notified) &&
   ch in mkGhost().pending_notified
 )
 
 define mk_notified_postconditions(ch)
 (
-  user_acc_ghost_state(userGhost()) &&
   acc(mkGhost().pending_notified) &&
-  mkGhost().pending_notified == old(mkGhost().pending_notified) setminus Set(ch)
+  (
+    isUserland() ||
+    (mkGhost().pending_notified == old(mkGhost().pending_notified) setminus Set(ch))
+  )
 )
 
 define mk_protected_preconditions(ch)
 (
-  user_acc_ghost_state(userGhost()) &&
   acc(mkGhost().pending_protected_call) &&
   mkGhost().pending_protected_call == ch
 )
 
 define mk_protected_postconditions(ch)
 (
-  user_acc_ghost_state(userGhost()) &&
   acc(mkGhost().pending_protected_call) &&
   mkGhost().pending_protected_call == -1
 )
 
 define mk_fault_preconditions(ch)
 (
-  user_acc_ghost_state(userGhost()) &&
   acc(mkGhost().pending_fault_call) &&
-  mkGhost().pending_fault_call == ch &&
-  acc(mkGhost().reply_required)
+  acc(mkGhost().reply_required) &&
+  mkGhost().pending_fault_call == ch
 )
 
-define mk_fault_postconditions(ch, reply)
+define mk_fault_postconditions(ch, needs_reply)
 (
-  user_acc_ghost_state(userGhost()) &&
   acc(mkGhost().pending_fault_call) &&
-  mkGhost().pending_fault_call == -1 &&
   acc(mkGhost().reply_required) &&
-  ((reply != 0) == mkGhost().reply_required)
+  mkGhost().pending_fault_call == -1 &&
+  ((needs_reply != 0) == mkGhost().reply_required)
 )
 
 define f_mk_notified_preconditions(heap,gv,ch)
@@ -294,8 +294,8 @@ define f_mk_protected_postconditions(heap,gv,ch)
 define f_mk_fault_preconditions(heap,gv,ch)
   (mk_fault_preconditions(ch))
 
-define f_mk_fault_postconditions(heap,gv,ch,reply)
-  (mk_fault_postconditions(ch,reply))
+define f_mk_fault_postconditions(heap,gv,ch,needs_reply)
+  (mk_fault_postconditions(ch,needs_reply))
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -315,37 +315,3 @@ define apply_set_bv64_lshr_suffix_nonzero(i,n,the_set)
 
 define f_apply_set_bv64_lshr_suffix_nonzero(heap,gv,i,n,the_set)
   (apply_set_bv64_lshr_suffix_nonzero(i,n,the_set))
-
-// The user can use the following tactics by `inhale`ing them.
-
-define apply_mk_notified_postconditions(ch)
-(
-  // Inhaling this tactic performs the handler loop state transition, allowing
-  // the user to conclude the common `notified` postcondition.
-  mkGhost().pending_notified == old(mkGhost().pending_notified) setminus Set(ch)
-)
-
-define apply_mk_protected_postconditions()
-(
-  // Inhaling this tactic performs the handler loop state transition, allowing
-  // the user to conclude the common `protected` postcondition.
-  mkGhost().pending_protected_call == -1
-)
-
-define apply_mk_fault_postconditions(reply)
-(
-  // Inhaling this tactic performs the handler loop state transition, allowing
-  // the user to conclude the common `fault` postcondition.
-  mkGhost().pending_fault_call == -1 &&
-  (reply == mkGhost().reply_required)
-)
-
-define f_apply_mk_notified_postconditions(heap,gv,ch)
-  (apply_mk_notified_postconditions(ch))
-
-define f_apply_mk_protected_postconditions(heap,gv)
-  (apply_mk_protected_postconditions())
-
-define f_apply_mk_fault_postconditions(heap,gv,reply)
-  (apply_mk_fault_postconditions(reply))
-

@@ -24,6 +24,12 @@
 /@ extern function mk_received_tasks(response: Int, ctx: Ref): Bool @/
 /@ extern function mk_response_bit_set(response: Int, ch: Int): Bool @/
 /@ extern function mk_init(state: Ref): Bool @/
+/@ extern function mk_notified_preconditions(ch: Int): Bool @/
+/@ extern function mk_notified_postconditions(ch: Int): Bool @/
+/@ extern function mk_protected_preconditions(ch: Int): Bool @/
+/@ extern function mk_protected_postconditions(ch: Int): Bool @/
+/@ extern function mk_fault_preconditions(ch: Int): Bool @/
+/@ extern function mk_fault_postconditions(ch: Int, needs_reply: Int): Bool @/
 
 /@ extern function builtin_lshr(x: Int, y: Int): Int @/
 /@ extern function apply_bv64_lshr0_sem(x: Int): Bool @/
@@ -32,6 +38,7 @@
 /@ extern function apply_bv64_lshr_closed(x: Int): Bool @/
 /@ extern function apply_bv64_lshr_compose(x: Int, y: Int, z: Int): Bool @/
 /@ extern function apply_set_bv64_lshr_suffix_nonzero(i: Int, n: Int, m: Set[Int]): Bool @/
+/@ extern function isUserland(): Bool @/
 
 /@ extern function user_rely_init(state: Ref): Bool @/
 /@ extern function user_rely_receive(pp: Int,pf: Int,ns: Set[Int], state: Ref): Bool @/
@@ -303,7 +310,9 @@ fun handler_loop() {
         var 1 is_fault = (badge >>> 62) & 1;
 
         if (is_fault) {
+            /@ exhale mk_fault_preconditions(badge & PD_MASK) @/
             var microkit_fault_reply_option reply_to_fault = uep_fault(badge & PD_MASK, tag);
+            /@ inhale mk_fault_postconditions(badge & PD_MASK, reply_to_fault.0) @/
             if (reply_to_fault.0) {
                 have_reply = true;
                 reply_tag = reply_to_fault.1;
@@ -342,6 +351,7 @@ fun handler_loop() {
                     /@ assert apply_bv64_lshr64_zero(badge_orig) @/
                     if (badge & 1) {
                         uep_notified(channel_index);
+                        /@ inhale !isUserland() @/
                     }
                     /@ assert apply_bv64_lshr_closed(badge) @/
                     /@ assert apply_bv64_lshr_compose(badge_orig, channel_index, 1) @/
