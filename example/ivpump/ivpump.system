@@ -8,11 +8,13 @@
 
     <memory_region name="control" size="0x1_000" />
     <memory_region name="command" size="0x1_000" />
+    <memory_region name="keybuffer" size="0x1_000" />
 
     <protection_domain name="keypad">
         <program_image path="keypad.elf" />
         <map mr="control" vaddr="0x2_000_000" perms="rw" cached="false" />
         <map mr="command" vaddr="0x2_002_000" perms="rw" cached="false" />
+        <map mr="keybuffer" vaddr="0x2_004_000" perms="r" cached="false" />
     </protection_domain>
     <protection_domain name="pump">
         <program_image path="pump.elf" />

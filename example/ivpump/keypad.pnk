@@ -6,6 +6,7 @@
 
 #define CONTROL_ADDR 33554432
 #define COMMAND_ADDR 33562624
+#define KEYBUFFER_ADDR 33570816
 
 /@ extern field input: Seq[Int] @/
 /@ extern field has_control: Bool @/
@@ -24,7 +25,7 @@ fun uep_init() {
 
 fun uep_notified(microkit_channel ch) {
     /@ requires user_acc_ghost_state(userGhost()) @/
-    /@ requires userGhost().input == Seq1(ch) @/
+    /@ requires userGhost().input == Seq1(1) || userGhost().input == Seq1(2) @/
     /@ requires !userGhost().has_control @/
     /@ requires mk_notified_preconditions(ch) @/
     /@ ensures user_acc_ghost_state(userGhost()) @/
@@ -33,15 +34,18 @@ fun uep_notified(microkit_channel ch) {
     /@ ensures mk_notified_postconditions(ch)@/
     /@ assert apply_is_userland(true) @/
     @microkit_report_debug(0, 0, 0, 2);
+    var 1 keypress = 0;
+    !ldw keypress, KEYBUFFER_ADDR;
     var 1 control = 1;
     while (control != 0) {
         /@ invariant user_acc_ghost_state(userGhost()) &&
-                     userGhost().input == Seq1(ch) &&
-                     (userGhost().has_control == (control == 0))
+                     (keypress == 1 || keypress == 2) &&
+                     userGhost().input == Seq1(keypress) &&
+                     userGhost().has_control == (control == 0)
         @/
         !ldw control, CONTROL_ADDR;
     }
-    !stw COMMAND_ADDR, ch;
+    !stw COMMAND_ADDR, keypress;
     !stw CONTROL_ADDR, 1;
     return 0;
 }

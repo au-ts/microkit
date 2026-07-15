@@ -103,10 +103,18 @@ define user_guard_shared_load32(address, state)
 define user_guard_shared_load64(address, state)
 (
     // Checked to hold whenever this PD triggers a read event to shared memory
-    // on the given address. 
-    address == 33554432 && // CONTROL_ADDR
-    state.input != Seq() &&
-    !state.has_control
+    // on the given address.
+    (
+        address == 33554432 && // CONTROL_ADDR
+        state.input != Seq() &&
+        !state.has_control
+    )
+    ||
+    (
+        address == 33570816 && // KEYBUFFER_ADDR
+        state.input != Seq() &&
+        !state.has_control
+    )
 )
 
 define user_guard_shared_store8(address, value, state)
@@ -221,10 +229,10 @@ define user_transition_Recv(state)
 (
     // Describes the possible ghost state transitions permitted after this PD
     // triggers a `Recv` event.
-    state.input == Seq(1) &&
+    (state.input == Seq(1) || state.input == Seq(2)) &&
     state.has_control == old(state.has_control) &&
     state.issued_cmds == old(state.issued_cmds)
-    // we assume we always receive input 1, one can weaken this later
+    // we nondeterministically receive key press 1 or 2
 )
 
 define user_transition_ReplyRecv(reply_tag, state)
@@ -266,9 +274,21 @@ define user_transition_shared_load64(address, value, state)
 (
     // Describes the possible ghost state transitions permitted after this PD
     // reads from a given shared memory address.
-    state.input == old(state.input) &&
-    state.has_control == (value == 0) &&
-    state.issued_cmds == old(state.issued_cmds)
+    (
+        address == 33554432 && // CONTROL_ADDR
+        state.input == old(state.input) &&
+        state.has_control == (value == 0) &&
+        state.issued_cmds == old(state.issued_cmds)
+    )
+    ||
+    (
+        address == 33570816 && // KEYBUFFER_ADDR
+        Seq(value) == state.input &&
+        state.input == old(state.input) &&
+        state.has_control == old(state.has_control) &&
+        state.issued_cmds == old(state.issued_cmds)
+    )
+    // the key buffer contains which key press we received
 )
 
 
@@ -458,21 +478,23 @@ define f_user_handler_loop_invariant(heap, gv, have_reply, state)
 define f_user_notified_loop_invariant(heap, gv, channel_index, state)
 (
     !state.has_control &&
+    mkGhost().pending_notified subset Set(1) &&
     (
-        (
-            mkGhost().pending_notified == Set(1) &&
-            state.input == Seq(1)
-        )
-        ||
-        (
-            mkGhost().pending_notified == Set[Int]() &&
-            state.input == Seq()
-        )
+        1 in mkGhost().pending_notified ==>
+        (state.input == Seq(1) || state.input == Seq(2))
     )
     &&
     (
+        !(1 in mkGhost().pending_notified) ==>
+        state.input == Seq()
+    )
+    &&
+    (
+        // The call to uep_notified requires the precondition that
+        // `input == Seq(1) || input == Seq(2)`. We need this clause to make
+        // Viper see that this holds whenever the call is made.
         channel_index in mkGhost().pending_notified ==>
-        state.input == Seq(channel_index)
+        (state.input == Seq(1) || state.input == Seq(2))
     )
 )
 
