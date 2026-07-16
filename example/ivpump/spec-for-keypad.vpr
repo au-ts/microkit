@@ -4,13 +4,16 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
-///////////////////////////////////////////////////////////////////////////////
-// user: the uesr ghost state                                                //
-///////////////////////////////////////////////////////////////////////////////
 
-field input: Seq[Int]
-field has_control: Bool
-field issued_cmds: Seq[Int]
+///////////////////////////////////////////////////////////////////////////////
+// user specs for the PD's local state machine                               //
+///////////////////////////////////////////////////////////////////////////////
+// `user_guard`:
+// A guard states that the PD will not emit the corresponding Microkit event,
+// except when the PD's current ghost state satisfies the guard predicate.
+// Locally these become proof obligations that the user/verifier must show to
+// hold whenever the program executes a call that causes the corresponding
+// event.
 
 define f_Seq(heap,gv) (
     Seq()
@@ -20,35 +23,80 @@ define f_Seq1(heap,gv,ch) (
     Seq(ch)
 )
 
+///////////////////////////////////////////////////////////////////////////////
+// user: the PD ghost state                                                  //
+///////////////////////////////////////////////////////////////////////////////
+
+field input: Seq[Int]
+field has_control: Bool
+field issued_cmds: Seq[Int]
+
 define user_acc_ghost_state(state)
 (
     acc(state.input) &&
     acc(state.has_control) &&
     acc(state.issued_cmds)
 )
-
 define f_user_acc_ghost_state(heap, gv, state)
   (user_acc_ghost_state(state))
 
+
+
 ///////////////////////////////////////////////////////////////////////////////
-// user: guards                                                              //
+// user: event microkit_notify()                                             //
 ///////////////////////////////////////////////////////////////////////////////
-// A guard states that the PD will not emit a specific kind of Microkit event,
-// except when the corresponding guard predicate holds for the PD's current
-// ghost state. Locally these become proof obligations that the user/verifier
-// must show to hold whenever the corresponding event takes place.
+// args: microkit_channel ch
 
 define user_guard_microkit_notify(ch, state)
 (
     // Checked to hold whenever this PD triggers a `microkit_notify(ch)` event.
     false // keypad does not notify anybody
 )
+define f_user_guard_microkit_notify(heap, gv, ch, state)
+  (user_guard_microkit_notify(ch, state))
+
+
+define user_transition_microkit_notify(ch, state)
+(
+    // Describes the possible state transitions allowed after this PD triggers
+    // a microkit_notify(ch) event
+    false // keypad does not trigger notify events
+)
+define f_user_transition_microkit_notify(heap, gv, ch, state)
+  (user_transition_microkit_notify(ch, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event microkit_irq_ack()                                            //
+///////////////////////////////////////////////////////////////////////////////
+// args: microkit_channel ch
 
 define user_guard_microkit_irq_ack(ch, state)
 (
     // Checked to hold whenever this PD triggers a `microkit_irq_ack(ch)` event.
     false // keypad does not trigger acks
 )
+define f_user_guard_microkit_irq_ack(heap, gv, ch, state)
+  (user_guard_microkit_irq_ack(ch, state))
+
+
+define user_transition_microkit_irq_ack(ch, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // triggers a `microkit_irq_ack(ch)` event
+    false // keypad does not trigger irq ack events
+)
+define f_user_transition_microkit_irq_ack(heap, gv, ch, state)
+  (user_transition_microkit_irq_ack(ch, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event microkit_ppcall()                                             //
+///////////////////////////////////////////////////////////////////////////////
+// args: microkit_channel ch, microkit_msginfo msginfo
+// retval: microkit_msginfo
 
 define user_guard_microkit_ppcall(ch, msginfo, state)
 (
@@ -56,6 +104,33 @@ define user_guard_microkit_ppcall(ch, msginfo, state)
     // `microkit_ppcall(ch,msginfo)` event.
     false // keypad does not make ppcalls
 )
+define f_user_guard_microkit_ppcall(heap, gv, ch, msginfo, state)
+  (user_guard_microkit_ppcall(ch, msginfo, state))
+
+
+define user_transition_microkit_ppcall(ch, msginfo, retval, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // triggers a `microkit_ppcall(ch,msginfo)` event.
+    false // keypad does not trigger ppcall events
+)
+define f_user_transition_microkit_ppcall(heap, gv, ch, msginfo, retval, state)
+  (user_transition_microkit_ppcall(ch, msginfo, retval, state))
+
+
+define user_rely_microkit_ppcall(ch, msginfo, retval, state)
+(
+    true
+)
+define f_user_rely_microkit_ppcall(heap, gv, ch, msginfo, retval, state)
+  (user_rely_microkit_ppcall(ch, msginfo, retval, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event mk_Recv()                                                     //
+///////////////////////////////////////////////////////////////////////////////
+// retval: panseL4_Response (response_tag, pp, pf, ns)
 
 define user_guard_Recv(state)
 (
@@ -65,11 +140,71 @@ define user_guard_Recv(state)
     // keypad cannot receive while it is handling some keyboard input or has
     // control over the comm buffer
 )
+define f_user_guard_Recv(heap, gv, state)
+  (user_guard_Recv(state))
+
+
+define user_transition_Recv(response_tag, pp, pf, ns, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // triggers a `Recv` event.
+    (state.input == Seq(1) || state.input == Seq(2)) &&
+    state.has_control == old(state.has_control) &&
+    state.issued_cmds == old(state.issued_cmds)
+    // we nondeterministically receive key press 1 or 2
+)
+define f_user_transition_Recv(heap, gv, response_tag, pp, pf, ns, state)
+  (user_transition_Recv(response_tag, pp, pf, ns, state))
+
+
+define user_rely_Recv(response_tag, pp, pf, ns, state) (
+    // Assumed to hold whenever this PD receives a response on its endpoint.
+    ns == Set(1)
+)
+define f_user_rely_Recv(heap, gv, response_tag, pp, pf, ns, state)
+  (user_rely_Recv(response_tag, pp, pf, ns, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event mk_ReplyRecv()                                                //
+///////////////////////////////////////////////////////////////////////////////
+// args: panseL4_MessageInfo_t reply_tag
+// retval: panseL4_Response (response_tag, pp, pf, ns)
 
 define user_guard_ReplyRecv(reply_tag, state)
 (
     false // keypad does not do replies
 )
+define f_user_guard_ReplyRecv(heap, gv, reply_tag, state)
+  (user_guard_ReplyRecv(reply_tag, state))
+
+
+define user_transition_ReplyRecv(reply_tag, response_tag, pp, pf, ns, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // triggers a `ReplyRecv` event.
+    false
+)
+define f_user_transition_ReplyRecv(heap, gv, reply_tag, response_tag, pp, pf, ns, state)
+  (user_transition_ReplyRecv(reply_tag, response_tag, pp, pf, ns, state))
+
+
+define user_rely_ReplyRecv(reply_tag, response_tag, pp, pf, ns, state) (
+    // Assumed to hold whenever this PD receives a response on its endpoint.
+    false
+)
+define f_user_rely_ReplyRecv(heap, gv, reply_tag, response_tag, pp, pf, ns, state)
+  (user_rely_ReplyRecv(reply_tag, response_tag, pp, pf, ns, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event mk_NBSendRecv()                                               //
+///////////////////////////////////////////////////////////////////////////////
+// args: panseL4_CPtr signal_cap,
+//       panseL4_MessageInfo_t signal_msg
+// retval: panseL4_Response (response_tag, pp, pf, ns)
 
 define user_guard_NBSendRecv(signal_cap, signal_msg, state)
 (
@@ -78,6 +213,34 @@ define user_guard_NBSendRecv(signal_cap, signal_msg, state)
     // used a `microkit_deferred_notify` or `microkit_deferred_irq_ack` call.
     false // keypad does not use deferred calls
 )
+define f_user_guard_NBSendRecv(heap, gv, signal_cap, signal_msg, state)
+  (user_guard_NBSendRecv(signal_cap, signal_msg, state))
+
+
+define user_transition_NBSendRecv(signal_cap, signal_msg, response_tag, pp, pf, ns, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // triggers an `NBSendRecv` event.
+    false
+)
+define f_user_transition_NBSendRecv(heap, gv, signal_cap, signal_msg, response_tag, pp, pf, ns, state)
+  (user_transition_NBSendRecv(signal_cap, signal_msg, response_tag, pp, pf, ns, state))
+
+define user_rely_NBSendRecv(signal_cap, signal_msg, response_tag, pp, pf, ns, state) (
+    // Assumed to hold whenever this PD receives a response on its endpoint.
+    false
+)
+define f_user_rely_NBSendRecv(heap, gv, signal_cap, signal_msg, response_tag, pp, pf, ns, state)
+  (user_rely_NBSendRecv(signal_cap, signal_msg, response_tag, pp, pf, ns, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_load8()                                                //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address
+// retval: 1
+
 
 define user_guard_shared_load8(address, state)
 (
@@ -85,6 +248,34 @@ define user_guard_shared_load8(address, state)
     // on the given address. 
     false
 )
+define f_user_guard_shared_load8(heap, gv, address, state)
+  (user_guard_shared_load8(address, state))
+
+
+define user_transition_shared_load8(address, retval, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // reads from a given shared memory address.
+    false
+)
+define f_user_transition_shared_load8(heap, gv, address, retval, state)
+  (user_transition_shared_load8(address, retval, state))
+
+
+define user_rely_shared_load8(address, retval, state)
+(
+    false
+)
+define f_user_rely_shared_load8(heap, gv, address, retval, state)
+  (user_rely_shared_load8(address, retval, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_load16()                                               //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address
+// retval: 1
 
 define user_guard_shared_load16(address, state)
 (
@@ -92,6 +283,34 @@ define user_guard_shared_load16(address, state)
     // on the given address. 
     false
 )
+define f_user_guard_shared_load16(heap, gv, address, state)
+  (user_guard_shared_load16(address, state))
+
+
+define user_transition_shared_load16(address, retval, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // reads from a given shared memory address.
+    false
+)
+define f_user_transition_shared_load16(heap, gv, address, retval, state)
+  (user_transition_shared_load16(address, retval, state))
+
+
+define user_rely_shared_load16(address, retval, state)
+(
+    false
+)
+define f_user_rely_shared_load16(heap, gv, address, retval, state)
+  (user_rely_shared_load16(address, retval, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_load32()                                               //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address
+// retval: 1
 
 define user_guard_shared_load32(address, state)
 (
@@ -99,11 +318,37 @@ define user_guard_shared_load32(address, state)
     // on the given address. 
     false
 )
+define f_user_guard_shared_load32(heap, gv, address, state)
+  (user_guard_shared_load32(address, state))
+
+
+define user_transition_shared_load32(address, retval, state)
+(
+    // Describes the possible ghost state transitions permitted after this PD
+    // reads from a given shared memory address.
+    false
+)
+define f_user_transition_shared_load32(heap, gv, address, retval, state)
+  (user_transition_shared_load32(address, retval, state))
+
+
+define user_rely_shared_load32(address, retval, state)
+(
+    false
+)
+define f_user_rely_shared_load32(heap, gv, address, retval, state)
+  (user_rely_shared_load32(address, retval, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_load64()                                               //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address
+// retval: 1
 
 define user_guard_shared_load64(address, state)
 (
-    // Checked to hold whenever this PD triggers a read event to shared memory
-    // on the given address.
     (
         address == 33554432 && // CONTROL_ADDR
         state.input != Seq() &&
@@ -116,164 +361,12 @@ define user_guard_shared_load64(address, state)
         !state.has_control
     )
 )
-
-define user_guard_shared_store8(address, value, state)
-(
-    // Checked to hold whenever this PD triggers a write event to shared memory
-    // on the given address. 
-    false
-)
-
-define user_guard_shared_store16(address, value, state)
-(
-    // Checked to hold whenever this PD triggers a write event to shared memory
-    // on the given address. 
-    false
-)
-
-define user_guard_shared_store32(address, value, state)
-(
-    // Checked to hold whenever this PD triggers a write event to shared memory
-    // on the given address. 
-    false
-)
-
-define user_guard_shared_store64(address, value, state)
-(
-    // Checked to hold whenever this PD triggers a write event to shared memory
-    // on the given address. 
-    
-    (
-        address == 33554432 && // CONTROL_ADDR
-        value == 1 &&
-        state.input == Seq() &&
-        state.has_control
-    )
-    ||
-    (
-        address == 33562624 && // COMMAND_ADDR
-        state.input == Seq(value) &&
-        state.has_control
-    )
-)
-
-define f_user_guard_microkit_notify(heap, gv, ch, state)
-  (user_guard_microkit_notify(ch, state))
-
-define f_user_guard_microkit_irq_ack(heap, gv, ch, state)
-  (user_guard_microkit_irq_ack(ch, state))
-
-define f_user_guard_microkit_ppcall(heap, gv, ch, msginfo, state)
-  (user_guard_microkit_ppcall(ch, msginfo, state))
-
-define f_user_guard_Recv(heap, gv, state)
-  (user_guard_Recv(state))
-
-define f_user_guard_ReplyRecv(heap, gv, reply_tag, state)
-  (user_guard_ReplyRecv(reply_tag, state))
-
-define f_user_guard_NBSendRecv(heap, gv, signal_cap, signal_msg, state)
-  (user_guard_NBSendRecv(signal_cap, signal_msg, state))
-
-define f_user_guard_shared_load8(heap, gv, address, state)
-  (user_guard_shared_load8(address, state))
-
-define f_user_guard_shared_load16(heap, gv, address, state)
-  (user_guard_shared_load16(address, state))
-
-define f_user_guard_shared_load32(heap, gv, address, state)
-  (user_guard_shared_load32(address, state))
-
 define f_user_guard_shared_load64(heap, gv, address, state)
   (user_guard_shared_load64(address, state))
 
-define f_user_guard_shared_store8(heap, gv, address, value, state)
-  (user_guard_shared_store8(address, value, state))
 
-define f_user_guard_shared_store16(heap, gv, address, value, state)
-  (user_guard_shared_store16(address, value, state))
-
-define f_user_guard_shared_store32(heap, gv, address, value, state)
-  (user_guard_shared_store32(address, value, state))
-
-define f_user_guard_shared_store64(heap, gv, address, value, state)
-  (user_guard_shared_store64(address, value, state))
-
-
-///////////////////////////////////////////////////////////////////////////////
-// user: transitions                                                         //
-///////////////////////////////////////////////////////////////////////////////
-
-define user_transition_microkit_notify(ch, state)
+define user_transition_shared_load64(address, retval, state)
 (
-    // Describes the possible state transitions allowed after this PD triggers
-    // a microkit_notify(ch) event
-    false // keypad does not trigger notify events
-)
-
-define user_transition_microkit_irq_ack(ch, state)
-(
-    // Describes the possible ghost state transitions permitted after this PD
-    // triggers a `microkit_irq_ack(ch)` event
-    false // keypad does not trigger irq ack events
-)
-
-define user_transition_microkit_ppcall(ch, msginfo, state)
-(
-    // Describes the possible ghost state transitions permitted after this PD
-    // triggers a `microkit_ppcall(ch,msginfo)` event.
-    false // keypad does not trigger ppcall events
-)
-
-define user_transition_Recv(state)
-(
-    // Describes the possible ghost state transitions permitted after this PD
-    // triggers a `Recv` event.
-    (state.input == Seq(1) || state.input == Seq(2)) &&
-    state.has_control == old(state.has_control) &&
-    state.issued_cmds == old(state.issued_cmds)
-    // we nondeterministically receive key press 1 or 2
-)
-
-define user_transition_ReplyRecv(reply_tag, state)
-(
-    // Describes the possible ghost state transitions permitted after this PD
-    // triggers a `ReplyRecv` event.
-    false
-)
-
-define user_transition_NBSendRecv(signal_cap, signal_msg, state)
-(
-    // Describes the possible ghost state transitions permitted after this PD
-    // triggers an `NBSendRecv` event.
-    false
-)
-
-define user_transition_shared_load8(address, value, state)
-(
-    // Describes the possible ghost state transitions permitted after this PD
-    // reads from a given shared memory address.
-    false
-)
-
-define user_transition_shared_load16(address, value, state)
-(
-    // Describes the possible ghost state transitions permitted after this PD
-    // reads from a given shared memory address.
-    false
-)
-
-define user_transition_shared_load32(address, value, state)
-(
-    // Describes the possible ghost state transitions permitted after this PD
-    // reads from a given shared memory address.
-    false
-)
-
-define user_transition_shared_load64(address, value, state)
-(
-    // Describes the possible ghost state transitions permitted after this PD
-    // reads from a given shared memory address.
     (
         address == 33554432 && // CONTROL_ADDR
         state.input == old(state.input) &&
@@ -290,33 +383,117 @@ define user_transition_shared_load64(address, value, state)
     )
     // the key buffer contains which key press we received
 )
+define f_user_transition_shared_load64(heap, gv, address, retval, state)
+  (user_transition_shared_load64(address, retval, state))
+
+
+define user_rely_shared_load64(address, retval, state)
+(
+    false // FIXME
+)
+define f_user_rely_shared_load64(heap, gv, address, retval, state)
+  (user_rely_shared_load64(address, retval, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_store8()                                               //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address, 1 value
+
+define user_guard_shared_store8(address, value, state)
+(
+    // Checked to hold whenever this PD triggers a write event to shared memory
+    // on the given address. 
+    false
+)
+define f_user_guard_shared_store8(heap, gv, address, value, state)
+  (user_guard_shared_store8(address, value, state))
 
 
 define user_transition_shared_store8(address, value, state)
 (
-    // Describes the possible ghost state transitions permitted after this PD
-    // writes to a given shared memory address.
     false
 )
+define f_user_transition_shared_store8(heap, gv, address, value, state)
+  (user_guard_shared_store8(address, value, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_store16()                                              //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address, 1 value
+
+define user_guard_shared_store16(address, value, state)
+(
+    // Checked to hold whenever this PD triggers a write event to shared memory
+    // on the given address. 
+    false
+)
+define f_user_guard_shared_store16(heap, gv, address, value, state)
+  (user_guard_shared_store16(address, value, state))
+
 
 define user_transition_shared_store16(address, value, state)
 (
-    // Describes the possible ghost state transitions permitted after this PD
-    // writes to a given shared memory address.
     false
 )
+define f_user_transition_shared_store16(heap, gv, address, value, state)
+  (user_guard_shared_store16(address, value, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_store32()                                              //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address, 1 value
+
+define user_guard_shared_store32(address, value, state)
+(
+    // Checked to hold whenever this PD triggers a write event to shared memory
+    // on the given address. 
+    false
+)
+define f_user_guard_shared_store32(heap, gv, address, value, state)
+  (user_guard_shared_store32(address, value, state))
+
 
 define user_transition_shared_store32(address, value, state)
 (
-    // Describes the possible ghost state transitions permitted after this PD
-    // writes to a given shared memory address.
     false
 )
+define f_user_transition_shared_store32(heap, gv, address, value, state)
+  (user_guard_shared_store32(address, value, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_store64()                                              //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address, 1 value
+
+define user_guard_shared_store64(address, value, state)
+(
+    (
+        address == 33554432 && // CONTROL_ADDR
+        value == 1 &&
+        state.input == Seq() &&
+        state.has_control
+    )
+    ||
+    (
+        address == 33562624 && // COMMAND_ADDR
+        state.input == Seq(value) &&
+        state.has_control
+    )
+)
+define f_user_guard_shared_store64(heap, gv, address, value, state)
+  (user_guard_shared_store64(address, value, state))
+
 
 define user_transition_shared_store64(address, value, state)
 (
-    // Describes the possible ghost state transitions permitted after this PD
-    // writes to a given shared memory address.
     (
         address == 33554432 && // CONTROL_ADDR
         value == 1 &&
@@ -332,125 +509,29 @@ define user_transition_shared_store64(address, value, state)
         state.issued_cmds == old(state.issued_cmds) ++ old(state.input)
     )
 )
-
-define f_user_transition_microkit_notify(heap, gv, ch, state)
-  (user_transition_microkit_notify(ch, state))
-
-define f_user_transition_microkit_irq_ack(heap, gv, ch, state)
-  (user_transition_microkit_irq_ack(ch, state))
-
-define f_user_transition_microkit_ppcall(heap, gv, ch, msginfo, state)
-  (user_transition_microkit_ppcall(ch, msginfo, state))
-
-define f_user_transition_Recv(heap, gv, state)
-  (user_transition_Recv(state))
-
-define f_user_transition_ReplyRecv(heap, gv, reply_tag, state)
-  (user_transition_ReplyRecv(reply_tag, state))
-
-define f_user_transition_NBSendRecv(heap, gv, signal_cap, signal_msg, state)
-  (user_transition_NBSendRecv(signal_cap, signal_msg, state))
-
-define f_user_transition_shared_load8(heap, gv, address, value, state)
-  (user_transition_shared_load8(address, value, state))
-
-define f_user_transition_shared_load16(heap, gv, address, value, state)
-  (user_transition_shared_load16(address, value, state))
-
-define f_user_transition_shared_load32(heap, gv, address, value, state)
-  (user_transition_shared_load32(address, value, state))
-
-define f_user_transition_shared_load64(heap, gv, address, value, state)
-  (user_transition_shared_load64(address, value, state))
-
-define f_user_transition_shared_store8(heap, gv, address, value, state)
-  (user_transition_shared_store8(address, value, state))
-
-define f_user_transition_shared_store16(heap, gv, address, value, state)
-  (user_transition_shared_store16(address, value, state))
-
-define f_user_transition_shared_store32(heap, gv, address, value, state)
-  (user_transition_shared_store32(address, value, state))
-
 define f_user_transition_shared_store64(heap, gv, address, value, state)
-  (user_transition_shared_store64(address, value, state))
+  (user_guard_shared_store64(address, value, state))
+
+
 
 ///////////////////////////////////////////////////////////////////////////////
-// user: rely                                                                //
+// user: initial state assumptions                                           //
 ///////////////////////////////////////////////////////////////////////////////
 // Assumptions that the PD makes about the environment.
 // These become assumptions in the proof, and unsubstantiated assumptions can
 // lead to unsoundness. Be careful!
 
-define f_user_rely_init(heap, gv, state)
+
+define user_rely_init(state)
 (
     // Assumed to hold when entering `uep_init()`.
     state.input == Seq() &&
     state.has_control == false &&
     state.issued_cmds == Seq()
 )
+define f_user_rely_init(heap, gv, state)
+  (user_rely_init(state))
 
-define f_user_rely_receive(heap, gv, pp, pf, ns, state) (
-    // Assumed to hold whenever this PD receives a response on its endpoint.
-    ns == Set(1)
-)
-
-define user_rely_ppcall(response, state)
-(
-    true
-)
-
-define f_user_rely_ppcall(heap, gv, response, state)
-  (user_rely_ppcall(response, state))
-
-
-
-///////////////////////////////////////////////////////////////////////////////
-// user: pre- and postconditions                                             //
-///////////////////////////////////////////////////////////////////////////////
-
-define f_user_local_microkit_notify_pre(heap, gv, ch, state)
-(
-    // Checked to hold every time this PD makes a microkit_notify(ch) call
-    true
-)
-
-define f_user_local_microkit_notify_post(heap, gv, ch, state)
-(
-    // Checked to hold every time a microkit_notify(ch) call returns in this PD
-    true
-)
-
-define f_user_local_microkit_irq_ack_pre(heap, gv, ch, state)
-(
-    // Checked to hold every time this PD makes a `microkit_irq_ack(ch)` call
-    true
-)
-
-define f_user_local_microkit_irq_ack_post(heap, gv, ch, state)
-(
-    // Checked to hold every time a `microkit_irq_ack(ch)` call returns
-    true
-)
-
-define f_user_local_microkit_ppcall_pre(heap, gv, ch, msginfo, state)
-(
-    // Checked to hold every time this PD makes a
-    // `microkit_ppcall(ch, msginfo)` call
-    true
-)
-
-define f_user_local_microkit_ppcall_post(heap, gv, ch, msginfo, response, state)
-(
-    // Checked to hold every time a `microkit_ppcall(ch,msginfo)` call returns.
-    // This is quite useful, as it allows one to tie the user_rely_ppcall
-    // guard together with the internal state of the protection domain.
-    true
-)
-
-// NB pre/postconditions are not available for shared_{load/store}XX methods
-// since these are virtual methods without a method body. Hence, postconditions
-// would not be checked, but would introduce assumptions.
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -460,12 +541,13 @@ define f_user_local_microkit_ppcall_post(heap, gv, ch, msginfo, response, state)
 // The preservation of these invariants becomes a proof obligation that the
 // user/verifier must show.
 
-define f_user_handler_loop_entry(heap,gv,state)
+define f_user_handler_loop_entry(heap, gv, state)
 (
     gv.microkit_have_signal == 0 &&
     state.input == Seq() &&
     !state.has_control
 )
+
 
 define f_user_handler_loop_invariant(heap, gv, have_reply, state)
 (
@@ -474,6 +556,7 @@ define f_user_handler_loop_invariant(heap, gv, have_reply, state)
     state.input == Seq() &&
     !state.has_control
 )
+
 
 define f_user_notified_loop_invariant(heap, gv, channel_index, state)
 (
