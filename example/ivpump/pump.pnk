@@ -11,21 +11,47 @@
 /@ extern function mk_notified_postconditions(ch: Int): Bool @/
 /@ extern function apply_is_userland(x: Bool): Bool @/
 
+/@ extern field has_control: Bool @/
+/@ extern field unhandled_cmds: Seq[Int] @/
+/@ extern field handled_cmds: Seq[Int] @/
+/@ extern function Seq(): Seq[Int] @/
+/@ extern function Seq1(ch: Int): Seq[Int] @/
+
 fun uep_init() {
+    /@ requires user_acc_ghost_state(userGhost()) @/
+    /@ requires user_rely_init(userGhost()) @/
+    /@ ensures false @/ // never terminates
     @microkit_report_debug(0, 0, 0, 1);
     microkit_notify(42);
+    var 1 control = 0;
     while (true) {
-        var 1 control = 0;
+        /@ invariant
+           (
+                control != 1 &&
+                user_acc_ghost_state(userGhost()) &&
+                !userGhost().has_control &&
+                userGhost().unhandled_cmds == Seq()
+           )
+        @/
         while (control != 1) {
+            /@ invariant 
+               user_acc_ghost_state(userGhost()) &&
+               userGhost().unhandled_cmds == Seq() &&
+               (
+                   (control == 1 && userGhost().has_control) ||
+                   (control != 1 && !userGhost().has_control)
+               )
+            @/
             !ldw control, CONTROL_ADDR;
         }
         var 1 command = 0;
         !ldw command, COMMAND_ADDR;
         !stw CONTROL_ADDR, 0;
-
+        control = 0; // bug found during verif.: we were missing this line
         // simulate a keypad notify so we don't get bored
         var 1 delay = 10000000;
         while (delay > 0) {
+            /@ invariant 0 <= delay && delay <= 10000000 @/
             delay = delay - 1;
         }
         microkit_notify(42);

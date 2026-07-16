@@ -1,0 +1,531 @@
+//
+// Copyright 2026, UNSW
+//
+// SPDX-License-Identifier: BSD-2-Clause
+//
+
+
+define f_Seq(heap,gv) (
+    Seq()
+)
+
+define f_Seq1(heap,gv,ch) (
+    Seq(ch)
+)
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: the PD ghost state                                                  //
+///////////////////////////////////////////////////////////////////////////////
+
+field has_control: Bool
+field unhandled_cmds: Seq[Int]
+field handled_cmds: Seq[Int]
+
+define user_acc_ghost_state(state)
+(
+    acc(state.has_control) &&
+    acc(state.unhandled_cmds) &&
+    acc(state.handled_cmds)
+)
+define f_user_acc_ghost_state(heap, gv, state)
+  (user_acc_ghost_state(state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user specs for the PD's local state machine                               //
+///////////////////////////////////////////////////////////////////////////////
+// Each Microkit event has a corresponding `user_guard` and `user_transition`
+// predicate. The Microkit events with return values also have a `user_rely`.
+// 
+// `user_guard`:
+// A guard states that the PD will not emit the corresponding Microkit event,
+// except when the PD's current ghost state satisfies the guard predicate.
+// Locally these become proof obligations that the user/verifier must show to
+// hold whenever the program executes a call that causes the corresponding
+// event.
+//
+// `user_transition`:
+// The transition predicate determines whether a PD may transition from its
+// state before emitting a Microkit event (the `old(state)`) to a given state
+// after emitting the Microkit event. The transition that actually takes place 
+// is chosen nondeterministically from all possible new states that satisfy the
+// transition relation. Note that the transition relation may constrain an
+// environment-controlled return value. Such a constraint does not remove the
+// return value as a possibility from the global event model. It only means
+// that a run cannot transition to a new state that constrains the return value
+// to something other than the environment-dictated value.
+// Note that the variable `state` in the transition relation always references
+// the ghost state _after_ the call. Use `old(state.field)` to describe the
+// pre-transition ghost state.
+//
+// `user_rely`:
+// The reliance predicate states an environmental assumption used in the local
+// proof, by expressing a relation between a pre-transition ghost state and
+// the possible return values of a Microkit event. These assumptions have to be
+// proven as part of a global proof about the state machines. Note that in a
+// reliance predicate, one must use `old(state.field)`` to refer to the ghost
+// state before the transition, and one is not allowed to mention `state.field`
+// by itself. This syntactic discipline is not statically checked, the proof
+// engineer must maintaine it!
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event microkit_notify()                                             //
+///////////////////////////////////////////////////////////////////////////////
+// args: microkit_channel ch
+
+define user_guard_microkit_notify(ch, state)
+(
+    true
+    // Pump may notify anybody at any time. This should break any global proof
+    // attempt trying to show that `pump.handled_cmds` is at all times a subset
+    // of `keypad.issued_cmds`. The right guard would rule out notifications
+    // while `pump.has_control`
+)
+define f_user_guard_microkit_notify(heap, gv, ch, state)
+  (user_guard_microkit_notify(ch, state))
+
+
+define user_transition_microkit_notify(ch, state)
+(
+    state.has_control == old(state.has_control) &&
+    state.unhandled_cmds == old(state.unhandled_cmds) &&
+    state.handled_cmds == old(state.handled_cmds)
+    // sending a notification does not change the state
+)
+define f_user_transition_microkit_notify(heap, gv, ch, state)
+  (user_transition_microkit_notify(ch, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event microkit_irq_ack()                                            //
+///////////////////////////////////////////////////////////////////////////////
+// args: microkit_channel ch
+
+define user_guard_microkit_irq_ack(ch, state)
+(
+    false // pump does not trigger irq acks
+)
+define f_user_guard_microkit_irq_ack(heap, gv, ch, state)
+  (user_guard_microkit_irq_ack(ch, state))
+
+
+define user_transition_microkit_irq_ack(ch, state)
+(
+    false // pump does not trigger irq acks
+)
+define f_user_transition_microkit_irq_ack(heap, gv, ch, state)
+  (user_transition_microkit_irq_ack(ch, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event microkit_ppcall()                                             //
+///////////////////////////////////////////////////////////////////////////////
+// args: microkit_channel ch, microkit_msginfo msginfo
+// retval: microkit_msginfo
+
+define user_guard_microkit_ppcall(ch, msginfo, state)
+(
+    false // pump does not make ppcalls
+)
+define f_user_guard_microkit_ppcall(heap, gv, ch, msginfo, state)
+  (user_guard_microkit_ppcall(ch, msginfo, state))
+
+
+define user_transition_microkit_ppcall(ch, msginfo, retval, state)
+(
+    false // pump does not make ppcalls
+)
+define f_user_transition_microkit_ppcall(heap, gv, ch, msginfo, retval, state)
+  (user_transition_microkit_ppcall(ch, msginfo, retval, state))
+
+
+define user_rely_microkit_ppcall(ch, msginfo, retval, state)
+(
+    true // pump does not make ppcalls
+)
+define f_user_rely_microkit_ppcall(heap, gv, ch, msginfo, retval, state)
+  (user_rely_microkit_ppcall(ch, msginfo, retval, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event mk_Recv()                                                     //
+///////////////////////////////////////////////////////////////////////////////
+// retval: panseL4_Response (response_tag, pp, pf, ns)
+
+define user_guard_Recv(state)
+(
+    false // pump never leaves the init loop, doesn't receive
+)
+define f_user_guard_Recv(heap, gv, state)
+  (user_guard_Recv(state))
+
+
+define user_transition_Recv(response_tag, pp, pf, ns, state)
+(
+    false // pump never leaves the init loop, doesn't receive
+)
+define f_user_transition_Recv(heap, gv, response_tag, pp, pf, ns, state)
+  (user_transition_Recv(response_tag, pp, pf, ns, state))
+
+
+define user_rely_Recv(response_tag, pp, pf, ns, state) (
+    true
+)
+define f_user_rely_Recv(heap, gv, response_tag, pp, pf, ns, state)
+  (user_rely_Recv(response_tag, pp, pf, ns, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event mk_ReplyRecv()                                                //
+///////////////////////////////////////////////////////////////////////////////
+// args: panseL4_MessageInfo_t reply_tag
+// retval: panseL4_Response (response_tag, pp, pf, ns)
+
+define user_guard_ReplyRecv(reply_tag, state)
+(
+    false // pump does not do replies
+)
+define f_user_guard_ReplyRecv(heap, gv, reply_tag, state)
+  (user_guard_ReplyRecv(reply_tag, state))
+
+
+define user_transition_ReplyRecv(reply_tag, response_tag, pp, pf, ns, state)
+(
+    false // pump does not do replies
+)
+define f_user_transition_ReplyRecv(heap, gv, reply_tag, response_tag, pp, pf, ns, state)
+  (user_transition_ReplyRecv(reply_tag, response_tag, pp, pf, ns, state))
+
+
+define user_rely_ReplyRecv(reply_tag, response_tag, pp, pf, ns, state) (
+    true // pump does not do replies
+)
+define f_user_rely_ReplyRecv(heap, gv, reply_tag, response_tag, pp, pf, ns, state)
+  (user_rely_ReplyRecv(reply_tag, response_tag, pp, pf, ns, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event mk_NBSendRecv()                                               //
+///////////////////////////////////////////////////////////////////////////////
+// args: panseL4_CPtr signal_cap,
+//       panseL4_MessageInfo_t signal_msg
+// retval: panseL4_Response (response_tag, pp, pf, ns)
+
+define user_guard_NBSendRecv(signal_cap, signal_msg, state)
+(
+    false // pump does not use deferred calls
+)
+define f_user_guard_NBSendRecv(heap, gv, signal_cap, signal_msg, state)
+  (user_guard_NBSendRecv(signal_cap, signal_msg, state))
+
+
+define user_transition_NBSendRecv(signal_cap, signal_msg, response_tag, pp, pf, ns, state)
+(
+    false // pump does not use deferred calls
+)
+define f_user_transition_NBSendRecv(heap, gv, signal_cap, signal_msg, response_tag, pp, pf, ns, state)
+  (user_transition_NBSendRecv(signal_cap, signal_msg, response_tag, pp, pf, ns, state))
+
+define user_rely_NBSendRecv(signal_cap, signal_msg, response_tag, pp, pf, ns, state) (
+    true // pump does not use deferred calls
+)
+define f_user_rely_NBSendRecv(heap, gv, signal_cap, signal_msg, response_tag, pp, pf, ns, state)
+  (user_rely_NBSendRecv(signal_cap, signal_msg, response_tag, pp, pf, ns, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_load8()                                                //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address
+// retval: 1
+
+
+define user_guard_shared_load8(address, state)
+(
+    false
+)
+define f_user_guard_shared_load8(heap, gv, address, state)
+  (user_guard_shared_load8(address, state))
+
+
+define user_transition_shared_load8(address, retval, state)
+(
+    false
+)
+define f_user_transition_shared_load8(heap, gv, address, retval, state)
+  (user_transition_shared_load8(address, retval, state))
+
+
+define user_rely_shared_load8(address, retval, state)
+(
+    true
+)
+define f_user_rely_shared_load8(heap, gv, address, retval, state)
+  (user_rely_shared_load8(address, retval, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_load16()                                               //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address
+// retval: 1
+
+define user_guard_shared_load16(address, state)
+(
+    false
+)
+define f_user_guard_shared_load16(heap, gv, address, state)
+  (user_guard_shared_load16(address, state))
+
+
+define user_transition_shared_load16(address, retval, state)
+(
+    false
+)
+define f_user_transition_shared_load16(heap, gv, address, retval, state)
+  (user_transition_shared_load16(address, retval, state))
+
+
+define user_rely_shared_load16(address, retval, state)
+(
+    true
+)
+define f_user_rely_shared_load16(heap, gv, address, retval, state)
+  (user_rely_shared_load16(address, retval, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_load32()                                               //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address
+// retval: 1
+
+define user_guard_shared_load32(address, state)
+(
+    false
+)
+define f_user_guard_shared_load32(heap, gv, address, state)
+  (user_guard_shared_load32(address, state))
+
+
+define user_transition_shared_load32(address, retval, state)
+(
+    false
+)
+define f_user_transition_shared_load32(heap, gv, address, retval, state)
+  (user_transition_shared_load32(address, retval, state))
+
+
+define user_rely_shared_load32(address, retval, state)
+(
+    true
+)
+define f_user_rely_shared_load32(heap, gv, address, retval, state)
+  (user_rely_shared_load32(address, retval, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_load64()                                               //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address
+// retval: 1
+
+define user_guard_shared_load64(address, state)
+(
+    (
+        address == 33554432 && // CONTROL_ADDR
+        !state.has_control
+    )
+    ||
+    (
+        address == 33562624 && // COMMAND_ADDR
+        state.has_control &&
+        state.unhandled_cmds == Seq()
+    )
+)
+define f_user_guard_shared_load64(heap, gv, address, state)
+  (user_guard_shared_load64(address, state))
+
+
+define user_transition_shared_load64(address, retval, state)
+(
+    (
+        address == 33554432 && // CONTROL_ADDR
+        state.has_control == (retval == 1) &&
+        state.unhandled_cmds == old(state.unhandled_cmds) &&
+        state.handled_cmds == old(state.handled_cmds)
+    )
+    ||
+    (
+        address == 33562624 && // COMMAND_ADDR
+        state.has_control == old(state.has_control) &&
+        state.unhandled_cmds == Seq(retval) &&
+        state.handled_cmds == old(state.handled_cmds)
+    )
+    // the command area contains which key press we received
+)
+define f_user_transition_shared_load64(heap, gv, address, retval, state)
+  (user_transition_shared_load64(address, retval, state))
+
+
+define user_rely_shared_load64(address, retval, state)
+(
+    true
+)
+define f_user_rely_shared_load64(heap, gv, address, retval, state)
+  (user_rely_shared_load64(address, retval, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_store8()                                               //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address, 1 value
+
+define user_guard_shared_store8(address, value, state)
+(
+    false
+)
+define f_user_guard_shared_store8(heap, gv, address, value, state)
+  (user_guard_shared_store8(address, value, state))
+
+
+define user_transition_shared_store8(address, value, state)
+(
+    false
+)
+define f_user_transition_shared_store8(heap, gv, address, value, state)
+  (user_guard_shared_store8(address, value, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_store16()                                              //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address, 1 value
+
+define user_guard_shared_store16(address, value, state)
+(
+    false
+)
+define f_user_guard_shared_store16(heap, gv, address, value, state)
+  (user_guard_shared_store16(address, value, state))
+
+
+define user_transition_shared_store16(address, value, state)
+(
+    false
+)
+define f_user_transition_shared_store16(heap, gv, address, value, state)
+  (user_guard_shared_store16(address, value, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_store32()                                              //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address, 1 value
+
+define user_guard_shared_store32(address, value, state)
+(
+    false
+)
+define f_user_guard_shared_store32(heap, gv, address, value, state)
+  (user_guard_shared_store32(address, value, state))
+
+
+define user_transition_shared_store32(address, value, state)
+(
+    false
+)
+define f_user_transition_shared_store32(heap, gv, address, value, state)
+  (user_guard_shared_store32(address, value, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: event shared_store64()                                              //
+///////////////////////////////////////////////////////////////////////////////
+// args: 1 address, 1 value
+
+define user_guard_shared_store64(address, value, state)
+(
+    (
+        address == 33554432 && // CONTROL_ADDR
+        state.has_control &&
+        state.unhandled_cmds != Seq()
+    )
+)
+define f_user_guard_shared_store64(heap, gv, address, value, state)
+  (user_guard_shared_store64(address, value, state))
+
+
+define user_transition_shared_store64(address, value, state)
+(
+    state.has_control == (value == 1) &&
+    state.unhandled_cmds == Seq() &&
+    state.handled_cmds == old(state.handled_cmds) ++ old(state.unhandled_cmds)
+)
+define f_user_transition_shared_store64(heap, gv, address, value, state)
+  (user_guard_shared_store64(address, value, state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: initial state assumptions                                           //
+///////////////////////////////////////////////////////////////////////////////
+// Assumptions that the PD makes about the environment.
+// These become assumptions in the proof, and unsubstantiated assumptions can
+// lead to unsoundness. Be careful!
+
+
+define user_rely_init(state)
+(
+    // Assumed to hold when entering `uep_init()`.
+    !state.has_control &&
+    state.unhandled_cmds == Seq() &&
+    state.handled_cmds == Seq()
+)
+define f_user_rely_init(heap, gv, state)
+  (user_rely_init(state))
+
+
+
+///////////////////////////////////////////////////////////////////////////////
+// user: loop invariants                                                     //
+///////////////////////////////////////////////////////////////////////////////
+// Loop invariants for Microkit's internal loops.
+// The preservation of these invariants becomes a proof obligation that the
+// user/verifier must show.
+
+define f_user_handler_loop_entry(heap, gv, state)
+(
+    false
+)
+
+
+define f_user_handler_loop_invariant(heap, gv, have_reply, state)
+(
+    false
+)
+
+
+define f_user_notified_loop_invariant(heap, gv, channel_index, state)
+(
+    false
+)
+
