@@ -5,16 +5,6 @@
 //
 
 
-///////////////////////////////////////////////////////////////////////////////
-// user specs for the PD's local state machine                               //
-///////////////////////////////////////////////////////////////////////////////
-// `user_guard`:
-// A guard states that the PD will not emit the corresponding Microkit event,
-// except when the PD's current ghost state satisfies the guard predicate.
-// Locally these become proof obligations that the user/verifier must show to
-// hold whenever the program executes a call that causes the corresponding
-// event.
-
 define f_Seq(heap,gv) (
     Seq()
 )
@@ -22,6 +12,8 @@ define f_Seq(heap,gv) (
 define f_Seq1(heap,gv,ch) (
     Seq(ch)
 )
+
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // user: the PD ghost state                                                  //
@@ -43,13 +35,51 @@ define f_user_acc_ghost_state(heap, gv, state)
 
 
 ///////////////////////////////////////////////////////////////////////////////
+// user specs for the PD's local state machine                               //
+///////////////////////////////////////////////////////////////////////////////
+// Each Microkit event has a corresponding `user_guard` and `user_transition`
+// predicate. The Microkit events with return values also have a `user_rely`.
+// 
+// `user_guard`:
+// A guard states that the PD will not emit the corresponding Microkit event,
+// except when the PD's current ghost state satisfies the guard predicate.
+// Locally these become proof obligations that the user/verifier must show to
+// hold whenever the program executes a call that causes the corresponding
+// event.
+//
+// `user_transition`:
+// The transition predicate determines whether a PD may transition from its
+// state before emitting a Microkit event (the `old(state)`) to a given state
+// after emitting the Microkit event. The transition that actually takes place 
+// is chosen nondeterministically from all possible new states that satisfy the
+// transition relation. Note that the transition relation may constrain an
+// environment-controlled return value. Such a constraint does not remove the
+// return value as a possibility from the global event model. It only means
+// that a run cannot transition to a new state that constrains the return value
+// to something other than the environment-dictated value.
+// Note that the variable `state` in the transition relation always references
+// the ghost state _after_ the call. Use `old(state.field)` to describe the
+// pre-transition ghost state.
+//
+// `user_rely`:
+// The reliance predicate states an environmental assumption used in the local
+// proof, by expressing a relation between a pre-transition ghost state and
+// the possible return values of a Microkit event. These assumptions have to be
+// proven as part of a global proof about the state machines. Note that in a
+// reliance predicate, one must use `old(state.field)`` to refer to the ghost
+// state before the transition, and one is not allowed to mention `state.field`
+// by itself. This syntactic discipline is not statically checked, the proof
+// engineer must maintaine it!
+
+
+
+///////////////////////////////////////////////////////////////////////////////
 // user: event microkit_notify()                                             //
 ///////////////////////////////////////////////////////////////////////////////
 // args: microkit_channel ch
 
 define user_guard_microkit_notify(ch, state)
 (
-    // Checked to hold whenever this PD triggers a `microkit_notify(ch)` event.
     false // keypad does not notify anybody
 )
 define f_user_guard_microkit_notify(heap, gv, ch, state)
@@ -58,9 +88,7 @@ define f_user_guard_microkit_notify(heap, gv, ch, state)
 
 define user_transition_microkit_notify(ch, state)
 (
-    // Describes the possible state transitions allowed after this PD triggers
-    // a microkit_notify(ch) event
-    false // keypad does not trigger notify events
+    false // keypad does not notify anybody
 )
 define f_user_transition_microkit_notify(heap, gv, ch, state)
   (user_transition_microkit_notify(ch, state))
@@ -74,8 +102,7 @@ define f_user_transition_microkit_notify(heap, gv, ch, state)
 
 define user_guard_microkit_irq_ack(ch, state)
 (
-    // Checked to hold whenever this PD triggers a `microkit_irq_ack(ch)` event.
-    false // keypad does not trigger acks
+    false // keypad does not trigger irq acks
 )
 define f_user_guard_microkit_irq_ack(heap, gv, ch, state)
   (user_guard_microkit_irq_ack(ch, state))
@@ -83,9 +110,7 @@ define f_user_guard_microkit_irq_ack(heap, gv, ch, state)
 
 define user_transition_microkit_irq_ack(ch, state)
 (
-    // Describes the possible ghost state transitions permitted after this PD
-    // triggers a `microkit_irq_ack(ch)` event
-    false // keypad does not trigger irq ack events
+    false // keypad does not trigger irq acks
 )
 define f_user_transition_microkit_irq_ack(heap, gv, ch, state)
   (user_transition_microkit_irq_ack(ch, state))
@@ -100,8 +125,6 @@ define f_user_transition_microkit_irq_ack(heap, gv, ch, state)
 
 define user_guard_microkit_ppcall(ch, msginfo, state)
 (
-    // Checked to hold whenever this PD triggers a
-    // `microkit_ppcall(ch,msginfo)` event.
     false // keypad does not make ppcalls
 )
 define f_user_guard_microkit_ppcall(heap, gv, ch, msginfo, state)
@@ -110,9 +133,7 @@ define f_user_guard_microkit_ppcall(heap, gv, ch, msginfo, state)
 
 define user_transition_microkit_ppcall(ch, msginfo, retval, state)
 (
-    // Describes the possible ghost state transitions permitted after this PD
-    // triggers a `microkit_ppcall(ch,msginfo)` event.
-    false // keypad does not trigger ppcall events
+    false // keypad does not make ppcalls
 )
 define f_user_transition_microkit_ppcall(heap, gv, ch, msginfo, retval, state)
   (user_transition_microkit_ppcall(ch, msginfo, retval, state))
@@ -120,7 +141,7 @@ define f_user_transition_microkit_ppcall(heap, gv, ch, msginfo, retval, state)
 
 define user_rely_microkit_ppcall(ch, msginfo, retval, state)
 (
-    true
+    true // keypad does not make ppcalls
 )
 define f_user_rely_microkit_ppcall(heap, gv, ch, msginfo, retval, state)
   (user_rely_microkit_ppcall(ch, msginfo, retval, state))
@@ -134,11 +155,10 @@ define f_user_rely_microkit_ppcall(heap, gv, ch, msginfo, retval, state)
 
 define user_guard_Recv(state)
 (
-    // Checked to hold whenever this PD triggers a `Recv` event.
     state.input == Seq() &&
     !state.has_control
-    // keypad cannot receive while it is handling some keyboard input or has
-    // control over the comm buffer
+    // keypad promises not to receive while it is handling some keyboard input
+    // or has control over the comm buffer
 )
 define f_user_guard_Recv(heap, gv, state)
   (user_guard_Recv(state))
@@ -146,8 +166,6 @@ define f_user_guard_Recv(heap, gv, state)
 
 define user_transition_Recv(response_tag, pp, pf, ns, state)
 (
-    // Describes the possible ghost state transitions permitted after this PD
-    // triggers a `Recv` event.
     (state.input == Seq(1) || state.input == Seq(2)) &&
     state.has_control == old(state.has_control) &&
     state.issued_cmds == old(state.issued_cmds)
@@ -158,8 +176,9 @@ define f_user_transition_Recv(heap, gv, response_tag, pp, pf, ns, state)
 
 
 define user_rely_Recv(response_tag, pp, pf, ns, state) (
-    // Assumed to hold whenever this PD receives a response on its endpoint.
     ns == Set(1)
+    // this PD knows it has only one partner, on channel 1, and it will
+    // only notify them, not make a ppcall
 )
 define f_user_rely_Recv(heap, gv, response_tag, pp, pf, ns, state)
   (user_rely_Recv(response_tag, pp, pf, ns, state))
@@ -182,17 +201,14 @@ define f_user_guard_ReplyRecv(heap, gv, reply_tag, state)
 
 define user_transition_ReplyRecv(reply_tag, response_tag, pp, pf, ns, state)
 (
-    // Describes the possible ghost state transitions permitted after this PD
-    // triggers a `ReplyRecv` event.
-    false
+    false // keypad does not do replies
 )
 define f_user_transition_ReplyRecv(heap, gv, reply_tag, response_tag, pp, pf, ns, state)
   (user_transition_ReplyRecv(reply_tag, response_tag, pp, pf, ns, state))
 
 
 define user_rely_ReplyRecv(reply_tag, response_tag, pp, pf, ns, state) (
-    // Assumed to hold whenever this PD receives a response on its endpoint.
-    false
+    true // keypad does not do replies
 )
 define f_user_rely_ReplyRecv(heap, gv, reply_tag, response_tag, pp, pf, ns, state)
   (user_rely_ReplyRecv(reply_tag, response_tag, pp, pf, ns, state))
@@ -208,9 +224,6 @@ define f_user_rely_ReplyRecv(heap, gv, reply_tag, response_tag, pp, pf, ns, stat
 
 define user_guard_NBSendRecv(signal_cap, signal_msg, state)
 (
-    // Checked to hold whenever this PD triggers an `NBSendRecv` event. This
-    // happens when a handler loop iteration starts, and the previous iteration
-    // used a `microkit_deferred_notify` or `microkit_deferred_irq_ack` call.
     false // keypad does not use deferred calls
 )
 define f_user_guard_NBSendRecv(heap, gv, signal_cap, signal_msg, state)
@@ -219,16 +232,13 @@ define f_user_guard_NBSendRecv(heap, gv, signal_cap, signal_msg, state)
 
 define user_transition_NBSendRecv(signal_cap, signal_msg, response_tag, pp, pf, ns, state)
 (
-    // Describes the possible ghost state transitions permitted after this PD
-    // triggers an `NBSendRecv` event.
-    false
+    false // keypad does not use deferred calls
 )
 define f_user_transition_NBSendRecv(heap, gv, signal_cap, signal_msg, response_tag, pp, pf, ns, state)
   (user_transition_NBSendRecv(signal_cap, signal_msg, response_tag, pp, pf, ns, state))
 
 define user_rely_NBSendRecv(signal_cap, signal_msg, response_tag, pp, pf, ns, state) (
-    // Assumed to hold whenever this PD receives a response on its endpoint.
-    false
+    true // keypad does not use deferred calls
 )
 define f_user_rely_NBSendRecv(heap, gv, signal_cap, signal_msg, response_tag, pp, pf, ns, state)
   (user_rely_NBSendRecv(signal_cap, signal_msg, response_tag, pp, pf, ns, state))
@@ -244,8 +254,6 @@ define f_user_rely_NBSendRecv(heap, gv, signal_cap, signal_msg, response_tag, pp
 
 define user_guard_shared_load8(address, state)
 (
-    // Checked to hold whenever this PD triggers a read event to shared memory
-    // on the given address. 
     false
 )
 define f_user_guard_shared_load8(heap, gv, address, state)
@@ -254,8 +262,6 @@ define f_user_guard_shared_load8(heap, gv, address, state)
 
 define user_transition_shared_load8(address, retval, state)
 (
-    // Describes the possible ghost state transitions permitted after this PD
-    // reads from a given shared memory address.
     false
 )
 define f_user_transition_shared_load8(heap, gv, address, retval, state)
@@ -264,7 +270,7 @@ define f_user_transition_shared_load8(heap, gv, address, retval, state)
 
 define user_rely_shared_load8(address, retval, state)
 (
-    false
+    true
 )
 define f_user_rely_shared_load8(heap, gv, address, retval, state)
   (user_rely_shared_load8(address, retval, state))
@@ -279,8 +285,6 @@ define f_user_rely_shared_load8(heap, gv, address, retval, state)
 
 define user_guard_shared_load16(address, state)
 (
-    // Checked to hold whenever this PD triggers a read event to shared memory
-    // on the given address. 
     false
 )
 define f_user_guard_shared_load16(heap, gv, address, state)
@@ -289,8 +293,6 @@ define f_user_guard_shared_load16(heap, gv, address, state)
 
 define user_transition_shared_load16(address, retval, state)
 (
-    // Describes the possible ghost state transitions permitted after this PD
-    // reads from a given shared memory address.
     false
 )
 define f_user_transition_shared_load16(heap, gv, address, retval, state)
@@ -299,7 +301,7 @@ define f_user_transition_shared_load16(heap, gv, address, retval, state)
 
 define user_rely_shared_load16(address, retval, state)
 (
-    false
+    true
 )
 define f_user_rely_shared_load16(heap, gv, address, retval, state)
   (user_rely_shared_load16(address, retval, state))
@@ -314,8 +316,6 @@ define f_user_rely_shared_load16(heap, gv, address, retval, state)
 
 define user_guard_shared_load32(address, state)
 (
-    // Checked to hold whenever this PD triggers a read event to shared memory
-    // on the given address. 
     false
 )
 define f_user_guard_shared_load32(heap, gv, address, state)
@@ -324,8 +324,6 @@ define f_user_guard_shared_load32(heap, gv, address, state)
 
 define user_transition_shared_load32(address, retval, state)
 (
-    // Describes the possible ghost state transitions permitted after this PD
-    // reads from a given shared memory address.
     false
 )
 define f_user_transition_shared_load32(heap, gv, address, retval, state)
@@ -334,7 +332,7 @@ define f_user_transition_shared_load32(heap, gv, address, retval, state)
 
 define user_rely_shared_load32(address, retval, state)
 (
-    false
+    true
 )
 define f_user_rely_shared_load32(heap, gv, address, retval, state)
   (user_rely_shared_load32(address, retval, state))
@@ -370,13 +368,13 @@ define user_transition_shared_load64(address, retval, state)
     (
         address == 33554432 && // CONTROL_ADDR
         state.input == old(state.input) &&
-        state.has_control == (value == 0) &&
+        state.has_control == (retval == 0) &&
         state.issued_cmds == old(state.issued_cmds)
     )
     ||
     (
         address == 33570816 && // KEYBUFFER_ADDR
-        Seq(value) == state.input &&
+        Seq(retval) == state.input &&
         state.input == old(state.input) &&
         state.has_control == old(state.has_control) &&
         state.issued_cmds == old(state.issued_cmds)
@@ -389,7 +387,7 @@ define f_user_transition_shared_load64(heap, gv, address, retval, state)
 
 define user_rely_shared_load64(address, retval, state)
 (
-    false // FIXME
+    true
 )
 define f_user_rely_shared_load64(heap, gv, address, retval, state)
   (user_rely_shared_load64(address, retval, state))
@@ -403,8 +401,6 @@ define f_user_rely_shared_load64(heap, gv, address, retval, state)
 
 define user_guard_shared_store8(address, value, state)
 (
-    // Checked to hold whenever this PD triggers a write event to shared memory
-    // on the given address. 
     false
 )
 define f_user_guard_shared_store8(heap, gv, address, value, state)
@@ -427,8 +423,6 @@ define f_user_transition_shared_store8(heap, gv, address, value, state)
 
 define user_guard_shared_store16(address, value, state)
 (
-    // Checked to hold whenever this PD triggers a write event to shared memory
-    // on the given address. 
     false
 )
 define f_user_guard_shared_store16(heap, gv, address, value, state)
@@ -451,8 +445,6 @@ define f_user_transition_shared_store16(heap, gv, address, value, state)
 
 define user_guard_shared_store32(address, value, state)
 (
-    // Checked to hold whenever this PD triggers a write event to shared memory
-    // on the given address. 
     false
 )
 define f_user_guard_shared_store32(heap, gv, address, value, state)
