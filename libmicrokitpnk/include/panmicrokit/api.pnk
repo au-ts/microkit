@@ -4,6 +4,37 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+// cap offsets (used by, but not part of the public api.pnk)
+#define MONITOR_EP 5
+#define TCB_CAP 6
+#define BASE_OUTPUT_NOTIFICATION_CAP 10
+#define BASE_ENDPOINT_CAP 74
+#define BASE_IRQ_CAP 138
+#define BASE_TCB_CAP 202
+
+// SDF specification exported by microkit-tool
+/@ extern function mk_is_protected_source(x: Int): Bool @/
+/@ extern function mk_is_ppcall_target(x: Int): Bool @/
+/@ extern function mk_is_notified_source(x: Int): Bool @/
+/@ extern function mk_is_notify_target(x: Int): Bool @/
+/@ extern function mk_is_irq_channel(x: Int): Bool @/
+/@ extern function mk_is_child(x: Int): Bool @/
+
+// relevant part of the user spec
+/@ extern function userGhost(): Ref @/
+/@ extern function user_acc_ghost_state(state: Ref): Bool @/
+
+/@ extern function user_guard_microkit_notify(ch: Int, state: Ref): Bool @/
+/@ extern function user_transition_microkit_notify(ch: Int, state: Ref): Bool @/
+
+/@ extern function user_guard_microkit_irq_ack(ch: Int, state: Ref): Bool @/
+/@ extern function user_transition_microkit_irq_ack(ch: Int, state: Ref): Bool @/
+
+/@ extern function user_guard_microkit_ppcall(ch: Int, msginfo: Int, state: Ref): Bool @/
+/@ extern function user_transition_microkit_ppcall(ch: Int, msginfo: Int, retval: Int, state: Ref): Bool @/
+/@ extern function user_rely_microkit_ppcall(ch: Int, msginfo: Int, retval: Int, state: Ref): Bool @/
+
+// The public Pancake Microkit API
 // basic types
 #define microkit_channel 1
 #define microkit_child 1
@@ -23,54 +54,16 @@
 #define microkit_mr_set panseL4_SetMR
 #define microkit_mr_get panseL4_GetMR
 
-#define MONITOR_EP 5
-#define TCB_CAP 6
-#define BASE_OUTPUT_NOTIFICATION_CAP 10
-#define BASE_ENDPOINT_CAP 74
-#define BASE_IRQ_CAP 138
-#define BASE_TCB_CAP 202
-
 /@ method ffimicrokit_report_debug(c: Int, c2: Int, a: Int, a2: Int) @/
 /@ method ffimicrokit_report_error(c: Int, c2: Int, a: Int, a2: Int) @/
-
-/@ extern function mk_is_protected_source(x: Int): Bool @/
-/@ extern function mk_is_ppcall_target(x: Int): Bool @/
-/@ extern function mk_is_notified_source(x: Int): Bool @/
-/@ extern function mk_is_notify_target(x: Int): Bool @/
-/@ extern function mk_is_irq_channel(x: Int): Bool @/
-/@ extern function mk_is_child(x: Int): Bool @/
-
-
-/@ extern function userGhost(): Ref @/
-/@ extern function user_acc_ghost_state(state: Ref): Bool @/
-
-/@ extern function user_local_microkit_notify_pre(ch: Int, state: Ref): Bool @/
-/@ extern function user_local_microkit_notify_post(ch: Int, state: Ref): Bool @/
-/@ extern function user_guard_microkit_notify(ch: Int, state: Ref): Bool @/
-/@ extern function user_transition_microkit_notify(ch: Int, state: Ref): Bool @/
-
-/@ extern function user_local_microkit_irq_ack_pre(ch: Int, state: Ref): Bool @/
-/@ extern function user_local_microkit_irq_ack_post(ch: Int, state: Ref): Bool @/
-/@ extern function user_guard_microkit_irq_ack(ch: Int, state: Ref): Bool @/
-/@ extern function user_transition_microkit_irq_ack(ch: Int, state: Ref): Bool @/
-
-/@ extern function user_local_microkit_ppcall_pre(ch: Int, msginfo: Int, state: Ref): Bool @/
-/@ extern function user_local_microkit_ppcall_post(ch: Int, msginfo: Int, tag: Int, state: Ref): Bool @/
-/@ extern function user_guard_microkit_ppcall(ch: Int, msginfo: Int, state: Ref): Bool @/
-/@ extern function user_transition_microkit_ppcall(ch: Int, msginfo: Int, state: Ref): Bool @/
-
-/@ extern function user_rely_ppcall(tag: Int, state: Ref): Bool @/
-
 
 export fun microkit_notify(microkit_channel ch) {
     /@ requires mk_is_notify_target(ch) @/
 
     /@ requires user_acc_ghost_state(userGhost()) @/
-    /@ requires user_local_microkit_notify_pre(ch, userGhost()) @/
     /@ requires user_guard_microkit_notify(ch, userGhost()) @/
 
     /@ ensures user_acc_ghost_state(userGhost()) @/
-    /@ ensures user_local_microkit_notify_post(ch, userGhost()) @/
     /@ ensures user_transition_microkit_notify(ch, userGhost()) @/
 
     panseL4_Signal(BASE_OUTPUT_NOTIFICATION_CAP + ch);
@@ -85,13 +78,11 @@ export fun microkit_irq_ack(microkit_channel ch) {
     /@ requires mk_is_irq_channel(ch) @/
 
     /@ requires user_acc_ghost_state(userGhost()) @/
-    /@ requires user_local_microkit_irq_ack_pre(ch, userGhost()) @/
     /@ requires user_guard_microkit_irq_ack(ch, userGhost()) @/
 
     /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
 
     /@ ensures user_acc_ghost_state(userGhost()) @/
-    /@ ensures user_local_microkit_irq_ack_post(ch, userGhost()) @/
     /@ ensures user_transition_microkit_irq_ack(ch, userGhost()) @/
 
     panseL4_IRQHandler_Ack(BASE_IRQ_CAP + ch);
@@ -128,21 +119,22 @@ export fun microkit_msginfo microkit_ppcall(microkit_channel ch, microkit_msginf
     /@ requires IsAbsMsgInfo(msginfo) @/
 
     /@ requires user_acc_ghost_state(userGhost()) @/
-    /@ requires user_local_microkit_ppcall_pre(ch, msginfo, userGhost()) @/
     /@ requires user_guard_microkit_ppcall(ch, msginfo, userGhost()) @/
 
+    /@ ensures IsAbsMsgInfo(msginfo) @/
+
     /@ ensures user_acc_ghost_state(userGhost()) @/
-    /@ ensures user_local_microkit_ppcall_post(ch, msginfo, retval, userGhost()) @/
-    /@ ensures user_transition_microkit_ppcall(ch, msginfo, userGhost()) @/
+    /@ ensures user_transition_microkit_ppcall(ch, msginfo, retval, userGhost()) @/
+    /@ ensures user_rely_microkit_ppcall(ch, msginfo, retval, userGhost()) @/
 
     // perform nondeterministic ghost state transition
     /@ exhale user_acc_ghost_state(userGhost()) @/
     /@ inhale user_acc_ghost_state(userGhost()) @/
-    /@ assume user_transition_microkit_ppcall(ch, msginfo, userGhost()) @/
     // wait for response from remote PD
     var microkit_msginfo tag = panseL4_Call(BASE_ENDPOINT_CAP + ch, msginfo);
     // rely on behavior of remote PD to finish the verification
-    /@ assume user_rely_ppcall(tag, userGhost()) @/
+    /@ assume user_transition_microkit_ppcall(ch, msginfo, tag, userGhost()) @/
+    /@ assume user_rely_microkit_ppcall(ch, msginfo, tag, userGhost()) @/
     return tag;
 }
 

@@ -10,8 +10,7 @@
 #define PD_MASK 255
 #define CHANNEL_MASK 63
 
-/@ extern function mk_is_patched_irqs(badge: Int): Bool @/
-
+// Microkit ghost state
 /@ extern field pending_protected_call: Int @/
 /@ extern field pending_fault_call: Int @/
 /@ extern field pending_notified: Set[Int] @/
@@ -30,7 +29,9 @@
 /@ extern function mk_protected_postconditions(ch: Int): Bool @/
 /@ extern function mk_fault_preconditions(ch: Int): Bool @/
 /@ extern function mk_fault_postconditions(ch: Int, needs_reply: Int): Bool @/
+/@ extern function mk_is_patched_irqs(badge: Int): Bool @/
 
+// axioms for bitwise arithmetic
 /@ extern function builtin_lshr(x: Int, y: Int): Int @/
 /@ extern function apply_bv64_lshr0_sem(x: Int): Bool @/
 /@ extern function apply_bv64_lshr63_bit(x: Int): Bool @/
@@ -40,17 +41,24 @@
 /@ extern function apply_set_bv64_lshr_suffix_nonzero(i: Int, n: Int, m: Set[Int]): Bool @/
 /@ extern function isUserland(): Bool @/
 
+// relevant part of the user spec
+/@ extern function userGhost(): Ref @/
+/@ extern function user_acc_ghost_state(state: Ref): Bool @/
+
 /@ extern function user_rely_init(state: Ref): Bool @/
-/@ extern function user_rely_receive(pp: Int,pf: Int,ns: Set[Int], state: Ref): Bool @/
+/@ extern function user_rely_receive(pp: Int, pf: Int, ns: Set[Int], state: Ref): Bool @/
 
 /@ extern function user_guard_Recv(state: Ref): Bool @/
-/@ extern function user_transition_Recv(state: Ref): Bool @/
+/@ extern function user_transition_Recv(response_tag: Int, pp: Int, pf: Int, ns: Set[Int], state: Ref): Bool @/
+/@ extern function user_rely_Recv(response_tag: Int, pp: Int, pf: Int, ns: Set[Int], state: Ref): Bool @/
 
 /@ extern function user_guard_ReplyRecv(reply_tag: Int, state: Ref): Bool @/
-/@ extern function user_transition_ReplyRecv(reply_tag: Int, state: Ref): Bool @/
+/@ extern function user_transition_ReplyRecv(reply_tag: Int, response_tag: Int, pp: Int, pf: Int, ns: Set[Int], state: Ref): Bool @/
+/@ extern function user_rely_ReplyRecv(reply_tag: Int, response_tag: Int, pp: Int, pf: Int, ns: Set[Int], state: Ref): Bool @/
 
 /@ extern function user_guard_NBSendRecv(signal_cap: Int, signal_msg: Int, state: Ref): Bool @/
-/@ extern function user_transition_NBSendRecv(signal_cap: Int, signal_msg: Int, state: Ref): Bool @/
+/@ extern function user_transition_NBSendRecv(signal_cap: Int, signal_msg: Int, response_tag: Int, pp: Int, pf: Int, ns: Set[Int], state: Ref): Bool @/
+/@ extern function user_rely_NBSendRecv(signal_cap: Int, signal_msg: Int, response_tag: Int, pp: Int, pf: Int, ns: Set[Int], state: Ref): Bool @/
 
 /@ extern function user_handler_loop_entry(): Bool @/
 /@ extern function user_handler_loop_invariant(have_reply: Int, state: Ref): Bool @/
@@ -90,23 +98,37 @@ fun panseL4_Response mk_Recv() {
     // ghost state transition postconditions:
     /@ ensures mk_received_tasks(panseL4_Response_badge(retval), mkGhost()) @/
     /@ ensures user_acc_ghost_state(userGhost()) @/
-    /@ ensures user_transition_Recv(userGhost()) @/
-    /@ ensures user_rely_receive(
-                mkGhost().pending_protected_call,
-                mkGhost().pending_fault_call,
-                mkGhost().pending_notified,
-                userGhost())
+    /@ ensures user_transition_Recv(
+                 retval,
+                 mkGhost().pending_protected_call,
+                 mkGhost().pending_fault_call,
+                 mkGhost().pending_notified,
+                 userGhost())
+    @/
+    /@ ensures user_rely_Recv(
+                 retval,
+                 mkGhost().pending_protected_call,
+                 mkGhost().pending_fault_call,
+                 mkGhost().pending_notified,
+                 userGhost())
     @/
 
     var panseL4_Response response = panseL4_Recv(INPUT_CAP,REPLY_CAP);
     // perform a nondeterministic ghost state machine transition
     /@ exhale user_acc_ghost_state(userGhost()) @/
     /@ inhale user_acc_ghost_state(userGhost()) @/
-    /@ assume user_transition_Recv(userGhost()) @/
 
     /@ exhale mk_no_pending_tasks(mkGhost()) @/
     /@ inhale mk_received_tasks(panseL4_Response_badge(response), mkGhost()) @/
-    /@ assume user_rely_receive(
+    /@ assume user_transition_Recv(
+                response,
+                mkGhost().pending_protected_call,
+                mkGhost().pending_fault_call,
+                mkGhost().pending_notified,
+                userGhost())
+    @/
+    /@ assume user_rely_Recv(
+                response,
                 mkGhost().pending_protected_call,
                 mkGhost().pending_fault_call,
                 mkGhost().pending_notified,
@@ -140,8 +162,17 @@ fun panseL4_Response mk_ReplyRecv(panseL4_MessageInfo_t reply_tag) {
     // ghost state transition postconditions:
     /@ ensures mk_received_tasks(panseL4_Response_badge(retval), mkGhost()) @/
     /@ ensures user_acc_ghost_state(userGhost()) @/
-    /@ ensures user_transition_ReplyRecv(reply_tag, userGhost()) @/
-    /@ ensures user_rely_receive(
+    /@ ensures user_transition_ReplyRecv(
+                reply_tag,
+                retval,
+                mkGhost().pending_protected_call,
+                mkGhost().pending_fault_call,
+                mkGhost().pending_notified,
+                userGhost())
+    @/
+    /@ ensures user_rely_ReplyRecv(
+                reply_tag,
+                retval,
                 mkGhost().pending_protected_call,
                 mkGhost().pending_fault_call,
                 mkGhost().pending_notified,
@@ -152,11 +183,20 @@ fun panseL4_Response mk_ReplyRecv(panseL4_MessageInfo_t reply_tag) {
     // perform a nondeterministic ghost state machine transition
     /@ exhale user_acc_ghost_state(userGhost()) @/
     /@ inhale user_acc_ghost_state(userGhost()) @/
-    /@ assume user_transition_ReplyRecv(reply_tag, userGhost()) @/
 
     /@ exhale mk_no_pending_tasks(mkGhost()) @/
     /@ inhale mk_received_tasks(panseL4_Response_badge(response), mkGhost()) @/
-    /@ assume user_rely_receive(
+    /@ assume user_transition_ReplyRecv(
+                reply_tag,
+                response,
+                mkGhost().pending_protected_call,
+                mkGhost().pending_fault_call,
+                mkGhost().pending_notified,
+                userGhost())
+    @/
+    /@ assume user_rely_ReplyRecv(
+                reply_tag,
+                response,
                 mkGhost().pending_protected_call,
                 mkGhost().pending_fault_call,
                 mkGhost().pending_notified,
@@ -195,12 +235,23 @@ fun panseL4_Response mk_NBSendRecv() {
     // ghost state transition postconditions:
     /@ ensures mk_received_tasks(panseL4_Response_badge(retval), mkGhost()) @/
     /@ ensures user_acc_ghost_state(userGhost()) @/
-    /@ ensures user_transition_NBSendRecv(gv.microkit_signal_cap, gv.microkit_signal_msg, userGhost()) @/
-    /@ ensures user_rely_receive(
-                mkGhost().pending_protected_call,
-                mkGhost().pending_fault_call,
-                mkGhost().pending_notified,
-                userGhost())
+    /@ ensures user_transition_NBSendRecv(
+                 gv.microkit_signal_cap,
+                 gv.microkit_signal_msg,
+                 retval,
+                 mkGhost().pending_protected_call,
+                 mkGhost().pending_fault_call,
+                 mkGhost().pending_notified,
+                 userGhost())
+    @/
+    /@ ensures user_rely_NBSendRecv(
+                 gv.microkit_signal_cap,
+                 gv.microkit_signal_msg,
+                 retval,
+                 mkGhost().pending_protected_call,
+                 mkGhost().pending_fault_call,
+                 mkGhost().pending_notified,
+                 userGhost())
     @/
 
     /@ ensures acc(gv.microkit_signal_cap) @/
@@ -211,11 +262,22 @@ fun panseL4_Response mk_NBSendRecv() {
     // perform a nondeterministic ghost state machine transition
     /@ exhale user_acc_ghost_state(userGhost()) @/
     /@ inhale user_acc_ghost_state(userGhost()) @/
-    /@ assume user_transition_NBSendRecv(gv.microkit_signal_cap, gv.microkit_signal_msg, userGhost()) @/
 
     /@ exhale mk_no_pending_tasks(mkGhost()) @/
     /@ inhale mk_received_tasks(panseL4_Response_badge(response), mkGhost()) @/
-    /@ assume user_rely_receive(
+    /@ assume user_transition_NBSendRecv(
+                gv.microkit_signal_cap,
+                gv.microkit_signal_msg,
+                response,
+                mkGhost().pending_protected_call,
+                mkGhost().pending_fault_call,
+                mkGhost().pending_notified,
+                userGhost())
+    @/
+    /@ assume user_rely_NBSendRecv(
+                gv.microkit_signal_cap,
+                gv.microkit_signal_msg,
+                response,
                 mkGhost().pending_protected_call,
                 mkGhost().pending_fault_call,
                 mkGhost().pending_notified,
