@@ -46,7 +46,6 @@
 /@ extern function user_acc_ghost_state(state: Ref): Bool @/
 
 /@ extern function user_rely_init(state: Ref): Bool @/
-/@ extern function user_rely_receive(pp: Int, pf: Int, ns: Set[Int], state: Ref): Bool @/
 
 /@ extern function user_guard_Recv(state: Ref): Bool @/
 /@ extern function user_transition_Recv(response_tag: Int, pp: Int, pf: Int, ns: Set[Int], state: Ref): Bool @/
