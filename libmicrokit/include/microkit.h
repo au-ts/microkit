@@ -618,3 +618,61 @@ static inline seL4_CPtr microkit_cspace_root_slot_to_cptr(seL4_Word slot)
 
     return slot << (seL4_WordBits - PD_ROOT_CAP_BITS);
 }
+
+static inline int microkit_page_get_address(seL4_CPtr frame, seL4_Word *paddr)
+{
+#if defined(CONFIG_ARCH_X86)
+    seL4_X86_Page_GetAddress_t ret = seL4_X86_Page_GetAddress(frame);
+#elif defined(CONFIG_ARCH_ARM)
+    seL4_ARM_Page_GetAddress_t ret = seL4_ARM_Page_GetAddress(frame);
+#elif defined(CONFIG_ARCH_RISCV)
+    seL4_RISCV_Page_GetAddress_t ret = seL4_RISCV_Page_GetAddress(frame);
+#else
+#error unsupported architecture
+#endif
+
+    if (ret.error != seL4_NoError) {
+        return ret.error;
+    }
+
+    *paddr = ret.paddr;
+    return seL4_NoError;
+}
+
+static inline seL4_Error microkit_page_map(seL4_CPtr frame, seL4_CPtr vspace, seL4_Word vaddr, seL4_CapRights_t rights)
+{
+#if defined(CONFIG_ARCH_X86)
+    return seL4_X86_Page_Map(frame, vspace, vaddr, rights, seL4_X86_Default_VMAttributes);
+#elif defined(CONFIG_ARCH_ARM)
+    return seL4_ARM_Page_Map(frame, vspace, vaddr, rights, seL4_ARM_Default_VMAttributes);
+#elif defined(CONFIG_ARCH_RISCV)
+    return seL4_RISCV_Page_Map(frame, vspace, vaddr, rights, seL4_RISCV_Default_VMAttributes);
+#else
+#error unsupported architecture
+#endif
+    return seL4_NoError;
+}
+
+static inline seL4_Error microkit_page_unmap(seL4_CPtr frame)
+{
+#if defined(CONFIG_ARCH_X86)
+    return seL4_X86_Page_Unmap(frame);
+#elif defined(CONFIG_ARCH_ARM)
+    return seL4_ARM_Page_Unmap(frame);
+#elif defined(CONFIG_ARCH_RISCV)
+    return seL4_RISCV_Page_Unmap(frame);
+#else
+#error unsupported architecture
+#endif
+    return seL4_NoError;
+}
+
+static inline seL4_Error microkit_io_page_map(seL4_CPtr frame, seL4_CPtr iospace, seL4_CapRights_t rights, seL4_Word ioaddr)
+{
+#if defined(CONFIG_ARCH_X86) && defined(CONFIG_IOMMU)
+    return seL4_X86_Page_MapIO(frame, iospace, rights, ioaddr);
+#else
+#error unsupported architecture for IOMMU page mapping
+#endif
+    return seL4_NoError;
+}

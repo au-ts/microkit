@@ -74,6 +74,12 @@ pub fn capdl_util_make_page_table_cap(pt_obj_id: ObjectId) -> Cap {
     Cap::PageTable(cap::PageTable { object: pt_obj_id })
 }
 
+pub fn capdl_util_make_iospace_cap(iospace_obj_id: ObjectId) -> Cap {
+    Cap::IOSpace(cap::IOSpace {
+        object: iospace_obj_id,
+    })
+}
+
 // Given a TCB object ID, return that TCB's VSpace object ID.
 pub fn capdl_util_get_vspace_id_from_tcb_id(
     spec_container: &CapDLSpecContainer,

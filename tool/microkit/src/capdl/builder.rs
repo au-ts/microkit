@@ -24,8 +24,7 @@ use crate::{
     },
     elf::ElfFile,
     sdf::{
-        CapMapType, CpuCore, IommuDeviceIdentifier, Map, SystemDescription, BUDGET_DEFAULT,
-        MONITOR_PD_NAME, MONITOR_PRIORITY,
+        CapMap, CpuCore, Map, SystemDescription, BUDGET_DEFAULT, MONITOR_PD_NAME, MONITOR_PRIORITY,
     },
     sel4::{Arch, Config, PageSize},
     util::{ranges_overlap, round_down, round_up},
@@ -303,6 +302,7 @@ impl CapDLSpecContainer {
                     frame_cap,
                     page_size_bytes,
                     cur_vaddr,
+                    true,
                 ) {
                     Ok(_) => {
                         frame_sequence += 1;
@@ -366,13 +366,21 @@ fn map_memory_region<M: Map>(
     let read = map.read();
     let write = map.write();
     let execute = map.execute();
+    let map_frames = map.map_frames();
     for frame_obj_id in frames.iter() {
         // Make a cap for this frame.
         let frame_cap =
             capdl_util_make_frame_cap(*frame_obj_id, read, write, execute, map.cached());
         // Map it into this PD address space.
         target_address_space
-            .map_page(spec_container, sel4_config, frame_cap, page_sz, cur_vaddr)
+            .map_page(
+                spec_container,
+                sel4_config,
+                frame_cap,
+                page_sz,
+                cur_vaddr,
+                map_frames,
+            )
             .map_err(|err| {
                 format!(
                     "failed to map {} for MR '{}' into address-space '{}' at {} {:#x}: {err}",
@@ -468,6 +476,7 @@ pub fn build_capdl_spec(
             mon_stack_frame_cap,
             PageSize::Small as u64,
             kernel_config.pd_stack_bottom(MON_STACK_SIZE),
+            true,
         )
         .unwrap();
 
@@ -489,6 +498,7 @@ pub fn build_capdl_spec(
             mon_ipcbuf_frame_cap.clone(),
             PageSize::Small as u64,
             kernel_config.pd_ipc_buffer(),
+            true,
         )
         .expect("should be able to map the IPC buffer as we checked overlaps in sel4.rs");
 
@@ -708,6 +718,7 @@ pub fn build_capdl_spec(
                 ipcbuf_frame_cap.clone(),
                 PageSize::Small as u64,
                 kernel_config.pd_ipc_buffer(),
+                true,
             )
             .expect("should be able to map the IPC buffer as we checked overlaps in sel4.rs");
         caps_to_bind_to_tcb.push(capdl_util_make_cte(
@@ -739,6 +750,7 @@ pub fn build_capdl_spec(
                     stack_frame_cap,
                     PageSize::Small as u64,
                     cur_stack_vaddr,
+                    true,
                 )
                 .unwrap();
             cur_stack_vaddr += PageSize::Small as u64;
@@ -1214,42 +1226,17 @@ pub fn build_capdl_spec(
     }
 
     // *********************************
-    // Step 5. Handle extra cap mappings
+    // Step 5. Create IOMMU Address Spaces
     // *********************************
-
-    for (pd_dest_idx, pd) in system.protection_domains.iter().enumerate() {
-        for cap_map in pd.cap_maps.iter() {
-            // TODO: Once we add more CapMap options, they might not all have
-            // the pd_name. But for now, they do.
-            let pd_src_shadow_cspace = &pd_shadow_cspaces[&cap_map.pd.unwrap()];
-
-            let cap_map_obj = match cap_map.cap_type {
-                CapMapType::Tcb => capdl_util_make_tcb_cap(pd_src_shadow_cspace.tcb),
-                CapMapType::Sc => capdl_util_make_sc_cap(pd_src_shadow_cspace.sched_context),
-                CapMapType::VSpace => capdl_util_make_page_table_cap(pd_src_shadow_cspace.vspace),
-            };
-
-            // Map this into the destination pd's cspace and the specified slot.
-            pd_shadow_cspaces[&pd_dest_idx].insert_cap_into_root_cnode(
-                &mut spec_container,
-                cap_map.slot as u32,
-                cap_map_obj,
-            );
-        }
-    }
-
-    // *********************************
-    // Step 6. Create IOMMU Address Spaces
-    // *********************************
-    let mut iospace_by_device: HashMap<IommuDeviceIdentifier, AddressSpace> = HashMap::new();
+    let mut iospace_by_device: HashMap<&str, AddressSpace> = HashMap::new();
     for iomap in system.iomaps.iter() {
         let address_space = iospace_by_device
-            .entry(iomap.identifier)
+            .entry(&iomap.io_address_space_name)
             .or_insert_with(|| {
                 create_iospace(
                     &mut spec_container,
                     kernel_config,
-                    &iomap.device,
+                    &iomap.io_address_space_name,
                     iomap.identifier,
                     iomap.domain_id,
                 )
@@ -1277,6 +1264,77 @@ pub fn build_capdl_spec(
         )?;
     }
 
+    // *********************************
+    // Step 6. Handle extra cap mappings
+    // *********************************
+
+    for (pd_dest_idx, pd) in system.protection_domains.iter().enumerate() {
+        for cap_map in pd.cap_maps.iter() {
+            let cap_map_obj = match cap_map {
+                CapMap::MemoryRegion(map) => {
+                    let mr_frames = &mr_name_to_frames[&map.mr_name];
+                    // Assume the SDF is reasonable
+                    let size_bits = (usize::BITS - mr_frames.len().leading_zeros()) as u8;
+
+                    // In future the cached attribute may becomes an attribute of the memory region and this will need to be updated.
+                    // Current we do not concern ourself with permissions.
+                    let mut slot = 0;
+                    let slots = mr_frames
+                        .iter()
+                        .map(|&frame_obj_id| {
+                            capdl_util_make_frame_cap(frame_obj_id, true, true, true, true)
+                        })
+                        .map(|cap| {
+                            let cte = capdl_util_make_cte(slot, cap);
+                            slot += 1;
+                            cte
+                        })
+                        .collect();
+
+                    let mr_cnode_obj = capdl_util_make_cnode_obj(
+                        &mut spec_container,
+                        &format!("{}_mr_{}", pd.name, map.mr_name),
+                        size_bits,
+                        slots,
+                    );
+
+                    // Configure the CNode to simulate array indexing.
+                    let mr_guard_size =
+                        kernel_config.cap_address_bits - PD_ROOT_CAP_BITS as u64 - size_bits as u64;
+                    capdl_util_make_cnode_cap(mr_cnode_obj, 0, mr_guard_size as u8)
+                }
+                CapMap::IOSpace(map) => {
+                    let addr_space_root = iospace_by_device
+                        .get(map.io_address_space_name.as_str())
+                        .expect("Already validated in sdf.rs")
+                        .root();
+                    capdl_util_make_iospace_cap(addr_space_root)
+                }
+                CapMap::Tcb(map) => {
+                    let pd_src_shadow_cspace =
+                        &pd_shadow_cspaces[&map.pd.expect("Already validated in sdf.rs")];
+                    capdl_util_make_tcb_cap(pd_src_shadow_cspace.tcb)
+                }
+                CapMap::Sc(map) => {
+                    let pd_src_shadow_cspace =
+                        &pd_shadow_cspaces[&map.pd.expect("Already validated in sdf.rs")];
+                    capdl_util_make_sc_cap(pd_src_shadow_cspace.sched_context)
+                }
+                CapMap::VSpace(map) => {
+                    let pd_src_shadow_cspace =
+                        &pd_shadow_cspaces[&map.pd.expect("Already validated in sdf.rs")];
+                    capdl_util_make_page_table_cap(pd_src_shadow_cspace.vspace)
+                }
+            };
+
+            // Map this into the destination pd's cspace and the specified slot.
+            pd_shadow_cspaces[&pd_dest_idx].insert_cap_into_root_cnode(
+                &mut spec_container,
+                cap_map.slot() as u32,
+                cap_map_obj,
+            );
+        }
+    }
     // *********************************
     // Step 7. Sort the root objects
     // *********************************

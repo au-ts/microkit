@@ -5,9 +5,15 @@
  SPDX-License-Identifier: BSD-2-Clause
 -->
 <system>
+    <memory_region name="dma_buffer" size="0xA000" page_size="0x1000" />
+    <io_address_space name="QEMU EDU" peripheral_id="0:4.0" domain_id="1">
+        <iomap mr="dma_buffer" iovaddr="0x10_0000" map_frames="false" />
+    </io_address_space>
+
     <protection_domain name="primary" priority="1">
         <program_image path="cap_sharing.elf" />
 
+        <map mr="dma_buffer" vaddr="0x3000_000" perms="rw" cached="true" setvar_vaddr="dma_buffer_vaddr" map_frames="false" />
         <cspace>
             <!-- You can have the SC or TCB of another PD -->
             <cap_sc  slot="1" pd="secondary" />
@@ -16,6 +22,13 @@
             <!-- You can also have it of yourself -->
             <cap_sc  slot="3" pd="primary" />
             <cap_tcb slot="4" pd="primary" />
+
+            <!-- You can also access caps of a memory_region -->
+            <cap_vspace slot="5" pd="primary" />
+            <cap_mr slot="6" mr_name="dma_buffer" />
+
+            <!-- You can also access the IOSpace cap -->
+            <cap_iospace slot="7" io_address_space="QEMU EDU" />
         </cspace>
     </protection_domain>
 

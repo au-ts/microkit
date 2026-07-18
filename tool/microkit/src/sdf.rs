@@ -300,6 +300,7 @@ pub struct SysMap {
     pub vaddr: u64,
     pub perms: u8,
     pub cached: bool,
+    pub map_frames: bool,
     /// Location in the parsed SDF file. Because this struct is
     /// used in a non-XML context, we make the position optional.
     pub text_pos: Option<roxmltree::TextPos>,
@@ -336,12 +337,13 @@ impl SysIOMapPerms {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SysIOMap {
-    pub device: String,
+    pub io_address_space_name: String,
     pub mr: String,
     pub identifier: IommuDeviceIdentifier,
     pub domain_id: Option<u64>,
     pub iovaddr: u64,
     pub perms: SysIOMapPerms,
+    pub map_frames: bool,
     pub text_pos: Option<roxmltree::TextPos>,
 }
 
@@ -356,6 +358,7 @@ pub trait Map {
     fn write(&self) -> bool;
     fn execute(&self) -> bool;
     fn cached(&self) -> bool;
+    fn map_frames(&self) -> bool;
 }
 
 impl Map for SysMap {
@@ -398,6 +401,10 @@ impl Map for SysMap {
     fn cached(&self) -> bool {
         self.cached
     }
+
+    fn map_frames(&self) -> bool {
+        self.map_frames
+    }
 }
 
 impl Map for SysIOMap {
@@ -439,6 +446,10 @@ impl Map for SysIOMap {
 
     fn cached(&self) -> bool {
         false
+    }
+
+    fn map_frames(&self) -> bool {
+        self.map_frames
     }
 }
 
@@ -632,16 +643,19 @@ pub struct ProtectionDomain {
     text_pos: Option<roxmltree::TextPos>,
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
-pub enum CapMapType {
-    Tcb,
-    Sc,
-    VSpace,
+#[derive(Debug, PartialEq, Eq)]
+pub struct CapMapCommon {
+    // The destination "slot" in the CSpace: note that this is "opaque" and
+    // can be shifted depending on the location in the CSpace to work as the CPtr,
+    // but here it is given as the index into the CNode.
+    pub slot: u64,
+    /// Location in the parsed SDF file
+    text_pos: roxmltree::TextPos,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct CapMap {
-    pub cap_type: CapMapType,
+pub struct PdCapMap {
+    pub common: CapMapCommon,
     // FIXME: This is quite a hack. Basically, we need to be able to reference
     // arbitrary PDs, but to gather the index, we need to know all the PDs.
     // However, at the time of parsing the cap maps, we are in the process
@@ -651,12 +665,27 @@ pub struct CapMap {
     // be filled out later during SDF parse process.
     pub pd_name: String,
     pub pd: Option<usize>,
-    // The destination "slot" in the CSpace: note that this is "opaque" and
-    // can be shifted depending on the location in the CSpace to work as the CPtr,
-    // but here it is given as the index into the CNode.
-    pub slot: u64,
-    /// Location in the parsed SDF file
-    text_pos: roxmltree::TextPos,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct MemoryRegionCapMap {
+    pub common: CapMapCommon,
+    pub mr_name: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct IOSpaceCapMap {
+    pub common: CapMapCommon,
+    pub io_address_space_name: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum CapMap {
+    Tcb(PdCapMap),
+    Sc(PdCapMap),
+    VSpace(PdCapMap),
+    IOSpace(IOSpaceCapMap),
+    MemoryRegion(MemoryRegionCapMap),
 }
 
 #[derive(Debug)]
@@ -686,7 +715,7 @@ impl SysMap {
         allow_setvar: bool,
         max_vaddr: u64,
     ) -> Result<SysMap, String> {
-        let mut attrs = vec!["mr", "vaddr", "perms", "cached"];
+        let mut attrs = vec!["mr", "vaddr", "perms", "cached", "map_frames"];
         if allow_setvar {
             attrs.push("setvar_vaddr");
             attrs.push("setvar_size");
@@ -746,11 +775,27 @@ impl SysMap {
             true
         };
 
+        let map_frames = if let Some(map_frames) = node.attribute("map_frames") {
+            match str_to_bool(map_frames) {
+                Some(val) => val,
+                None => {
+                    return Err(value_error(
+                        xml_sdf,
+                        node,
+                        "map_frames must be 'true' or 'false'".to_string(),
+                    ))
+                }
+            }
+        } else {
+            true
+        };
+
         Ok(SysMap {
             mr,
             vaddr,
             perms,
             cached,
+            map_frames,
             text_pos: Some(xml_sdf.doc.text_pos_at(node.range().start)),
         })
     }
@@ -761,11 +806,11 @@ impl SysIOMap {
         _config: &Config,
         xml_sdf: &XmlSystemDescription,
         node: &roxmltree::Node,
-        device: &str,
+        name: &str,
         identifier: IommuDeviceIdentifier,
         domain_id: Option<u64>,
     ) -> Result<SysIOMap, String> {
-        let attrs = vec!["mr", "iovaddr", "perms"];
+        let attrs = vec!["mr", "iovaddr", "perms", "map_frames"];
 
         check_attributes(xml_sdf, node, &attrs)?;
 
@@ -800,13 +845,29 @@ impl SysIOMap {
             SysIOMapPerms::ReadWrite
         };
 
+        let map_frames = if let Some(map_frames) = node.attribute("map_frames") {
+            match str_to_bool(map_frames) {
+                Some(val) => val,
+                None => {
+                    return Err(value_error(
+                        xml_sdf,
+                        node,
+                        "map_frames must be 'true' or 'false'".to_string(),
+                    ))
+                }
+            }
+        } else {
+            true
+        };
+
         Ok(SysIOMap {
-            device: device.to_string(),
+            io_address_space_name: name.to_string(),
             mr,
             identifier,
             domain_id,
             iovaddr,
             perms,
+            map_frames,
             text_pos: Some(xml_sdf.doc.text_pos_at(node.range().start)),
         })
     }
@@ -1740,17 +1801,122 @@ impl VirtualMachine {
 }
 
 impl CapMap {
+    pub fn common(&self) -> &CapMapCommon {
+        match self {
+            CapMap::Tcb(map) | CapMap::Sc(map) | CapMap::VSpace(map) => &map.common,
+            CapMap::IOSpace(map) => &map.common,
+            CapMap::MemoryRegion(map) => &map.common,
+        }
+    }
+
+    pub fn slot(&self) -> u64 {
+        self.common().slot
+    }
+
+    fn text_pos(&self) -> roxmltree::TextPos {
+        self.common().text_pos
+    }
+
+    fn source_name(&self) -> &str {
+        match self {
+            CapMap::Tcb(map) | CapMap::Sc(map) | CapMap::VSpace(map) => &map.pd_name,
+            CapMap::IOSpace(map) => &map.io_address_space_name,
+            CapMap::MemoryRegion(map) => &map.mr_name,
+        }
+    }
+
+    fn type_name(&self) -> &'static str {
+        match self {
+            CapMap::Tcb(_) => "Tcb",
+            CapMap::Sc(_) => "Sc",
+            CapMap::VSpace(_) => "VSpace",
+            CapMap::IOSpace(_) => "IOSpace",
+            CapMap::MemoryRegion(_) => "MemoryRegion",
+        }
+    }
+
+    fn pd_cap_mut(&mut self) -> Option<&mut PdCapMap> {
+        match self {
+            CapMap::Tcb(pd_cap_map) | CapMap::Sc(pd_cap_map) | CapMap::VSpace(pd_cap_map) => {
+                Some(pd_cap_map)
+            }
+            CapMap::IOSpace(_) | CapMap::MemoryRegion(_) => None,
+        }
+    }
+
+    fn common_from_xml(
+        xml_sdf: &XmlSystemDescription,
+        node: &roxmltree::Node,
+        slot: u64,
+    ) -> CapMapCommon {
+        CapMapCommon {
+            slot,
+            text_pos: xml_sdf.doc.text_pos_at(node.range().start),
+        }
+    }
+
+    fn handle_iospace(
+        xml_sdf: &XmlSystemDescription,
+        node: &roxmltree::Node,
+        slot: u64,
+    ) -> Result<CapMap, String> {
+        let io_address_space_name = checked_lookup(xml_sdf, node, "io_address_space")?;
+
+        Ok(CapMap::IOSpace(IOSpaceCapMap {
+            common: Self::common_from_xml(xml_sdf, node, slot),
+            io_address_space_name: io_address_space_name.into(),
+        }))
+    }
+
+    fn handle_mr(
+        xml_sdf: &XmlSystemDescription,
+        node: &roxmltree::Node,
+        slot: u64,
+    ) -> Result<CapMap, String> {
+        let mr_name = checked_lookup(xml_sdf, node, "mr_name")?;
+
+        Ok(CapMap::MemoryRegion(MemoryRegionCapMap {
+            common: Self::common_from_xml(xml_sdf, node, slot),
+            mr_name: mr_name.into(),
+        }))
+    }
+
+    fn handle_pd_cap(
+        xml_sdf: &XmlSystemDescription,
+        node: &roxmltree::Node,
+        slot: u64,
+    ) -> Result<PdCapMap, String> {
+        let pd_name = checked_lookup(xml_sdf, node, "pd")?.to_string();
+
+        Ok(PdCapMap {
+            common: Self::common_from_xml(xml_sdf, node, slot),
+            pd_name,
+            // FIXME: Hack, filled out later.
+            pd: None,
+        })
+    }
+
     fn from_xml(
-        cap_type: CapMapType,
+        cap_type: &str,
         xml_sdf: &XmlSystemDescription,
         node: &roxmltree::Node,
     ) -> Result<CapMap, String> {
-        // At the moment the four cap maps we support all have the 'pd' element,
-        // so we can include it here. When that stops being the case we will
-        // have to rework this a bit.
-        check_attributes(xml_sdf, node, &["slot", "pd"])?;
-
-        let pd_name = checked_lookup(xml_sdf, node, "pd")?.to_string();
+        let allowed_attrs = match cap_type {
+            "cap_mr" => &["slot", "mr_name"].as_slice(),
+            "cap_iospace" => &["slot", "io_address_space"].as_slice(),
+            "cap_tcb" | "cap_sc" | "cap_vspace" => &["slot", "pd"].as_slice(),
+            child_name => {
+                let location = loc_string(xml_sdf, xml_sdf.doc.text_pos_at(node.range().start));
+                if let Some(type_name) = child_name.strip_prefix("cap_") {
+                    return Err(format!(
+                        "Cap type: '{type_name}' is not supported at '{location}'"
+                    ));
+                } else {
+                    return Err(format!("Element '{child_name}' is not supported in a <cspace> element at '{location}'"));
+                }
+            }
+        };
+        check_attributes(xml_sdf, node, allowed_attrs)?;
 
         let slot = sdf_parse_number(checked_lookup(xml_sdf, node, "slot")?, node)?;
 
@@ -1771,14 +1937,14 @@ impl CapMap {
             ));
         }
 
-        Ok(CapMap {
-            cap_type,
-            pd_name,
-            // FIXME: Hack, filled out later.
-            pd: None,
-            slot,
-            text_pos: xml_sdf.doc.text_pos_at(node.range().start),
-        })
+        match cap_type {
+            "cap_mr" => Self::handle_mr(xml_sdf, node, slot),
+            "cap_iospace" => Self::handle_iospace(xml_sdf, node, slot),
+            "cap_tcb" => Self::handle_pd_cap(xml_sdf, node, slot).map(CapMap::Tcb),
+            "cap_sc" => Self::handle_pd_cap(xml_sdf, node, slot).map(CapMap::Sc),
+            "cap_vspace" => Self::handle_pd_cap(xml_sdf, node, slot).map(CapMap::VSpace),
+            _ => unreachable!("cap_type was validated above"),
+        }
     }
 }
 
@@ -1789,19 +1955,7 @@ impl CSpace {
         let mut cap_maps = vec![];
 
         for child in node.children().filter(|c| c.is_element()) {
-            cap_maps.push(match child.tag_name().name() {
-                "cap_tcb" => CapMap::from_xml(CapMapType::Tcb, xml_sdf, &child)?,
-                "cap_sc" => CapMap::from_xml(CapMapType::Sc, xml_sdf, &child)?,
-                "cap_vspace" => CapMap::from_xml(CapMapType::VSpace, xml_sdf, &child)?,
-                child_name => {
-                    let location = loc_string(xml_sdf, xml_sdf.doc.text_pos_at(child.range().start));
-                    if let Some(type_name) = child_name.strip_prefix("cap_") {
-                        return Err(format!("Cap type: '{type_name}' is not supported at '{location}'"));
-                    } else {
-                        return Err(format!("Element '{child_name}' is not supported in a <cspace> element at '{location}'"));
-                    }
-                }
-            })
+            cap_maps.push(CapMap::from_xml(child.tag_name().name(), xml_sdf, &child)?);
         }
 
         Ok(CSpace { cap_maps })
@@ -2535,15 +2689,20 @@ pub fn parse(
         .collect();
     for pd in pds.iter_mut() {
         for cap_map in pd.cap_maps.iter_mut() {
-            let Some(&pd) = pd_names_to_id.get(&cap_map.pd_name) else {
+            let text_pos = cap_map.text_pos();
+            let Some(pd_cap_map) = cap_map.pd_cap_mut() else {
+                continue;
+            };
+
+            let Some(&pd) = pd_names_to_id.get(&pd_cap_map.pd_name) else {
                 return Err(format!(
                     "Error: unknown PD name '{}': {}",
-                    cap_map.pd_name,
-                    loc_string(&xml_sdf, cap_map.text_pos)
+                    pd_cap_map.pd_name,
+                    loc_string(&xml_sdf, text_pos)
                 ));
             };
 
-            cap_map.pd = Some(pd);
+            pd_cap_map.pd = Some(pd);
         }
     }
 
@@ -2792,9 +2951,28 @@ pub fn parse(
 
         for cap_map in &pd.cap_maps {
             user_cap_slots
-                .entry(cap_map.slot)
+                .entry(cap_map.slot())
                 .and_modify(|v| v.push(cap_map))
                 .or_insert(vec![cap_map]);
+            if let CapMap::MemoryRegion(map) = cap_map {
+                if let Some(mr) = mrs.iter().find(|sys_mr| sys_mr.name == map.mr_name) {
+                    if !mr.page_size_specified_by_user {
+                        return Err(format!("Error: must specify the page size."));
+                    }
+                } else {
+                    return Err(format!("Error: invalid memory region {}", map.mr_name));
+                }
+            } else if let CapMap::IOSpace(map) = cap_map {
+                if !iomaps
+                    .iter()
+                    .any(|iomap| iomap.io_address_space_name == map.io_address_space_name)
+                {
+                    return Err(format!(
+                        "Error: invalid IO Address Space Name, {}",
+                        map.io_address_space_name
+                    ));
+                }
+            }
         }
 
         for (slot, cap_maps) in user_cap_slots.iter() {
@@ -2802,10 +2980,10 @@ pub fn parse(
                 let mut lines = String::new();
                 for mapping in cap_maps {
                     lines.push_str(&format!(
-                        "\n  type {:?} from '{}' at '{}'",
-                        mapping.cap_type,
-                        mapping.pd_name,
-                        loc_string(&xml_sdf, mapping.text_pos)
+                        "\n  type {} from '{}' at '{}'",
+                        mapping.type_name(),
+                        mapping.source_name(),
+                        loc_string(&xml_sdf, mapping.text_pos())
                     ));
                 }
                 return Err(format!(

@@ -92,6 +92,7 @@ impl AddressSpace {
         frame_cap: Cap,
         frame_size_bytes: u64,
         addr: u64,
+        map_frames: bool,
     ) -> Result<(), String> {
         self.map_recursive(
             spec_container,
@@ -101,6 +102,7 @@ impl AddressSpace {
             frame_cap,
             frame_size_bytes,
             addr,
+            map_frames,
         )
     }
 
@@ -192,6 +194,7 @@ impl AddressSpace {
         frame_cap: Cap,
         frame_size_bytes: u64,
         addr: u64,
+        map_frames: bool,
     ) -> Result<(), String> {
         if cur_level >= self.address_space_levels(sel4_config) {
             unreachable!("internal bug: recursed past the final address-space level");
@@ -201,14 +204,18 @@ impl AddressSpace {
         let leaf_level = self.get_leaf_level(sel4_config, frame_size_bytes);
 
         if cur_level == leaf_level {
-            self.insert_cap_into_level(
-                spec_container,
-                sel4_config,
-                cur_level_obj_id,
-                cur_level,
-                slot,
-                frame_cap,
-            )
+            if map_frames {
+                self.insert_cap_into_level(
+                    spec_container,
+                    sel4_config,
+                    cur_level_obj_id,
+                    cur_level,
+                    slot,
+                    frame_cap,
+                )
+            } else {
+                Ok(())
+            }
         } else {
             let next_obj_id = self.map_intermediary_level_helper(
                 spec_container,
@@ -226,6 +233,7 @@ impl AddressSpace {
                 frame_cap,
                 frame_size_bytes,
                 addr,
+                map_frames,
             )
         }
     }
@@ -405,14 +413,14 @@ impl AddressSpace {
 pub fn create_iospace(
     spec_container: &mut CapDLSpecContainer,
     sel4_config: &Config,
-    device_name: &str,
+    io_address_space_name: &str,
     device_identifier: IommuDeviceIdentifier,
     domain_id: Option<u64>,
 ) -> AddressSpace {
     let IommuDeviceIdentifier::X86Pci(pci_device) = device_identifier;
 
     let root = spec_container.add_root_object(CapDLNamedObject {
-        name: format!("{}_{}", get_iopt_level_name(0), device_name).into(),
+        name: format!("{}_{}", get_iopt_level_name(0), io_address_space_name).into(),
         object: Object::IOSpace(object::IOSpace {
             slots: vec![],
             domain_id: domain_id.unwrap().into(),
@@ -421,7 +429,7 @@ pub fn create_iospace(
     });
 
     let address_space = AddressSpace::IOSpace {
-        name: device_name.to_string(),
+        name: io_address_space_name.to_string(),
         root,
         device: device_identifier,
     };
