@@ -412,7 +412,7 @@ define user_transition_shared_store8(address, value, state)
     false
 )
 define f_user_transition_shared_store8(heap, gv, address, value, state)
-  (user_guard_shared_store8(address, value, state))
+  (user_transition_shared_store8(address, value, state))
 
 
 
@@ -434,7 +434,7 @@ define user_transition_shared_store16(address, value, state)
     false
 )
 define f_user_transition_shared_store16(heap, gv, address, value, state)
-  (user_guard_shared_store16(address, value, state))
+  (user_transition_shared_store16(address, value, state))
 
 
 
@@ -456,7 +456,7 @@ define user_transition_shared_store32(address, value, state)
     false
 )
 define f_user_transition_shared_store32(heap, gv, address, value, state)
-  (user_guard_shared_store32(address, value, state))
+  (user_transition_shared_store32(address, value, state))
 
 
 
@@ -502,7 +502,7 @@ define user_transition_shared_store64(address, value, state)
     )
 )
 define f_user_transition_shared_store64(heap, gv, address, value, state)
-  (user_guard_shared_store64(address, value, state))
+  (user_transition_shared_store64(address, value, state))
 
 
 

@@ -409,7 +409,7 @@ define user_transition_shared_store8(address, value, state)
     false
 )
 define f_user_transition_shared_store8(heap, gv, address, value, state)
-  (user_guard_shared_store8(address, value, state))
+  (user_transition_shared_store8(address, value, state))
 
 
 
@@ -431,7 +431,7 @@ define user_transition_shared_store16(address, value, state)
     false
 )
 define f_user_transition_shared_store16(heap, gv, address, value, state)
-  (user_guard_shared_store16(address, value, state))
+  (user_transition_shared_store16(address, value, state))
 
 
 
@@ -453,7 +453,7 @@ define user_transition_shared_store32(address, value, state)
     false
 )
 define f_user_transition_shared_store32(heap, gv, address, value, state)
-  (user_guard_shared_store32(address, value, state))
+  (user_transition_shared_store32(address, value, state))
 
 
 
@@ -464,11 +464,10 @@ define f_user_transition_shared_store32(heap, gv, address, value, state)
 
 define user_guard_shared_store64(address, value, state)
 (
-    (
-        address == 33554432 && // CONTROL_ADDR
-        state.has_control &&
-        state.unhandled_cmds != Seq()
-    )
+    address == 33554432 &&
+    value == 0 &&
+    state.has_control &&
+    state.unhandled_cmds != Seq()
 )
 define f_user_guard_shared_store64(heap, gv, address, value, state)
   (user_guard_shared_store64(address, value, state))
@@ -481,7 +480,7 @@ define user_transition_shared_store64(address, value, state)
     state.handled_cmds == old(state.handled_cmds) ++ old(state.unhandled_cmds)
 )
 define f_user_transition_shared_store64(heap, gv, address, value, state)
-  (user_guard_shared_store64(address, value, state))
+  (user_transition_shared_store64(address, value, state))
 
 
 
