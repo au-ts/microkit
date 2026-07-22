@@ -7,8 +7,6 @@ open import Data.Unit
 open import Data.Empty
 open import Relation.Binary.PropositionalEquality
 
---23456789012345678901234567890123456789001234567890123456789012345678901234567890
-
 {-
   The following data would come from an SDF export, specific to the system. In
   this example, `is-notify-target`, `mem-readable` and `mem-writeable` correspond

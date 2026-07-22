@@ -1,7 +1,5 @@
 module Trace where
 
---23456789012345678901234567890123456789001234567890123456789012345678901234567890
-
 open import Relation.Binary.PropositionalEquality
 
 open import Types

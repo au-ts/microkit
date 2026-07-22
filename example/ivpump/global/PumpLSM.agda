@@ -1,7 +1,5 @@
 module PumpLSM where
 
---23456789012345678901234567890123456789001234567890123456789012345678901234567890
-
 open import Data.Bool
 open import Data.Empty
 open import Data.List
