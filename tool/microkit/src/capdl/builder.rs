@@ -892,9 +892,9 @@ pub fn build_capdl_spec(
 
         // Step 4-9 Create spec and caps to IRQs
         for irq in pd.irqs.iter() {
-            if matches!(irq.kind, SysIrqKind::IOAPIC{ .. }) {
-                continue
-            }
+            // if matches!(irq.kind, SysIrqKind::IOAPIC{ .. }) {
+                // continue
+            // }
             // Create a IRQ handler cap and insert into the requested CSpace's slot.
             let irq_handle_cap = create_irq_handler_cap(
                 &mut spec_container,
