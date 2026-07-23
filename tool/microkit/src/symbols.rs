@@ -137,15 +137,6 @@ pub fn patch_symbols(
 
         elf_obj
             .write_symbol(
-                "microkit_root_cnode_size_bits",
-                &pd.cspace
-                    .as_ref()
-                    .map_or(0u64, |cspace| cspace.size_bits)
-                    .to_le_bytes(),
-            )
-            .unwrap();
-        elf_obj
-            .write_symbol(
                 "microkit_max_user_caps_bits",
                 &pd.cspace
                     .as_ref()

@@ -38,7 +38,7 @@ typedef seL4_MessageInfo_t microkit_msginfo;
 #define MICROKIT_MAX_CHANNEL_ID (MICROKIT_MAX_CHANNELS - 1)
 #define MICROKIT_MAX_IOPORT_ID MICROKIT_MAX_CHANNELS
 #define MICROKIT_PD_NAME_LENGTH 64
-#define MICROKIT_BIT(n) (((seL4_Word)1) << (n))
+#define MICROKIT_BIT(n) (((seL4_Uint64)1) << (n))
 #define MICROKIT_MASK(n) (MICROKIT_BIT(n) - 1)
 
 /* User provided functions */
@@ -68,11 +68,10 @@ extern seL4_Word microkit_irqs;
 extern seL4_Word microkit_notifications;
 extern seL4_Word microkit_pps;
 extern seL4_Word microkit_ioports;
-extern seL4_Word microkit_root_cnode_size_bits;
-extern seL4_Word microkit_max_user_caps_bits;
+extern seL4_Uint64 microkit_max_user_caps_bits;
 
 /* Symbol for storing metadata about a pds root cnode */
-extern seL4_Word microkit_root_cnode_metadata;
+extern seL4_Uint64 microkit_root_cnode_metadata;
 
 /*
  * Output a single character on the debug console.
@@ -623,35 +622,30 @@ static inline seL4_CPtr microkit_cspace_root_slot_to_cptr(seL4_Word slot)
     return slot << (seL4_WordBits - microkit_max_user_caps_bits);
 }
 
+typedef seL4_Uint64 microkit_metadata_word_t;
+
+#define MICROKIT_METADATA_WORD_BITS 64
 #define MICROKIT_METADATA_PRESENT_BITS 1
 #define MICROKIT_METADATA_NESTED_BITS  1
-#define MICROKIT_METADATA_SIZE_BITS    6
 #define MICROKIT_METADATA_PAYLOAD_BITS \
-    (seL4_WordBits - MICROKIT_METADATA_PRESENT_BITS - MICROKIT_METADATA_NESTED_BITS - MICROKIT_METADATA_SIZE_BITS)
+    (MICROKIT_METADATA_WORD_BITS - MICROKIT_METADATA_PRESENT_BITS - MICROKIT_METADATA_NESTED_BITS)
 
-#define MICROKIT_METADATA_PRESENT_MASK MICROKIT_BIT(seL4_WordBits - 1)
-#define MICROKIT_METADATA_NESTED_MASK  MICROKIT_BIT(MICROKIT_METADATA_PAYLOAD_BITS + MICROKIT_METADATA_SIZE_BITS)
-#define MICROKIT_METADATA_SIZE_SHIFT   MICROKIT_METADATA_PAYLOAD_BITS
-#define MICROKIT_METADATA_SIZE_MASK    MICROKIT_MASK(MICROKIT_METADATA_SIZE_BITS)
-#define MICROKIT_METADATA_PAYLOAD_MASK MICROKIT_MASK(MICROKIT_METADATA_PAYLOAD_BITS)
+#define MICROKIT_METADATA_NESTED_MASK \
+    (((microkit_metadata_word_t)1) << MICROKIT_METADATA_PAYLOAD_BITS)
 
-static inline seL4_Bool microkit_metadata_unpack_with_flags(seL4_Word word, seL4_Word *payload, seL4_Word *size_bits,
-                                                            seL4_Bool *nested)
+#define MICROKIT_METADATA_PRESENT_MASK \
+    (((microkit_metadata_word_t)1) << (MICROKIT_METADATA_PAYLOAD_BITS + MICROKIT_METADATA_NESTED_BITS))
+
+#define MICROKIT_METADATA_PAYLOAD_MASK (MICROKIT_MASK(MICROKIT_METADATA_PAYLOAD_BITS))
+
+static inline seL4_Bool microkit_metadata_unpack(microkit_metadata_word_t word, seL4_Word *payload)
 {
     if ((word & MICROKIT_METADATA_PRESENT_MASK) == 0) {
         return seL4_False;
     }
 
-    *nested = (word & MICROKIT_METADATA_NESTED_MASK) != 0;
-    *size_bits = (word >> MICROKIT_METADATA_SIZE_SHIFT) & MICROKIT_METADATA_SIZE_MASK;
-    *payload = word & MICROKIT_METADATA_PAYLOAD_MASK;
+    *payload = (seL4_Word)(word & MICROKIT_METADATA_PAYLOAD_MASK);
     return seL4_True;
-}
-
-static inline seL4_Bool microkit_metadata_unpack(seL4_Word word, seL4_Word *payload, seL4_Word *size_bits)
-{
-    seL4_Bool ignored_nested;
-    return microkit_metadata_unpack_with_flags(word, payload, size_bits, &ignored_nested);
 }
 
 static inline seL4_Bool microkit_root_slot_to_metadata(seL4_Word slot, seL4_Word *metadata)
@@ -660,9 +654,8 @@ static inline seL4_Bool microkit_root_slot_to_metadata(seL4_Word slot, seL4_Word
         return seL4_False;
     }
 
-    seL4_Word *root_metadata = (seL4_Word *)microkit_root_cnode_metadata;
-    seL4_Word ignored_size_bits;
-    return microkit_metadata_unpack(root_metadata[slot], metadata, &ignored_size_bits);
+    microkit_metadata_word_t *root_metadata = (microkit_metadata_word_t *)microkit_root_cnode_metadata;
+    return microkit_metadata_unpack(root_metadata[slot], metadata);
 }
 
 static inline seL4_Bool microkit_root_slot_to_nested_metadata(seL4_Word root_slot, seL4_Word nested_slot,
@@ -673,21 +666,28 @@ static inline seL4_Bool microkit_root_slot_to_nested_metadata(seL4_Word root_slo
         return seL4_False;
     }
 
-    seL4_Word *root_metadata = (seL4_Word *)microkit_root_cnode_metadata;
-    seL4_Word nested_size_bits;
-    seL4_Word nested_metadata_vaddr;
-    seL4_Bool nested;
-    if (!microkit_metadata_unpack_with_flags(root_metadata[root_slot], &nested_metadata_vaddr, &nested_size_bits,
-                                             &nested)) {
-        return seL4_False;
-    }
-    if (!nested || nested_slot >= MICROKIT_BIT(nested_size_bits)) {
+    microkit_metadata_word_t *root_metadata = (microkit_metadata_word_t *)microkit_root_cnode_metadata;
+    microkit_metadata_word_t root_word = root_metadata[root_slot];
+
+    if ((root_word & MICROKIT_METADATA_NESTED_MASK) == 0) {
         return seL4_False;
     }
 
-    seL4_Word *nested_metadata = (seL4_Word *)nested_metadata_vaddr;
-    seL4_Word ignored_size_bits;
-    return microkit_metadata_unpack(nested_metadata[nested_slot], metadata, &ignored_size_bits);
+    seL4_Word nested_metadata_vaddr;
+    if (!microkit_metadata_unpack(root_word, &nested_metadata_vaddr)) {
+        return seL4_False;
+    }
+
+    microkit_metadata_word_t *nested_metadata = (microkit_metadata_word_t *)nested_metadata_vaddr;
+    for (seL4_Word i = 0;; i++) {
+        microkit_metadata_word_t nested_word = nested_metadata[i];
+        if ((nested_word & MICROKIT_METADATA_PRESENT_MASK) == 0) {
+            return seL4_False;
+        }
+        if (i == nested_slot) {
+            return microkit_metadata_unpack(nested_word, metadata);
+        }
+    }
 }
 
 static inline seL4_Error microkit_page_get_address(seL4_CPtr frame, seL4_Word *paddr)

@@ -94,7 +94,7 @@ const PD_BASE_VCPU_CAP: u64 = PD_BASE_VM_TCB_CAP + 64;
 const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
 
 pub const PD_CAP_SIZE: u32 = 512;
-const PD_CAP_BITS: u8 = PD_CAP_SIZE.ilog2() as u8;
+pub const PD_CAP_BITS: u8 = PD_CAP_SIZE.ilog2() as u8;
 const PD_SCHEDCONTEXT_EXTRA_SIZE: u64 = 256;
 const PD_SCHEDCONTEXT_EXTRA_SIZE_BITS: u64 = PD_SCHEDCONTEXT_EXTRA_SIZE.ilog2() as u64;
 
@@ -698,6 +698,24 @@ pub fn build_capdl_spec(
                 frames,
             )?;
         }
+        for page_table in &pd.page_tables {
+            pd_elf_spec
+                .address_space
+                .map_page_tables_for_range(
+                    &mut spec_container,
+                    kernel_config,
+                    page_table.page_size as u64,
+                    page_table.vaddr..page_table.vaddr + page_table.size,
+                )
+                .map_err(|err| {
+                    format!(
+                        "{err} while reserving page tables for PD '{}' range [{:#x}..{:#x})",
+                        pd.name,
+                        page_table.vaddr,
+                        page_table.vaddr + page_table.size
+                    )
+                })?;
+        }
 
         // Step 3-3a: Create and map in the IPC buffer
         let ipcbuf_frame_obj_id = capdl_util_make_frame_obj(
@@ -1276,6 +1294,34 @@ pub fn build_capdl_spec(
             &mr_name_to_frames[&iomap.mr],
         )?;
     }
+    for page_table in system.io_page_tables.iter() {
+        let address_space = iospace_by_device
+            .entry(&page_table.name)
+            .or_insert_with(|| {
+                create_iospace(
+                    &mut spec_container,
+                    kernel_config,
+                    &page_table.name,
+                    page_table.identifier,
+                    page_table.domain_id,
+                )
+            });
+        address_space
+            .map_page_tables_for_range(
+                &mut spec_container,
+                kernel_config,
+                page_table.page_size as u64,
+                page_table.iovaddr..page_table.iovaddr + page_table.size,
+            )
+            .map_err(|err| {
+                format!(
+                    "{err} while reserving IO page tables for '{}' range [{:#x}..{:#x})",
+                    page_table.name,
+                    page_table.iovaddr,
+                    page_table.iovaddr + page_table.size
+                )
+            })?;
+    }
 
     // *********************************
     // Step 6. Handle extra cap mappings
@@ -1311,7 +1357,6 @@ pub fn build_capdl_spec(
                 CapMap::MemoryRegionFrames(map) => {
                     let mr_frames = &mr_name_to_frames[&map.mr_name];
                     let size_bits = calculate_size_bits(mr_frames.len() as u64).max(1);
-
                     fill_cnode_with_frames(
                         &mut spec_container,
                         kernel_config,
@@ -1320,7 +1365,7 @@ pub fn build_capdl_spec(
                         map.perms,
                         cspace.size_bits as u8,
                         &format!("pd_{}_slot_{}_mr_{}", pd.name, cap_map.slot(), map.mr_name),
-                    )
+                    )?
                 }
                 CapMap::ElfFrames(map) => {
                     let pd_src_frame_obj_ids = pd_elf_specs
@@ -1343,7 +1388,7 @@ pub fn build_capdl_spec(
                             pd.name,
                             cap_map.slot()
                         ),
-                    )
+                    )?
                 }
                 CapMap::StackFrames(map) => {
                     let pd_src_frame_obj_ids = pd_stack_frames
@@ -1365,7 +1410,7 @@ pub fn build_capdl_spec(
                             pd.name,
                             cap_map.slot()
                         ),
-                    )
+                    )?
                 }
                 CapMap::IpcBufferFrame(map) => {
                     let pd_src_frame_obj_id = pd_ipc_frame
@@ -1513,7 +1558,13 @@ fn fill_cnode_with_frames(
     perms: FrameCapPerms,
     root_cnode_bits: u8,
     cnode_name: &str,
-) -> Cap {
+) -> Result<Cap, String> {
+    if root_cnode_bits as u64 + size_bits as u64 > kernel_config.cap_address_bits {
+        return Err(format!(
+            "Attempting to create a nested cnode of size_bits {} below the root cnode of size_bits {}",
+            size_bits, root_cnode_bits
+        ));
+    }
     // The execute and cached fields are considered attributes by seL4 and from my understanding @cazb2
     // do not get masked when invoking the frame thus are redundant. Since they are not fixed at runtime.
     let mut slot = 0;
@@ -1533,5 +1584,9 @@ fn fill_cnode_with_frames(
 
     // Configure the CNode to simulate array indexing.
     let mr_guard_size = kernel_config.cap_address_bits - root_cnode_bits as u64 - size_bits as u64;
-    capdl_util_make_cnode_cap(mr_cnode_obj, 0, mr_guard_size as u8)
+    Ok(capdl_util_make_cnode_cap(
+        mr_cnode_obj,
+        0,
+        mr_guard_size as u8,
+    ))
 }

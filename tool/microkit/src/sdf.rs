@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
+use crate::capdl::PD_CAP_BITS;
 /// This module is responsible for parsing the System Description Format (SDF)
 /// which is based on XML.
 /// We do not use any fancy XML, and instead keep things as minimal and simple
@@ -29,7 +30,7 @@ use std::collections::{hash_map, HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::num::NonZero;
-use std::ops::Deref;
+use std::ops::{Deref, Range};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -413,6 +414,68 @@ pub struct SysIOMap {
     pub text_pos: Option<roxmltree::TextPos>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct PageTable {
+    pub vaddr: u64,
+    pub size: u64,
+    pub page_size: PageSize,
+    pub text_pos: roxmltree::TextPos,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct IOPageTable {
+    pub name: String,
+    pub identifier: IommuDeviceIdentifier,
+    pub domain_id: Option<u64>,
+    pub iovaddr: u64,
+    pub size: u64,
+    pub page_size: PageSize,
+    pub text_pos: roxmltree::TextPos,
+}
+
+trait PageTableReservation {
+    fn element(&self) -> &'static str;
+    fn range_name(&self) -> &'static str;
+    fn range(&self) -> Range<u64>;
+    fn text_pos(&self) -> roxmltree::TextPos;
+}
+
+impl PageTableReservation for PageTable {
+    fn element(&self) -> &'static str {
+        "page_table"
+    }
+
+    fn range_name(&self) -> &'static str {
+        "virtual address range"
+    }
+
+    fn range(&self) -> Range<u64> {
+        self.vaddr..self.vaddr + self.size
+    }
+
+    fn text_pos(&self) -> roxmltree::TextPos {
+        self.text_pos
+    }
+}
+
+impl PageTableReservation for IOPageTable {
+    fn element(&self) -> &'static str {
+        "io_page_table"
+    }
+
+    fn range_name(&self) -> &'static str {
+        "address range"
+    }
+
+    fn range(&self) -> Range<u64> {
+        self.iovaddr..self.iovaddr + self.size
+    }
+
+    fn text_pos(&self) -> roxmltree::TextPos {
+        self.text_pos
+    }
+}
+
 pub trait Map {
     fn mr_name(&self) -> &str;
     fn addr(&self) -> u64;
@@ -684,6 +747,7 @@ pub struct ProtectionDomain {
     /// Enable FPU for this PD.
     pub fpu: bool,
     pub maps: Vec<SysMap>,
+    pub page_tables: Vec<PageTable>,
     pub irqs: Vec<SysIrq>,
     pub ioports: Vec<IOPort>,
     pub setvars: Vec<SysSetVar>,
@@ -1010,11 +1074,154 @@ impl SysIOMap {
     }
 }
 
+fn validate_page_table_region(
+    config: &Config,
+    xml_sdf: &XmlSystemDescription,
+    node: &roxmltree::Node,
+    addr: u64,
+    size: u64,
+    page_size: u64,
+    max_end: u64,
+    addr_name: &str,
+) -> Result<(), String> {
+    if !config.page_sizes().contains(&page_size) {
+        return Err(value_error(
+            xml_sdf,
+            node,
+            format!("page size {page_size:#x} not supported"),
+        ));
+    }
+
+    if size == 0 {
+        return Err(value_error(
+            xml_sdf,
+            node,
+            "size must be greater than 0".to_string(),
+        ));
+    }
+
+    if !addr.is_multiple_of(page_size) {
+        return Err(value_error(
+            xml_sdf,
+            node,
+            format!("{addr_name} is not aligned to the page size"),
+        ));
+    }
+
+    if !size.is_multiple_of(page_size) {
+        return Err(value_error(
+            xml_sdf,
+            node,
+            "size is not a multiple of the page size".to_string(),
+        ));
+    }
+
+    let Some(end) = addr.checked_add(size) else {
+        return Err(value_error(
+            xml_sdf,
+            node,
+            "address range overflows".to_string(),
+        ));
+    };
+
+    if end > max_end {
+        return Err(value_error(
+            xml_sdf,
+            node,
+            format!("address range [{addr:#x}..{end:#x}) exceeds valid address space [0x0..{max_end:#x})"),
+        ));
+    }
+
+    Ok(())
+}
+
+fn parse_page_table_region(
+    config: &Config,
+    xml_sdf: &XmlSystemDescription,
+    node: &roxmltree::Node,
+    addr_name: &'static str,
+    max_end: u64,
+) -> Result<(u64, u64, PageSize, roxmltree::TextPos), String> {
+    check_attributes(xml_sdf, node, &[addr_name, "size", "page_size"])?;
+
+    let addr = sdf_parse_number(checked_lookup(xml_sdf, node, addr_name)?, node)?;
+    let size = sdf_parse_number(checked_lookup(xml_sdf, node, "size")?, node)?;
+    let page_size = sdf_parse_number(checked_lookup(xml_sdf, node, "page_size")?, node)?;
+
+    validate_page_table_region(
+        config, xml_sdf, node, addr, size, page_size, max_end, addr_name,
+    )?;
+
+    Ok((
+        addr,
+        size,
+        page_size.into(),
+        xml_sdf.doc.text_pos_at(node.range().start),
+    ))
+}
+
+impl PageTable {
+    fn from_xml(
+        config: &Config,
+        xml_sdf: &XmlSystemDescription,
+        node: &roxmltree::Node,
+        max_vaddr: u64,
+    ) -> Result<Self, String> {
+        let (vaddr, size, page_size, text_pos) =
+            parse_page_table_region(config, xml_sdf, node, "vaddr", max_vaddr)?;
+
+        Ok(PageTable {
+            vaddr,
+            size,
+            page_size,
+            text_pos,
+        })
+    }
+}
+
+impl IOPageTable {
+    fn from_xml(
+        config: &Config,
+        xml_sdf: &XmlSystemDescription,
+        node: &roxmltree::Node,
+        name: &str,
+        identifier: IommuDeviceIdentifier,
+        domain_id: Option<u64>,
+    ) -> Result<Self, String> {
+        let (iovaddr, size, page_size, text_pos) = parse_page_table_region(
+            config,
+            xml_sdf,
+            node,
+            "iovaddr",
+            x86_io_address_space::CAPDL_MAX_IOVA + 1,
+        )?;
+
+        if page_size != PageSize::Small {
+            return Err(value_error(
+                xml_sdf,
+                node,
+                "currently seL4 does not have large page support for the IOMMU".to_string(),
+            ));
+        }
+
+        Ok(IOPageTable {
+            name: name.to_string(),
+            identifier,
+            domain_id,
+            iovaddr,
+            size,
+            page_size,
+            text_pos,
+        })
+    }
+}
+
 // This is implemented in such a way that each device will have its own address space.
 // If devices need to share physical memory, this can be done by mapping the same memory_region
 // into each address space.
 struct IOAddressSpace {
     iomaps: Vec<SysIOMap>,
+    io_page_tables: Vec<IOPageTable>,
 }
 
 impl IOAddressSpace {
@@ -1087,6 +1294,7 @@ impl IOAddressSpace {
         iommu_device_identifiers.push(identifier);
 
         let mut iomaps = Vec::new();
+        let mut io_page_tables = Vec::new();
 
         for child in node.children().filter(|node| node.is_element()) {
             match child.tag_name().name() {
@@ -1094,6 +1302,12 @@ impl IOAddressSpace {
                     let iomap =
                         SysIOMap::from_xml(config, xml_sdf, &child, name, identifier, domain_id)?;
                     iomaps.push(iomap);
+                }
+                "io_page_table" => {
+                    let io_page_table = IOPageTable::from_xml(
+                        config, xml_sdf, &child, name, identifier, domain_id,
+                    )?;
+                    io_page_tables.push(io_page_table);
                 }
                 _ => {
                     let pos = xml_sdf.doc.text_pos_at(child.range().start);
@@ -1106,7 +1320,10 @@ impl IOAddressSpace {
             }
         }
 
-        Ok(IOAddressSpace { iomaps })
+        Ok(IOAddressSpace {
+            iomaps,
+            io_page_tables,
+        })
     }
 }
 
@@ -1314,6 +1531,7 @@ impl ProtectionDomain {
         }
 
         let mut maps = Vec::new();
+        let mut page_tables = Vec::new();
         let mut irqs = Vec::new();
         let mut ioports = Vec::new();
         let mut setvars: Vec<SysSetVar> = Vec::new();
@@ -1406,6 +1624,10 @@ impl ProtectionDomain {
                     }
 
                     maps.push(map);
+                }
+                "page_table" => {
+                    let map_max_vaddr = config.pd_map_max_vaddr(stack_size);
+                    page_tables.push(PageTable::from_xml(config, xml_sdf, &child, map_max_vaddr)?);
                 }
                 "irq" => {
                     let id = checked_lookup(xml_sdf, &child, "id")?
@@ -1763,7 +1985,7 @@ impl ProtectionDomain {
                         ));
                     }
 
-                    cspace = Some(CSpace::from_xml(xml_sdf, &child)?);
+                    cspace = Some(CSpace::from_xml(config, xml_sdf, &child)?);
                 }
                 _ => {
                     let pos = xml_sdf.doc.text_pos_at(child.range().start);
@@ -1803,6 +2025,7 @@ impl ProtectionDomain {
             program_image_for_symbols,
             fpu,
             maps,
+            page_tables,
             irqs,
             ioports,
             setvars,
@@ -2088,7 +2311,11 @@ impl CapMap {
 }
 
 impl CSpace {
-    fn from_xml(xml_sdf: &XmlSystemDescription, node: &roxmltree::Node) -> Result<Self, String> {
+    fn from_xml(
+        config: &Config,
+        xml_sdf: &XmlSystemDescription,
+        node: &roxmltree::Node,
+    ) -> Result<Self, String> {
         check_attributes(xml_sdf, node, &[])?;
 
         let mut cap_maps = vec![];
@@ -2098,11 +2325,25 @@ impl CSpace {
         }
 
         // Default to 1, the minimum allowed by the kernel.
-        let size_bits = cap_maps
-            .iter()
-            .map(|cap_map| calculate_size_bits(cap_map.common().slot + 1))
-            .max()
-            .unwrap_or(1) as u64;
+        let mut size_bits = 1;
+        for cap_map in &cap_maps {
+            let slot_count = cap_map.common().slot.checked_add(1).ok_or_else(|| {
+                value_error(
+                    xml_sdf,
+                    node,
+                    "overflow due to the large slot number in cspace".into(),
+                )
+            })?;
+            size_bits = size_bits.max(calculate_size_bits(slot_count) as u64);
+        }
+
+        if size_bits as u64 + PD_CAP_BITS as u64 > config.cap_address_bits {
+            return Err(value_error(
+                xml_sdf,
+                node,
+                format!("the CSpace has a slot that is too large, which stops us from indexing into the normal microkit cnode"),
+            ));
+        }
 
         Ok(CSpace {
             cap_maps,
@@ -2763,6 +3004,7 @@ pub struct SystemDescription {
     pub protection_domains: Vec<ProtectionDomain>,
     pub memory_regions: Vec<SysMemoryRegion>,
     pub iomaps: Vec<SysIOMap>,
+    pub io_page_tables: Vec<IOPageTable>,
     pub channels: Vec<Channel>,
     pub domains: Domains,
 }
@@ -2855,6 +3097,96 @@ where
     Ok(())
 }
 
+fn mapped_range<M: Map>(mrs: &[SysMemoryRegion], map: &M) -> Range<u64> {
+    let mr = mrs
+        .iter()
+        .find(|mr| mr.name == map.mr_name())
+        .expect("map memory region already validated");
+    let start = map.addr();
+    start
+        ..start
+            .checked_add(mr.size)
+            .expect("map range already validated")
+}
+
+fn check_page_table_reservation<'a, PT, M, I>(
+    xml_sdf: &XmlSystemDescription,
+    mrs: &[SysMemoryRegion],
+    page_table: &PT,
+    maps: I,
+    checked_page_tables: &[Range<u64>],
+    address_space: &str,
+) -> Result<(), String>
+where
+    PT: PageTableReservation,
+    M: Map + 'a,
+    I: IntoIterator<Item = &'a M>,
+{
+    let page_table_range = page_table.range();
+
+    for map in maps {
+        let mapped_range = mapped_range(mrs, map);
+        if ranges_overlap(&page_table_range, &mapped_range) {
+            return Err(format!(
+                "Error: {} {} [{:#x}..{:#x}) overlaps with {} for '{}' [{:#x}..{:#x}) in {} {}",
+                page_table.element(),
+                page_table.range_name(),
+                page_table_range.start,
+                page_table_range.end,
+                map.element(),
+                map.mr_name(),
+                mapped_range.start,
+                mapped_range.end,
+                address_space,
+                location_suffix_format(xml_sdf, Some(page_table.text_pos()))
+            ));
+        }
+    }
+
+    for checked_range in checked_page_tables {
+        if ranges_overlap(&page_table_range, checked_range) {
+            return Err(format!(
+                "Error: {} {} [{:#x}..{:#x}) overlaps with {} [{:#x}..{:#x}) in {} {}",
+                page_table.element(),
+                page_table.range_name(),
+                page_table_range.start,
+                page_table_range.end,
+                page_table.element(),
+                checked_range.start,
+                checked_range.end,
+                address_space,
+                location_suffix_format(xml_sdf, Some(page_table.text_pos()))
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn check_page_tables(
+    xml_sdf: &XmlSystemDescription,
+    mrs: &[SysMemoryRegion],
+    page_tables: &[PageTable],
+    maps: &[SysMap],
+    address_space: &str,
+) -> Result<(), String> {
+    let mut checked_page_tables: Vec<Range<u64>> = Vec::new();
+
+    for page_table in page_tables {
+        check_page_table_reservation(
+            xml_sdf,
+            mrs,
+            page_table,
+            maps,
+            &checked_page_tables,
+            address_space,
+        )?;
+        checked_page_tables.push(page_table.range());
+    }
+
+    Ok(())
+}
+
 fn check_io_maps(
     xml_sdf: &XmlSystemDescription,
     mrs: &[SysMemoryRegion],
@@ -2888,6 +3220,33 @@ fn check_io_maps(
             &address_space,
             x86_io_address_space::CAPDL_MAX_IOVA + 1,
         )?;
+    }
+
+    Ok(())
+}
+
+fn check_io_page_tables(
+    xml_sdf: &XmlSystemDescription,
+    mrs: &[SysMemoryRegion],
+    iomaps: &[SysIOMap],
+    io_page_tables: &[IOPageTable],
+) -> Result<(), String> {
+    let mut checked_page_tables: HashMap<&str, Vec<Range<u64>>> = HashMap::new();
+
+    for page_table in io_page_tables {
+        let checked_for_space = checked_page_tables
+            .entry(page_table.name.as_str())
+            .or_default();
+        check_page_table_reservation(
+            xml_sdf,
+            mrs,
+            page_table,
+            iomaps.iter().filter(|iomap| iomap.name == page_table.name),
+            checked_for_space,
+            &format!("io address space '{}'", page_table.name),
+        )?;
+
+        checked_for_space.push(page_table.range());
     }
 
     Ok(())
@@ -3070,6 +3429,7 @@ pub fn parse(
     let mut root_pds = vec![];
     let mut mrs = vec![];
     let mut iomaps = vec![];
+    let mut io_page_tables = vec![];
     let mut io_address_space_names = HashSet::new();
     let mut iommu_domain_ids = HashSet::new();
     let mut iommu_device_identifiers = Vec::new();
@@ -3107,17 +3467,16 @@ pub fn parse(
                 search_paths,
             )?),
             "io_address_space" => {
-                iomaps.extend(
-                    IOAddressSpace::from_xml(
-                        config,
-                        &xml_sdf,
-                        &child,
-                        &mut io_address_space_names,
-                        &mut iommu_domain_ids,
-                        &mut iommu_device_identifiers,
-                    )?
-                    .iomaps,
-                );
+                let io_address_space = IOAddressSpace::from_xml(
+                    config,
+                    &xml_sdf,
+                    &child,
+                    &mut io_address_space_names,
+                    &mut iommu_domain_ids,
+                    &mut iommu_device_identifiers,
+                )?;
+                iomaps.extend(io_address_space.iomaps);
+                io_page_tables.extend(io_address_space.io_page_tables);
             }
             "virtual_machine" => {
                 let pos = xml_sdf.doc.text_pos_at(child.range().start);
@@ -3444,6 +3803,13 @@ pub fn parse(
             &format!("protection domain '{}'", pd.name),
             config.pd_map_max_vaddr(pd.stack_size),
         )?;
+        check_page_tables(
+            &xml_sdf,
+            &mrs,
+            &pd.page_tables,
+            &pd.maps,
+            &format!("protection domain '{}'", pd.name),
+        )?;
         if let Some(vm) = &pd.virtual_machine {
             check_maps(
                 &xml_sdf,
@@ -3456,6 +3822,7 @@ pub fn parse(
     }
 
     check_io_maps(&xml_sdf, &mrs, &iomaps)?;
+    check_io_page_tables(&xml_sdf, &mrs, &iomaps, &io_page_tables)?;
 
     // Ensure that there are no overlapping extra cap maps in the user caps region
     // and we are not mapping in the same cap from the same source more than once
@@ -3636,6 +4003,7 @@ pub fn parse(
         protection_domains: pds,
         memory_regions: mrs,
         iomaps,
+        io_page_tables,
         channels,
         domains,
     })

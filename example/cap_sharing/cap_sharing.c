@@ -26,6 +26,8 @@
 
 #define MR_SIZE              0xa000
 #define MR_PAGE_SIZE         0x1000
+#define STACK_SIZE           0x2000
+
 #define DMA_BUFFER_VADDR     0x10001000
 #define IOVA                 0x100000
 #define RUNTIME_IOVA         (IOVA + MR_SIZE)
@@ -91,16 +93,6 @@ static void print_frame_info(const char *name, seL4_CPtr cap, seL4_Word vaddr)
     microkit_dbg_puts("\n");
 }
 
-static seL4_Bool root_slot_to_metadata_with_size(seL4_Word slot, seL4_Word *metadata, seL4_Word *size_bits)
-{
-    if (slot == 0 || slot >= MICROKIT_BIT(microkit_max_user_caps_bits) || microkit_root_cnode_metadata == 0) {
-        return seL4_False;
-    }
-
-    seL4_Word *root_metadata = (seL4_Word *)microkit_root_cnode_metadata;
-    return microkit_metadata_unpack(root_metadata[slot], metadata, size_bits);
-}
-
 static void validate_frame_metadata(void)
 {
     seL4_Word secondary_stack_bottom;
@@ -109,6 +101,10 @@ static void validate_frame_metadata(void)
         halt();
     }
     print_frame_info("secondary stack bottom", CAP_SECONDARY_STACK, secondary_stack_bottom);
+    for (seL4_Word i = 1; i < STACK_SIZE / MICROKIT_BIT(seL4_PageBits); i++) {
+        print_frame_info("stack frame", CAP_SECONDARY_STACK | i,
+                         secondary_stack_bottom + i * MICROKIT_BIT(seL4_PageBits));
+    }
 
     seL4_Word secondary_ipcbuf;
     if (!microkit_root_slot_to_metadata(SLOT_SECONDARY_IPCBUF, &secondary_ipcbuf)) {
@@ -118,30 +114,21 @@ static void validate_frame_metadata(void)
     print_frame_info("secondary IPC buffer", CAP_SECONDARY_IPCBUF, secondary_ipcbuf);
 
     seL4_Word secondary_elf_metadata;
-    seL4_Word secondary_elf_metadata_size_bits;
-    if (!root_slot_to_metadata_with_size(SLOT_SECONDARY_ELF, &secondary_elf_metadata, &secondary_elf_metadata_size_bits)) {
+    if (!microkit_root_slot_to_metadata(SLOT_SECONDARY_ELF, &secondary_elf_metadata)) {
         microkit_dbg_puts("|primary  | error retrieving secondary ELF metadata\n");
         halt();
     }
     microkit_dbg_puts("|primary  | secondary ELF metadata at ");
     put_hex64(secondary_elf_metadata);
-    microkit_dbg_puts(" size bits ");
-    microkit_dbg_put32(secondary_elf_metadata_size_bits);
     microkit_dbg_puts("\n");
 
-    seL4_Bool seen_empty_metadata_slot = seL4_False;
     seL4_Word secondary_elf_frame_count = 0;
-    for (seL4_Word i = 0; i < MICROKIT_BIT(secondary_elf_metadata_size_bits); i++) {
+    for (seL4_Word i = 0;; i++) {
         seL4_Word secondary_elf_frame_vaddr;
         seL4_Bool found =
             microkit_root_slot_to_nested_metadata(SLOT_SECONDARY_ELF, i, &secondary_elf_frame_vaddr);
         if (!found) {
-            seen_empty_metadata_slot = seL4_True;
-            continue;
-        }
-        if (seen_empty_metadata_slot) {
-            microkit_dbg_puts("|primary  | error: secondary ELF metadata has a gap\n");
-            halt();
+            break;
         }
 
         print_frame_info("secondary ELF", CAP_SECONDARY_ELF | i, secondary_elf_frame_vaddr);

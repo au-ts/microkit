@@ -26,8 +26,8 @@ use microkit_tool::sel4::{
 };
 use microkit_tool::symbols::patch_symbols;
 use microkit_tool::util::{
-    calculate_size_bits, get_full_path, human_size_strict, json_str, json_str_as_bool,
-    json_str_as_u64, round_down, round_up,
+    get_full_path, human_size_strict, json_str, json_str_as_bool, json_str_as_u64, round_down,
+    round_up,
 };
 use microkit_tool::viper;
 use microkit_tool::{DisjointMemoryRegion, MemoryRegion};
@@ -449,22 +449,16 @@ fn main() -> Result<(), String> {
         }
         candidate_before(possible_end)
     };
-    let encode_metadata = |vaddr: u64, size_bits: u8, nested: bool| -> u64 {
+    let encode_metadata = |vaddr: u64, nested: bool| -> u64 {
         const PRESENT_BITS: u64 = 1;
         const NESTED_BITS: u64 = 1;
-        const SIZE_BITS: u64 = 6;
-        const PAYLOAD_BITS: u64 = u64::BITS as u64 - PRESENT_BITS - NESTED_BITS - SIZE_BITS;
-        const PRESENT_BIT: u64 = 1 << (u64::BITS - 1);
-        const NESTED_BIT: u64 = 1 << (PAYLOAD_BITS + SIZE_BITS);
-        if u64::from(size_bits) >= (1u64 << SIZE_BITS) {
-            panic!("Error: metadata size bits {size_bits} do not fit in {SIZE_BITS} bits");
-        }
+        const PAYLOAD_BITS: u64 = u64::BITS as u64 - PRESENT_BITS - NESTED_BITS;
+        const PRESENT_BIT: u64 = 1 << (PAYLOAD_BITS + 1);
+        const NESTED_BIT: u64 = 1 << PAYLOAD_BITS;
         if vaddr >= (1 << PAYLOAD_BITS) {
             panic!("Error: metadata vaddr {vaddr:#x} does not fit in {PAYLOAD_BITS} payload bits");
         }
-        PRESENT_BIT | (if nested { NESTED_BIT } else { 0 })
-            | (u64::from(size_bits) << PAYLOAD_BITS)
-            | vaddr
+        PRESENT_BIT | (if nested { NESTED_BIT } else { 0 }) | vaddr
     };
 
     let pd_elf_segments_by_idx: Vec<Vec<Range<u64>>> = system_elfs
@@ -488,6 +482,7 @@ fn main() -> Result<(), String> {
             pd.maps
                 .iter()
                 .map(|map| map.vaddr..map.vaddr + get_mr_size(map.mr_name()))
+                .chain(pd.page_tables.iter().map(|pt| pt.vaddr..pt.vaddr + pt.size))
                 .collect::<Vec<Range<u64>>>()
         })
         .collect();
@@ -525,8 +520,11 @@ fn main() -> Result<(), String> {
                         })
                         .collect::<Vec<u64>>();
 
-                    let region_size_bytes =
-                        round_up((frame_vaddrs.len() * 8) as u64, PageSize::Small as u64);
+                    // The last entry is a zero terminator.
+                    let region_size_bytes = round_up(
+                        ((frame_vaddrs.len() + 1) * 8) as u64,
+                        PageSize::Small as u64,
+                    );
 
                     let nested_cspace_region = find_free_region(
                         &mut pd_regions[pd_idx],
@@ -535,15 +533,13 @@ fn main() -> Result<(), String> {
                     );
                     pd_regions[pd_idx].push(nested_cspace_region.clone());
 
-                    root_metadata[cap_map.slot() as usize] = encode_metadata(
-                        nested_cspace_region.start,
-                        calculate_size_bits(frame_vaddrs.len() as u64),
-                        true,
-                    );
+                    root_metadata[cap_map.slot() as usize] =
+                        encode_metadata(nested_cspace_region.start, true);
 
                     let nested_metadata = frame_vaddrs
                         .into_iter()
-                        .flat_map(|vaddr| encode_metadata(vaddr, 0, false).to_le_bytes())
+                        .flat_map(|vaddr| encode_metadata(vaddr, false).to_le_bytes())
+                        .chain(0u64.to_le_bytes())
                         .collect::<Vec<u8>>();
 
                     let nested_mr_name =
@@ -557,11 +553,11 @@ fn main() -> Result<(), String> {
                 microkit_tool::sdf::CapMap::StackFrames(map) => {
                     let other_pd_idx = map.pd_info().pd.expect("Filled in sdf.rs");
                     root_metadata[cap_map.slot() as usize] =
-                        encode_metadata(pd_stack_bases_by_idx[other_pd_idx], 0, false);
+                        encode_metadata(pd_stack_bases_by_idx[other_pd_idx], false);
                 }
                 microkit_tool::sdf::CapMap::IpcBufferFrame(_) => {
                     root_metadata[cap_map.slot() as usize] =
-                        encode_metadata(kernel_config.pd_ipc_buffer(), 0, false);
+                        encode_metadata(kernel_config.pd_ipc_buffer(), false);
                 }
                 _ => (),
             }
