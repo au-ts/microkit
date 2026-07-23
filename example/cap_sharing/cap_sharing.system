@@ -5,8 +5,16 @@
  SPDX-License-Identifier: BSD-2-Clause
 -->
 <system>
+    <memory_region name="dma_buffer" size="0xa000" page_size="0x1000" />
+    <memory_region name="page_table_seed" size="0x1000" page_size="0x1000" />
+
+    <io_address_space name="QEMU EDU" peripheral_id="0:4.0" domain_id="1">
+        <iomap mr="dma_buffer" iovaddr="0x10_0000" perms="rw" />
+    </io_address_space>
+
     <protection_domain name="primary" priority="1">
         <program_image path="cap_sharing.elf" />
+        <map mr="page_table_seed" vaddr="0x1000_0000" perms="rw" />
 
         <cspace>
             <!-- You can have the SC or TCB of another PD -->
@@ -16,6 +24,16 @@
             <!-- You can also have it of yourself -->
             <cap_sc  slot="3" pd="primary" />
             <cap_tcb slot="4" pd="primary" />
+
+            <!-- You can access your VSpace, memory-region frames, and an IOSpace. -->
+            <cap_vspace  slot="5" pd="primary" />
+            <cap_mr      slot="6" mr_name="dma_buffer" perms="rw" />
+            <cap_iospace slot="7" io_address_space="QEMU EDU" />
+
+            <!-- You can access frames belonging to another PD. -->
+            <cap_stack  slot="9"  pd="secondary" perms="r" />
+            <cap_ipcbuf slot="10" pd="secondary" perms="r" />
+            <cap_elf    slot="11" pd="secondary" perms="r" />
         </cspace>
     </protection_domain>
 

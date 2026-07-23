@@ -38,6 +38,8 @@ typedef seL4_MessageInfo_t microkit_msginfo;
 #define MICROKIT_MAX_CHANNEL_ID (MICROKIT_MAX_CHANNELS - 1)
 #define MICROKIT_MAX_IOPORT_ID MICROKIT_MAX_CHANNELS
 #define MICROKIT_PD_NAME_LENGTH 64
+#define MICROKIT_BIT(n) (((seL4_Word)1) << (n))
+#define MICROKIT_MASK(n) (MICROKIT_BIT(n) - 1)
 
 /* User provided functions */
 void init(void);
@@ -67,6 +69,10 @@ extern seL4_Word microkit_notifications;
 extern seL4_Word microkit_pps;
 extern seL4_Word microkit_ioports;
 extern seL4_Word microkit_root_cnode_size_bits;
+extern seL4_Word microkit_max_user_caps_bits;
+
+/* Symbol for storing metadata about a pds root cnode */
+extern seL4_Word microkit_root_cnode_metadata;
 
 /*
  * Output a single character on the debug console.
@@ -604,14 +610,143 @@ static inline void microkit_deferred_irq_ack(microkit_channel ch)
  * Convert the "slot" identifier from the system file for the extra user caps
  * <cspace> element into the seL4_CPtr at runtime.
  *
- * If the slot is not in the valid range of inputs (0 < slot < microkit_root_cnode_size_bits),
+ * If the slot is not in the valid range of inputs
+ * (0 < slot < MICROKIT_BIT(microkit_max_user_caps_bits)),
  * it returns the value `seL4_CapNull`.
  **/
 static inline seL4_CPtr microkit_cspace_root_slot_to_cptr(seL4_Word slot)
 {
-    if (slot == 0 || slot >= (1ULL << microkit_root_cnode_size_bits)) {
+    if (slot == 0 || slot >= MICROKIT_BIT(microkit_max_user_caps_bits)) {
         return seL4_CapNull;
     }
 
-    return slot << (seL4_WordBits - microkit_root_cnode_size_bits);
+    return slot << (seL4_WordBits - microkit_max_user_caps_bits);
+}
+
+#define MICROKIT_METADATA_PRESENT_BITS 1
+#define MICROKIT_METADATA_NESTED_BITS  1
+#define MICROKIT_METADATA_SIZE_BITS    6
+#define MICROKIT_METADATA_PAYLOAD_BITS \
+    (seL4_WordBits - MICROKIT_METADATA_PRESENT_BITS - MICROKIT_METADATA_NESTED_BITS - MICROKIT_METADATA_SIZE_BITS)
+
+#define MICROKIT_METADATA_PRESENT_MASK MICROKIT_BIT(seL4_WordBits - 1)
+#define MICROKIT_METADATA_NESTED_MASK  MICROKIT_BIT(MICROKIT_METADATA_PAYLOAD_BITS + MICROKIT_METADATA_SIZE_BITS)
+#define MICROKIT_METADATA_SIZE_SHIFT   MICROKIT_METADATA_PAYLOAD_BITS
+#define MICROKIT_METADATA_SIZE_MASK    MICROKIT_MASK(MICROKIT_METADATA_SIZE_BITS)
+#define MICROKIT_METADATA_PAYLOAD_MASK MICROKIT_MASK(MICROKIT_METADATA_PAYLOAD_BITS)
+
+static inline seL4_Bool microkit_metadata_unpack_with_flags(seL4_Word word, seL4_Word *payload, seL4_Word *size_bits,
+                                                            seL4_Bool *nested)
+{
+    if ((word & MICROKIT_METADATA_PRESENT_MASK) == 0) {
+        return seL4_False;
+    }
+
+    *nested = (word & MICROKIT_METADATA_NESTED_MASK) != 0;
+    *size_bits = (word >> MICROKIT_METADATA_SIZE_SHIFT) & MICROKIT_METADATA_SIZE_MASK;
+    *payload = word & MICROKIT_METADATA_PAYLOAD_MASK;
+    return seL4_True;
+}
+
+static inline seL4_Bool microkit_metadata_unpack(seL4_Word word, seL4_Word *payload, seL4_Word *size_bits)
+{
+    seL4_Bool ignored_nested;
+    return microkit_metadata_unpack_with_flags(word, payload, size_bits, &ignored_nested);
+}
+
+static inline seL4_Bool microkit_root_slot_to_metadata(seL4_Word slot, seL4_Word *metadata)
+{
+    if (slot == 0 || slot >= MICROKIT_BIT(microkit_max_user_caps_bits) || microkit_root_cnode_metadata == 0) {
+        return seL4_False;
+    }
+
+    seL4_Word *root_metadata = (seL4_Word *)microkit_root_cnode_metadata;
+    seL4_Word ignored_size_bits;
+    return microkit_metadata_unpack(root_metadata[slot], metadata, &ignored_size_bits);
+}
+
+static inline seL4_Bool microkit_root_slot_to_nested_metadata(seL4_Word root_slot, seL4_Word nested_slot,
+                                                              seL4_Word *metadata)
+{
+    if (root_slot == 0 || root_slot >= MICROKIT_BIT(microkit_max_user_caps_bits) ||
+        microkit_root_cnode_metadata == 0) {
+        return seL4_False;
+    }
+
+    seL4_Word *root_metadata = (seL4_Word *)microkit_root_cnode_metadata;
+    seL4_Word nested_size_bits;
+    seL4_Word nested_metadata_vaddr;
+    seL4_Bool nested;
+    if (!microkit_metadata_unpack_with_flags(root_metadata[root_slot], &nested_metadata_vaddr, &nested_size_bits,
+                                             &nested)) {
+        return seL4_False;
+    }
+    if (!nested || nested_slot >= MICROKIT_BIT(nested_size_bits)) {
+        return seL4_False;
+    }
+
+    seL4_Word *nested_metadata = (seL4_Word *)nested_metadata_vaddr;
+    seL4_Word ignored_size_bits;
+    return microkit_metadata_unpack(nested_metadata[nested_slot], metadata, &ignored_size_bits);
+}
+
+static inline seL4_Error microkit_page_get_address(seL4_CPtr frame, seL4_Word *paddr)
+{
+#if defined(CONFIG_ARCH_X86_64)
+    seL4_X86_Page_GetAddress_t ret = seL4_X86_Page_GetAddress(frame);
+#elif defined(CONFIG_ARCH_AARCH64)
+    seL4_ARM_Page_GetAddress_t ret = seL4_ARM_Page_GetAddress(frame);
+#elif defined(CONFIG_ARCH_RISCV)
+    seL4_RISCV_Page_GetAddress_t ret = seL4_RISCV_Page_GetAddress(frame);
+#else
+#error "Unsupported architecture for 'microkit_page_get_address'"
+#endif
+
+    if (ret.error != seL4_NoError) {
+        return ret.error;
+    }
+
+    *paddr = ret.paddr;
+    return seL4_NoError;
+}
+
+static inline seL4_Error microkit_page_map(seL4_CPtr frame, seL4_CPtr vspace, seL4_Word vaddr,
+                                           seL4_CapRights_t rights, seL4_Word attributes)
+{
+#if defined(CONFIG_ARCH_X86_64)
+    return seL4_X86_Page_Map(frame, vspace, vaddr, rights, attributes);
+#elif defined(CONFIG_ARCH_AARCH64)
+    return seL4_ARM_Page_Map(frame, vspace, vaddr, rights, attributes);
+#elif defined(CONFIG_ARCH_RISCV)
+    return seL4_RISCV_Page_Map(frame, vspace, vaddr, rights, attributes);
+#else
+#error "Unsupported architecture for 'microkit_page_map'"
+#endif
+}
+
+static inline seL4_Error microkit_io_page_map(seL4_CPtr frame, seL4_CPtr iospace, seL4_CapRights_t rights,
+                                              seL4_Word ioaddr)
+{
+#if defined(CONFIG_ARCH_X86_64) && defined(CONFIG_IOMMU)
+    return seL4_X86_Page_MapIO(frame, iospace, rights, ioaddr);
+#else
+    (void)frame;
+    (void)iospace;
+    (void)rights;
+    (void)ioaddr;
+    return seL4_InvalidArgument;
+#endif
+}
+
+static inline seL4_Error microkit_page_unmap(seL4_CPtr frame)
+{
+#if defined(CONFIG_ARCH_X86_64)
+    return seL4_X86_Page_Unmap(frame);
+#elif defined(CONFIG_ARCH_AARCH64)
+    return seL4_ARM_Page_Unmap(frame);
+#elif defined(CONFIG_ARCH_RISCV)
+    return seL4_RISCV_Page_Unmap(frame);
+#else
+#error "Unsupported architecture for 'microkit_page_unmap'"
+#endif
 }

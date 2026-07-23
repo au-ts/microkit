@@ -70,6 +70,12 @@ pub fn capdl_util_make_tcb_cap(tcb_obj_id: ObjectId) -> Cap {
     Cap::Tcb(cap::Tcb { object: tcb_obj_id })
 }
 
+pub fn capdl_util_make_iospace_cap(iospace_obj_id: ObjectId) -> Cap {
+    Cap::IOSpace(cap::IOSpace {
+        object: iospace_obj_id,
+    })
+}
+
 pub fn capdl_util_make_page_table_cap(pt_obj_id: ObjectId) -> Cap {
     Cap::PageTable(cap::PageTable { object: pt_obj_id })
 }
