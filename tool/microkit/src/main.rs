@@ -18,11 +18,11 @@ use microkit_tool::capdl::packaging::pack_spec_into_initial_task;
 use microkit_tool::elf::ElfFile;
 use microkit_tool::loader::Loader;
 use microkit_tool::report::write_report;
-use microkit_tool::sdf::{parse, SysMemoryRegion, SysMemoryRegionPaddr};
+use microkit_tool::sdf::{parse, Map, SysMap, SysMemoryRegion, SysMemoryRegionPaddr};
 use microkit_tool::sdk::{AvailableConfig, Sdk};
 use microkit_tool::sel4::{
     emulate_kernel_boot, emulate_kernel_boot_partial, AddressSpaceConstants, Arch, Config,
-    ObjectSizes, PlatformConfig, RiscvVirtualMemory,
+    ObjectSizes, PageSize, PlatformConfig, RiscvVirtualMemory,
 };
 use microkit_tool::symbols::patch_symbols;
 use microkit_tool::util::{
@@ -33,6 +33,7 @@ use microkit_tool::viper;
 use microkit_tool::{DisjointMemoryRegion, MemoryRegion};
 use std::collections::HashMap;
 use std::fs::{self, metadata};
+use std::ops::Range;
 use std::path::Path;
 
 const MAX_BUILD_ITERATION: usize = 3;
@@ -413,6 +414,176 @@ fn main() -> Result<(), String> {
 
     // The monitor is just a special PD
     system_elfs.push(monitor_elf);
+
+    let get_mr_size = |mr_name: &str| {
+        system
+            .memory_regions
+            .iter()
+            .find(|mr| &mr.name == mr_name)
+            .expect("validated in sdf.rs")
+            .size
+    };
+    let find_free_region = |regions: &mut [Range<u64>], size: u64, max_addr: u64| {
+        let page_size = PageSize::Small as u64;
+        let candidate_before = |possible_end| {
+            let end = round_down(possible_end, page_size);
+            let start = round_down(
+                end.checked_sub(size)
+                    .expect("Error: no free region in address space"),
+                page_size,
+            );
+            start..end
+        };
+
+        regions.sort_by_key(|range| range.start);
+        let mut possible_end = round_down(max_addr, page_size);
+        for region in regions.iter().rev() {
+            if possible_end <= region.start {
+                continue;
+            }
+            let candidate = candidate_before(possible_end);
+            if candidate.start >= region.end {
+                return candidate;
+            }
+            possible_end = round_down(region.start, page_size);
+        }
+        candidate_before(possible_end)
+    };
+    let encode_metadata = |vaddr: u64, nested: bool| -> u64 {
+        const PRESENT_BITS: u64 = 1;
+        const NESTED_BITS: u64 = 1;
+        const PAYLOAD_BITS: u64 = u64::BITS as u64 - PRESENT_BITS - NESTED_BITS;
+        const PRESENT_BIT: u64 = 1 << (PAYLOAD_BITS + 1);
+        const NESTED_BIT: u64 = 1 << PAYLOAD_BITS;
+        if vaddr >= (1 << PAYLOAD_BITS) {
+            panic!("Error: metadata vaddr {vaddr:#x} does not fit in {PAYLOAD_BITS} payload bits");
+        }
+        PRESENT_BIT | (if nested { NESTED_BIT } else { 0 }) | vaddr
+    };
+
+    let pd_elf_segments_by_idx: Vec<Vec<Range<u64>>> = system_elfs
+        .iter()
+        .map(|seg| {
+            seg.loadable_segments()
+                .iter()
+                .map(|seg| {
+                    let start = round_down(seg.virt_addr, PageSize::Small as u64);
+                    let end = round_up(seg.virt_addr + seg.mem_size(), PageSize::Small as u64);
+                    start..end
+                })
+                .collect()
+        })
+        .collect();
+
+    let mut pd_regions: Vec<Vec<Range<u64>>> = system
+        .protection_domains
+        .iter()
+        .map(|pd| {
+            pd.maps
+                .iter()
+                .map(|map| map.vaddr..map.vaddr + get_mr_size(map.mr_name()))
+                .chain(pd.page_tables.iter().map(|pt| pt.vaddr..pt.vaddr + pt.size))
+                .collect::<Vec<Range<u64>>>()
+        })
+        .collect();
+
+    for (idx, regions) in pd_regions.iter_mut().enumerate() {
+        regions.extend_from_slice(&pd_elf_segments_by_idx[idx]);
+        regions.sort_by_key(|range| range.start);
+    }
+
+    let pd_stack_bases_by_idx = system
+        .protection_domains
+        .iter()
+        .map(|pd| kernel_config.pd_stack_bottom(pd.stack_size))
+        .collect::<Vec<u64>>();
+
+    for (pd_idx, pd) in system.protection_domains.iter_mut().enumerate() {
+        let Some(cspace) = &mut pd.cspace else {
+            continue;
+        };
+
+        // create the MR with the bytes for the metadata
+        let mut root_metadata = vec![0u64; 1usize << cspace.size_bits];
+        for cap_map in cspace.cap_maps.iter() {
+            match cap_map {
+                microkit_tool::sdf::CapMap::ElfFrames(map) => {
+                    let other_pd_idx = map.pd_info().pd.expect("Filled in sdf.rs");
+                    let frame_vaddrs = system_elfs[other_pd_idx]
+                        .loadable_segments()
+                        .iter()
+                        .flat_map(|seg| {
+                            let start = round_down(seg.virt_addr, PageSize::Small as u64);
+                            let end =
+                                round_up(seg.virt_addr + seg.mem_size(), PageSize::Small as u64);
+                            (start..end).step_by(PageSize::Small as usize)
+                        })
+                        .collect::<Vec<u64>>();
+
+                    // The last entry is a zero terminator.
+                    let region_size_bytes = round_up(
+                        ((frame_vaddrs.len() + 1) * 8) as u64,
+                        PageSize::Small as u64,
+                    );
+
+                    let nested_cspace_region = find_free_region(
+                        &mut pd_regions[pd_idx],
+                        region_size_bytes,
+                        kernel_config.pd_map_max_vaddr(pd.stack_size),
+                    );
+                    pd_regions[pd_idx].push(nested_cspace_region.clone());
+
+                    root_metadata[cap_map.slot() as usize] =
+                        encode_metadata(nested_cspace_region.start, true);
+
+                    let nested_metadata = frame_vaddrs
+                        .into_iter()
+                        .flat_map(|vaddr| encode_metadata(vaddr, false).to_le_bytes())
+                        .chain(0u64.to_le_bytes())
+                        .collect::<Vec<u8>>();
+
+                    let nested_mr_name =
+                        format!("pd_{}_slot_{}_nested_metadata", pd.name, cap_map.slot());
+                    let nested_mr =
+                        SysMemoryRegion::new_mr(nested_mr_name.clone(), nested_metadata);
+                    system.memory_regions.push(nested_mr);
+                    pd.maps
+                        .push(SysMap::new_map(nested_mr_name, nested_cspace_region.start));
+                }
+                microkit_tool::sdf::CapMap::StackFrames(map) => {
+                    let other_pd_idx = map.pd_info().pd.expect("Filled in sdf.rs");
+                    root_metadata[cap_map.slot() as usize] =
+                        encode_metadata(pd_stack_bases_by_idx[other_pd_idx], false);
+                }
+                microkit_tool::sdf::CapMap::IpcBufferFrame(_) => {
+                    root_metadata[cap_map.slot() as usize] =
+                        encode_metadata(kernel_config.pd_ipc_buffer(), false);
+                }
+                _ => (),
+            }
+        }
+
+        let root_cspace_metadata_region = find_free_region(
+            &mut pd_regions[pd_idx],
+            round_up((1u64 << cspace.size_bits) * 8, PageSize::Small as u64),
+            kernel_config.pd_map_max_vaddr(pd.stack_size),
+        );
+
+        pd_regions[pd_idx].push(root_cspace_metadata_region.clone());
+        let root_metadata_bytes = root_metadata
+            .iter()
+            .flat_map(|vaddr| vaddr.to_le_bytes())
+            .collect::<Vec<u8>>();
+
+        cspace.metadata_vaddr = Some(root_cspace_metadata_region.start);
+        let root_mr_name = format!("pd_{}_slot_root_cspace_metadata", pd.name,);
+        let root_mr = SysMemoryRegion::new_mr(root_mr_name.clone(), root_metadata_bytes);
+        system.memory_regions.push(root_mr);
+        pd.maps.push(SysMap::new_map(
+            root_mr_name,
+            root_cspace_metadata_region.start,
+        ));
+    }
 
     let capdl_initialiser_orig = CapDLInitialiser::new(capdl_initialiser_elf);
 

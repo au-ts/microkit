@@ -73,6 +73,11 @@ pub enum AddressSpace {
     },
 }
 
+enum LeafAction {
+    Insert(Cap),
+    Reserve,
+}
+
 impl AddressSpace {
     pub fn root(&self) -> ObjectId {
         match self {
@@ -93,15 +98,41 @@ impl AddressSpace {
         frame_size_bytes: u64,
         addr: u64,
     ) -> Result<(), String> {
-        self.map_recursive(
+        self.map_or_reserve_recursive(
             spec_container,
             sel4_config,
             self.root(),
             self.get_root_level(sel4_config),
-            frame_cap,
             frame_size_bytes,
             addr,
+            LeafAction::Insert(frame_cap),
         )
+    }
+
+    pub fn map_page_tables_for_range(
+        &self,
+        spec_container: &mut CapDLSpecContainer,
+        sel4_config: &Config,
+        page_size_bytes: u64,
+        range: Range<u64>,
+    ) -> Result<(), String> {
+        let mut addr = range.start;
+        while addr < range.end {
+            self.map_or_reserve_recursive(
+                spec_container,
+                sel4_config,
+                self.root(),
+                self.get_root_level(sel4_config),
+                page_size_bytes,
+                addr,
+                LeafAction::Reserve,
+            )?;
+            addr = addr
+                .checked_add(page_size_bytes)
+                .ok_or_else(|| "Error: page_table address range overflows".to_string())?;
+        }
+
+        Ok(())
     }
 
     fn get_leaf_level(&self, sel4_config: &Config, page_size_bytes: u64) -> usize {
@@ -183,32 +214,41 @@ impl AddressSpace {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn map_recursive(
+    fn map_or_reserve_recursive(
         &self,
         spec_container: &mut CapDLSpecContainer,
         sel4_config: &Config,
         cur_level_obj_id: ObjectId,
         cur_level: usize,
-        frame_cap: Cap,
-        frame_size_bytes: u64,
+        page_size_bytes: u64,
         addr: u64,
+        leaf_action: LeafAction,
     ) -> Result<(), String> {
         if cur_level >= self.address_space_levels(sel4_config) {
             unreachable!("internal bug: recursed past the final address-space level");
         }
 
         let slot = self.get_level_index(sel4_config, cur_level, addr);
-        let leaf_level = self.get_leaf_level(sel4_config, frame_size_bytes);
+        let leaf_level = self.get_leaf_level(sel4_config, page_size_bytes);
 
         if cur_level == leaf_level {
-            self.insert_cap_into_level(
-                spec_container,
-                sel4_config,
-                cur_level_obj_id,
-                cur_level,
-                slot,
-                frame_cap,
-            )
+            match leaf_action {
+                LeafAction::Insert(frame_cap) => self.insert_cap_into_level(
+                    spec_container,
+                    sel4_config,
+                    cur_level_obj_id,
+                    cur_level,
+                    slot,
+                    frame_cap,
+                ),
+                LeafAction::Reserve => self.check_leaf_slot_empty(
+                    spec_container,
+                    sel4_config,
+                    cur_level_obj_id,
+                    cur_level,
+                    slot,
+                ),
+            }
         } else {
             let next_obj_id = self.map_intermediary_level_helper(
                 spec_container,
@@ -218,15 +258,52 @@ impl AddressSpace {
                 slot,
                 addr,
             )?;
-            self.map_recursive(
+            self.map_or_reserve_recursive(
                 spec_container,
                 sel4_config,
                 next_obj_id,
                 cur_level + 1,
-                frame_cap,
-                frame_size_bytes,
+                page_size_bytes,
                 addr,
+                leaf_action,
             )
+        }
+    }
+
+    fn check_leaf_slot_empty(
+        &self,
+        spec_container: &CapDLSpecContainer,
+        sel4_config: &Config,
+        cur_level_obj_id: ObjectId,
+        cur_level: usize,
+        cur_level_slot: usize,
+    ) -> Result<(), String> {
+        let object = &spec_container
+            .get_root_object(cur_level_obj_id)
+            .unwrap()
+            .object;
+
+        self.valid_level_object(object, sel4_config, cur_level)?;
+        let slots = object.slots().unwrap();
+
+        if slots
+            .iter()
+            .any(|cte| usize::from(cte.slot) == cur_level_slot)
+        {
+            Err(format!(
+                "address-space '{}': slot {} at level {} in object '{}' is already filled",
+                self.name(),
+                cur_level_slot,
+                cur_level,
+                spec_container
+                    .get_root_object(cur_level_obj_id)
+                    .unwrap()
+                    .name
+                    .as_ref()
+                    .unwrap()
+            ))
+        } else {
+            Ok(())
         }
     }
 

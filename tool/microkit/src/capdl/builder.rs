@@ -24,11 +24,11 @@ use crate::{
     },
     elf::ElfFile,
     sdf::{
-        CapMapType, CpuCore, Map, SystemDescription, BUDGET_DEFAULT, MONITOR_DOMAIN,
+        CapMap, CpuCore, FrameCapPerms, Map, SystemDescription, BUDGET_DEFAULT, MONITOR_DOMAIN,
         MONITOR_PD_NAME, MONITOR_PRIORITY,
     },
     sel4::{Arch, Config, PageSize},
-    util::{ranges_overlap, round_down, round_up},
+    util::{calculate_size_bits, ranges_overlap, round_down, round_up},
 };
 
 const FAULT_BADGE: u64 = 1 << 62;
@@ -93,11 +93,8 @@ const PD_BASE_VM_TCB_CAP: u64 = PD_BASE_PD_TCB_CAP + 64;
 const PD_BASE_VCPU_CAP: u64 = PD_BASE_VM_TCB_CAP + 64;
 const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
 
-/* This should be kept in sync with `PD_ROOT_CAP_BITS` in libmicrokit/include/microkit.h */
-const PD_ROOT_CAP_SIZE: u32 = 64;
-const PD_ROOT_CAP_BITS: u8 = PD_ROOT_CAP_SIZE.ilog2() as u8;
 pub const PD_CAP_SIZE: u32 = 512;
-const PD_CAP_BITS: u8 = PD_CAP_SIZE.ilog2() as u8;
+pub const PD_CAP_BITS: u8 = PD_CAP_SIZE.ilog2() as u8;
 const PD_SCHEDCONTEXT_EXTRA_SIZE: u64 = 256;
 const PD_SCHEDCONTEXT_EXTRA_SIZE_BITS: u64 = PD_SCHEDCONTEXT_EXTRA_SIZE.ilog2() as u64;
 
@@ -148,6 +145,7 @@ impl PDShadowCspace {
 struct ElfSpecResult {
     tcb: ObjectId,
     address_space: AddressSpace,
+    frames: Vec<ObjectId>,
 }
 
 pub struct CapDLSpecContainer {
@@ -225,6 +223,7 @@ impl CapDLSpecContainer {
         elf_id: usize,
         elf: &ElfFile,
     ) -> Result<ElfSpecResult, String> {
+        let mut frame_obj_ids: Vec<ObjectId> = Vec::new();
         // We assumes that ELFs and PDs have a one-to-one relationship. So for each ELF we create a VSpace.
         let address_space = create_vspace(self, sel4_config, pd_name);
         let vspace_obj_id = address_space.root();
@@ -289,6 +288,7 @@ impl CapDLSpecContainer {
                     None,
                     PageSize::Small.fixed_size_bits(sel4_config) as u8,
                 );
+                frame_obj_ids.push(frame_obj_id);
                 let frame_cap = capdl_util_make_frame_cap(
                     frame_obj_id,
                     segment.is_readable(),
@@ -348,6 +348,7 @@ impl CapDLSpecContainer {
         Ok(ElfSpecResult {
             tcb: self.add_root_object(tcb_obj),
             address_space,
+            frames: frame_obj_ids,
         })
     }
 }
@@ -619,6 +620,9 @@ pub fn build_capdl_spec(
     // This object keeps track of object IDs for various 'important' / nameable kernel objects for
     // each PD so that we can make various references to them at later steps.
     let mut pd_shadow_cspaces: HashMap<usize, PDShadowCspace> = HashMap::new();
+    let mut pd_stack_frames: HashMap<usize, Vec<ObjectId>> = HashMap::new();
+    let mut pd_ipc_frame: HashMap<usize, ObjectId> = HashMap::new();
+    let mut pd_elf_specs: HashMap<usize, ElfSpecResult> = HashMap::new();
 
     // Keep track of the global count of vCPU objects so we can bind them to the monitor for setting TCB name in debug config.
     // Only used on ARM and RISC-V as on x86-64 VMs share the same TCB as PD's which will have their TCB name set separately.
@@ -634,9 +638,13 @@ pub fn build_capdl_spec(
         let mut caps_to_insert_to_pd_cspace: Vec<CapTableEntry> = Vec::new();
 
         // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
-        let pd_elf_spec = spec_container
-            .add_elf_to_spec(kernel_config, &pd.name, pd.cpu, pd_global_idx, elf_obj)
-            .unwrap();
+        pd_elf_specs.insert(
+            pd_global_idx,
+            spec_container
+                .add_elf_to_spec(kernel_config, &pd.name, pd.cpu, pd_global_idx, elf_obj)
+                .unwrap(),
+        );
+        let pd_elf_spec = pd_elf_specs.get(&pd_global_idx).unwrap();
 
         let pd_tcb_obj_id = pd_elf_spec.tcb;
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec_container, pd_tcb_obj_id);
@@ -690,6 +698,24 @@ pub fn build_capdl_spec(
                 frames,
             )?;
         }
+        for page_table in &pd.page_tables {
+            pd_elf_spec
+                .address_space
+                .map_page_tables_for_range(
+                    &mut spec_container,
+                    kernel_config,
+                    page_table.page_size as u64,
+                    page_table.vaddr..page_table.vaddr + page_table.size,
+                )
+                .map_err(|err| {
+                    format!(
+                        "{err} while reserving page tables for PD '{}' range [{:#x}..{:#x})",
+                        pd.name,
+                        page_table.vaddr,
+                        page_table.vaddr + page_table.size
+                    )
+                })?;
+        }
 
         // Step 3-3a: Create and map in the IPC buffer
         let ipcbuf_frame_obj_id = capdl_util_make_frame_obj(
@@ -715,6 +741,13 @@ pub fn build_capdl_spec(
             TcbBoundSlot::IpcBuffer as u32,
             ipcbuf_frame_cap,
         ));
+
+        if pd_ipc_frame
+            .insert(pd_global_idx, ipcbuf_frame_obj_id)
+            .is_some()
+        {
+            panic!("Error: there should only be one ipcbuff per pd");
+        }
 
         // Step 3-3b: Create and map in the stack (bottom up)
         let mut cur_stack_vaddr = kernel_config.pd_stack_bottom(pd.stack_size);
@@ -743,6 +776,10 @@ pub fn build_capdl_spec(
                 )
                 .unwrap();
             cur_stack_vaddr += PageSize::Small as u64;
+            pd_stack_frames
+                .entry(pd_global_idx)
+                .or_insert(vec![])
+                .push(stack_frame_obj_id);
         }
 
         // Step 3-4 Create Scheduling Context
@@ -1065,14 +1102,20 @@ pub fn build_capdl_spec(
             PD_CAP_BITS,
             caps_to_insert_to_pd_cspace,
         );
+
+        let root_cnode_size_bits = match &pd.cspace {
+            Some(cspace) => cspace.size_bits,
+            None => 1,
+        } as u8;
+
         let pd_guard_size =
-            kernel_config.cap_address_bits - PD_CAP_BITS as u64 - PD_ROOT_CAP_BITS as u64;
+            kernel_config.cap_address_bits - PD_CAP_BITS as u64 - root_cnode_size_bits as u64;
         let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, pd_guard_size as u8);
 
         let pd_root_cnode_obj_id = capdl_util_make_cnode_obj(
             &mut spec_container,
             &(pd.name.clone() + "_root"),
-            PD_ROOT_CAP_BITS,
+            root_cnode_size_bits,
             Vec::new(),
         );
         // leave the guard size root cnode as 0
@@ -1251,26 +1294,143 @@ pub fn build_capdl_spec(
             &mr_name_to_frames[&iomap.mr],
         )?;
     }
+    for page_table in system.io_page_tables.iter() {
+        let address_space = iospace_by_device
+            .entry(&page_table.name)
+            .or_insert_with(|| {
+                create_iospace(
+                    &mut spec_container,
+                    kernel_config,
+                    &page_table.name,
+                    page_table.identifier,
+                    page_table.domain_id,
+                )
+            });
+        address_space
+            .map_page_tables_for_range(
+                &mut spec_container,
+                kernel_config,
+                page_table.page_size as u64,
+                page_table.iovaddr..page_table.iovaddr + page_table.size,
+            )
+            .map_err(|err| {
+                format!(
+                    "{err} while reserving IO page tables for '{}' range [{:#x}..{:#x})",
+                    page_table.name,
+                    page_table.iovaddr,
+                    page_table.iovaddr + page_table.size
+                )
+            })?;
+    }
 
     // *********************************
     // Step 6. Handle extra cap mappings
     // *********************************
-    for (pd_dest_idx, pd) in system.protection_domains.iter().enumerate() {
-        for cap_map in pd.cap_maps.iter() {
-            // TODO: Once we add more CapMap options, they might not all have
-            // the pd_name. But for now, they do.
-            let pd_src_shadow_cspace = &pd_shadow_cspaces[&cap_map.pd.unwrap()];
 
-            let cap_map_obj = match cap_map.cap_type {
-                CapMapType::Tcb => capdl_util_make_tcb_cap(pd_src_shadow_cspace.tcb),
-                CapMapType::Sc => capdl_util_make_sc_cap(pd_src_shadow_cspace.sched_context),
-                CapMapType::VSpace => capdl_util_make_page_table_cap(pd_src_shadow_cspace.vspace),
+    for (pd_dest_idx, pd) in system.protection_domains.iter().enumerate() {
+        let Some(cspace) = &pd.cspace else { continue };
+        for cap_map in cspace.cap_maps.iter() {
+            let cap_map_obj = match cap_map {
+                CapMap::IOSpace(map) => {
+                    let addr_space_root = iospace_by_device
+                        .get(map.name.as_str())
+                        .expect("Already validated in sdf.rs")
+                        .root();
+                    capdl_util_make_iospace_cap(addr_space_root)
+                }
+                CapMap::Tcb(map) => {
+                    let pd_src_shadow_cspace =
+                        &pd_shadow_cspaces[&map.pd.expect("Already validated in sdf.rs")];
+                    capdl_util_make_tcb_cap(pd_src_shadow_cspace.tcb)
+                }
+                CapMap::Sc(map) => {
+                    let pd_src_shadow_cspace =
+                        &pd_shadow_cspaces[&map.pd.expect("Already validated in sdf.rs")];
+
+                    capdl_util_make_sc_cap(pd_src_shadow_cspace.sched_context)
+                }
+                CapMap::VSpace(map) => {
+                    let pd_src_shadow_cspace =
+                        &pd_shadow_cspaces[&map.pd.expect("Already validated in sdf.rs")];
+                    capdl_util_make_page_table_cap(pd_src_shadow_cspace.vspace)
+                }
+                CapMap::MemoryRegionFrames(map) => {
+                    let mr_frames = &mr_name_to_frames[&map.mr_name];
+                    let size_bits = calculate_size_bits(mr_frames.len() as u64).max(1);
+                    fill_cnode_with_frames(
+                        &mut spec_container,
+                        kernel_config,
+                        mr_frames,
+                        size_bits,
+                        map.perms,
+                        cspace.size_bits as u8,
+                        &format!("pd_{}_slot_{}_mr_{}", pd.name, cap_map.slot(), map.mr_name),
+                    )?
+                }
+                CapMap::ElfFrames(map) => {
+                    let pd_src_frame_obj_ids = pd_elf_specs
+                        .get(&map.pd_info().pd.expect("Already validated in sdf.rs"))
+                        .expect("created above");
+
+                    let size_bits =
+                        calculate_size_bits(pd_src_frame_obj_ids.frames.len() as u64).max(1);
+
+                    fill_cnode_with_frames(
+                        &mut spec_container,
+                        kernel_config,
+                        &pd_src_frame_obj_ids.frames,
+                        size_bits,
+                        map.perms,
+                        cspace.size_bits as u8,
+                        &format!(
+                            "src_pd_{}_elf_frames_for_dst_{}_slot_{}",
+                            map.pd_info.pd_name,
+                            pd.name,
+                            cap_map.slot()
+                        ),
+                    )?
+                }
+                CapMap::StackFrames(map) => {
+                    let pd_src_frame_obj_ids = pd_stack_frames
+                        .get(&map.pd_info().pd.expect("Already validated in sdf.rs"))
+                        .expect("created above");
+
+                    let size_bits = calculate_size_bits(pd_src_frame_obj_ids.len() as u64).max(1);
+
+                    fill_cnode_with_frames(
+                        &mut spec_container,
+                        kernel_config,
+                        &pd_src_frame_obj_ids,
+                        size_bits,
+                        map.perms,
+                        cspace.size_bits as u8,
+                        &format!(
+                            "src_pd_{}_stack_frames_for_dst_{}_slot_{}",
+                            map.pd_info.pd_name,
+                            pd.name,
+                            cap_map.slot()
+                        ),
+                    )?
+                }
+                CapMap::IpcBufferFrame(map) => {
+                    let pd_src_frame_obj_id = pd_ipc_frame
+                        .get(&map.pd_info().pd.expect("Already validated in sdf.rs"))
+                        .expect("created above");
+
+                    capdl_util_make_frame_cap(
+                        *pd_src_frame_obj_id,
+                        map.perms.read(),
+                        map.perms.write(),
+                        false,
+                        true,
+                    )
+                }
             };
 
             // Map this into the destination pd's cspace and the specified slot.
             pd_shadow_cspaces[&pd_dest_idx].insert_cap_into_root_cnode(
                 &mut spec_container,
-                cap_map.slot as u32,
+                cap_map.slot() as u32,
                 cap_map_obj,
             );
         }
@@ -1388,4 +1548,45 @@ pub fn build_capdl_spec(
         });
 
     Ok(spec_container)
+}
+
+fn fill_cnode_with_frames(
+    spec_container: &mut CapDLSpecContainer,
+    kernel_config: &Config,
+    frames: &[ObjectId],
+    size_bits: u8,
+    perms: FrameCapPerms,
+    root_cnode_bits: u8,
+    cnode_name: &str,
+) -> Result<Cap, String> {
+    if root_cnode_bits as u64 + size_bits as u64 > kernel_config.cap_address_bits {
+        return Err(format!(
+            "Attempting to create a nested cnode of size_bits {} below the root cnode of size_bits {}",
+            size_bits, root_cnode_bits
+        ));
+    }
+    // The execute and cached fields are considered attributes by seL4 and from my understanding @cazb2
+    // do not get masked when invoking the frame thus are redundant. Since they are not fixed at runtime.
+    let mut slot = 0;
+    let slots = frames
+        .iter()
+        .map(|&frame_obj_id| {
+            capdl_util_make_frame_cap(frame_obj_id, perms.read(), perms.write(), false, true)
+        })
+        .map(|cap| {
+            let cte = capdl_util_make_cte(slot, cap);
+            slot += 1;
+            cte
+        })
+        .collect();
+
+    let mr_cnode_obj = capdl_util_make_cnode_obj(spec_container, cnode_name, size_bits, slots);
+
+    // Configure the CNode to simulate array indexing.
+    let mr_guard_size = kernel_config.cap_address_bits - root_cnode_bits as u64 - size_bits as u64;
+    Ok(capdl_util_make_cnode_cap(
+        mr_cnode_obj,
+        0,
+        mr_guard_size as u8,
+    ))
 }

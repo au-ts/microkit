@@ -75,9 +75,12 @@ $(IMAGE_FILE) $(KERNEL_32B) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)
 ifeq ($(ARCH),x86_64)
 qemu: $(KERNEL_32B) $(IMAGE_FILE)
 	qemu-system-x86_64                                \
+		-machine q35                                   \
 		-cpu qemu64,+fsgsbase,+pdpe1gb,+xsaveopt,+xsave \
 		-m "1G"                                         \
 		-display none                                   \
+		-device intel-iommu,intremap=off,aw-bits=39     \
+		-device edu,dma_mask=0xffffffffffffffff,bus=pcie.0,addr=0x04.0 \
 		-serial mon:stdio                               \
 		-kernel $(KERNEL_32B)                           \
 		-initrd $(IMAGE_FILE)

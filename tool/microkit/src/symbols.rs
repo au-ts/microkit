@@ -135,6 +135,27 @@ pub fn patch_symbols(
             .write_symbol("microkit_ioports", &pd.ioport_bits().to_le_bytes())
             .unwrap();
 
+        elf_obj
+            .write_symbol(
+                "microkit_max_user_caps_bits",
+                &pd.cspace
+                    .as_ref()
+                    .map_or(0u64, |cspace| cspace.size_bits)
+                    .to_le_bytes(),
+            )
+            .unwrap();
+        elf_obj
+            .write_symbol(
+                "microkit_root_cnode_metadata",
+                &pd.cspace
+                    .as_ref()
+                    .map_or(0u64, |cspace| {
+                        cspace.metadata_vaddr.expect("filled in main.rs")
+                    })
+                    .to_le_bytes(),
+            )
+            .unwrap();
+
         let mut symbols_to_write: Vec<(&String, u64)> = Vec::new();
         for setvar in pd.setvars.iter() {
             // Check that the symbol exists in the ELF
