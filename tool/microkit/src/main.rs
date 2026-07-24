@@ -21,7 +21,7 @@ use microkit_tool::sel4::{
     emulate_kernel_boot, emulate_kernel_boot_partial, Arch, Config, PlatformConfig,
     RiscvVirtualMemory,
 };
-use microkit_tool::symbols::patch_symbols;
+use microkit_tool::symbols::{patch_symbols, pd_save_symbols};
 use microkit_tool::util::{
     get_full_path, human_size_strict, json_str, json_str_as_bool, json_str_as_u64, round_down,
     round_up,
@@ -685,6 +685,11 @@ fn main() -> Result<(), String> {
             eprintln!("ERROR: {err}");
             std::process::exit(1);
         }
+        let res = pd_save_symbols(&kernel_config, &mut system_elfs, &system);
+        let early_return = match res {
+            Ok(i) => println!("We made it through symbol writing"),
+            Err(i) => panic!("We failed symbol writing"),
+        };
 
         let mut spec_container = build_capdl_spec(&kernel_config, &mut system_elfs, &system)?;
         pack_spec_into_initial_task(

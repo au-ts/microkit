@@ -1,3 +1,4 @@
+
 //
 // Copyright 2025, UNSW
 //
@@ -5,6 +6,11 @@
 //
 
 use std::{cmp::min, collections::HashMap};
+
+// for saving the symbols:
+use std::fs::OpenOptions;
+use std::io::BufWriter;
+use std::io::Write;
 
 use crate::{
     elf::ElfFile,
@@ -179,6 +185,94 @@ pub fn patch_symbols(
                 .write_symbol(sym_name, &value.to_le_bytes())
                 .unwrap();
         }
+    }
+
+    Ok(())
+}
+
+// this is just based on the old version of patch symbols
+pub fn pd_save_symbols(
+    kernel_config: &Config,
+    pd_elf_files: &mut [ElfFile],
+    system: &SystemDescription,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut mr_name_to_desc: HashMap<&String, &SysMemoryRegion> = HashMap::new();
+    for mr in system.memory_regions.iter() {
+        mr_name_to_desc.insert(&mr.name, mr);
+    }
+
+    for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
+        let name = pd.name.as_bytes();
+        let name_length = min(name.len(), PD_MAX_NAME_LENGTH);
+        let sym_filename = format!("{}_symbols.txt", pd.name);
+
+        let sym_file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(sym_filename)?;
+
+        let mut sym_writer = BufWriter::new(sym_file);
+
+        let mut notification_bits: u64 = 0;
+        let mut pp_bits: u64 = 0;
+
+        for channel in system.channels.iter() {
+            if channel.end_a.pd == pd_global_idx {
+                if channel.end_a.notify {
+                    notification_bits |= 1 << channel.end_a.id;
+                }
+                if channel.end_a.pp {
+                    pp_bits |= 1 << channel.end_a.id;
+                }
+            }
+            if channel.end_b.pd == pd_global_idx {
+                if channel.end_b.notify {
+                    notification_bits |= 1 << channel.end_b.id;
+                }
+                if channel.end_b.pp {
+                    pp_bits |= 1 << channel.end_b.id;
+                }
+            }
+        }
+
+        let mut emit = |symbol: &str, value: &[u8]| -> Result<(), Box<dyn std::error::Error>> {
+            let hex: String = value.iter()
+                .map(|b| format!("{:02x}", b))
+                .collect();
+
+            writeln!(sym_writer, "{} {}", symbol, hex)?;
+            Ok(())
+        };
+
+        emit("microkit_irqs", &pd.irq_bits().to_le_bytes())?;
+        emit("microkit_notifications", &notification_bits.to_le_bytes())?;
+        emit("microkit_pps", &pp_bits.to_le_bytes())?;
+        emit("microkit_name", &name[..name_length])?;
+        emit("microkit_passive", &[pd.passive as u8])?;
+
+        
+
+        let elf_obj = &mut pd_elf_files[pd_global_idx];
+        let mut symbols_to_write: Vec<(&String, u64)> = Vec::new();
+        for setvar in pd.setvars.iter() {
+            let data = match &setvar.kind {
+                sdf::SysSetVarKind::Size { mr } => mr_name_to_desc[mr].size,
+                sdf::SysSetVarKind::Vaddr { address } => *address,
+                sdf::SysSetVarKind::Paddr { region } => {
+                    mr_name_to_desc[region].paddr().unwrap_or_default()
+                }
+                sdf::SysSetVarKind::Id { id } => *id,
+                sdf::SysSetVarKind::X86IoPortAddr { address } => *address,
+                sdf::SysSetVarKind::PrefillSize { mr } => {
+                    mr_name_to_desc[mr].prefill_bytes.as_ref().unwrap().len() as u64
+                }
+            };
+
+            emit(&setvar.symbol, &data.to_le_bytes())?;
+        }
+
+        sym_writer.flush()?;
     }
 
     Ok(())
