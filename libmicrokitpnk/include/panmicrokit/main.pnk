@@ -312,7 +312,8 @@ fun handler_loop() {
     var panseL4_Word irqs_to_ack = patched_microkit_irqs;
     /@ assert apply_bv64_lshr0_sem(irqs_to_ack_orig) @/
     while (irqs_to_ack != 0) {
-        /@ invariant (0 <= irq_index) &&
+        /@ invariant acc(heap[0]) &&
+                     (0 <= irq_index) &&
                      irq_index <= 64 &&
                      bounded64(irqs_to_ack) &&
                      irqs_to_ack == builtin_lshr(irqs_to_ack_orig, irq_index) &&
