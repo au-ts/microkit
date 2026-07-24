@@ -115,12 +115,14 @@ export fun panseL4_Error microkit_pd_restart(microkit_child pd, 1 entry_point) {
 }
 
 export fun microkit_msginfo microkit_ppcall(microkit_channel ch, microkit_msginfo msginfo) {
+    /@ requires acc(heap[LIBSEL4_FFI_OFFSET]) @/
     /@ requires mk_is_ppcall_target(ch) @/
     /@ requires IsAbsMsgInfo(msginfo) @/
 
     /@ requires user_acc_ghost_state(userGhost()) @/
     /@ requires user_guard_microkit_ppcall(ch, msginfo, userGhost()) @/
 
+    /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
     /@ ensures IsAbsMsgInfo(msginfo) @/
 
     /@ ensures user_acc_ghost_state(userGhost()) @/
