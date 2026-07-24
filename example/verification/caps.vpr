@@ -1,0 +1,258 @@
+///////////////////////////////////////////////////////////////////////////////
+// panmicrokit: axiomatization of cap constraints                            //
+///////////////////////////////////////////////////////////////////////////////
+
+domain AbstractCaps {
+  function mk_is_protected_source(x: Int): Bool
+  function mk_is_ppcall_target(x: Int): Bool
+  function mk_is_notified_source(x: Int): Bool
+  function mk_is_notify_target(x: Int): Bool
+  function mk_is_irq_channel(x: Int): Bool
+  function mk_is_child(x: Int): Bool
+
+  function pansel4_has_cap(x: Int): Bool
+  function pansel4_has_endpoint_cap(x: Int): Bool
+  function pansel4_has_notification_cap(x: Int): Bool
+  function pansel4_has_reply_cap(x: Int): Bool
+  function pansel4_has_page_table_cap(x: Int): Bool
+  function pansel4_has_irq_handler_cap(x: Int): Bool
+  function pansel4_has_tcb_cap(x: Int): Bool
+  function pansel4_has_vcpu_cap(x: Int): Bool
+  function pansel4_has_ioport_cap(x: Int): Bool
+  function pansel4_has_arm_smc_cap(x: Int): Bool
+
+  function mem_readable(x: Int): Bool
+  function mem_writeable(x: Int): Bool
+
+  axiom protected_source_bounds {
+    forall x: Int :: { mk_is_protected_source(x) }
+      mk_is_protected_source(x) ==> 0 <= x && x < 62
+  }
+
+  axiom ppcall_target_bounds {
+    forall x: Int :: { mk_is_ppcall_target(x) }
+      mk_is_ppcall_target(x) ==> 0 <= x && x < 62
+  }
+
+  axiom notified_source_bounds {
+    forall x: Int :: { mk_is_notified_source(x) }
+      mk_is_notified_source(x) ==> 0 <= x && x < 62
+  }
+
+  axiom notify_target_bounds {
+    forall x: Int :: { mk_is_notify_target(x) }
+      mk_is_notify_target(x) ==> 0 <= x && x < 62
+  }
+
+  axiom irq_channel_bounds {
+    forall x: Int :: { mk_is_irq_channel(x) }
+      mk_is_irq_channel(x) ==> 0 <= x && x < 62
+  }
+
+  axiom child_bounds {
+    forall x: Int :: { mk_is_child(x) }
+      mk_is_child(x) ==> 0 <= x && x < 63
+  }
+
+  axiom protected_source_not_ppcall_target {
+    forall x: Int :: { mk_is_protected_source(x) }
+      mk_is_protected_source(x) ==> !mk_is_ppcall_target(x)
+  }
+
+  axiom ppcall_target_not_protected_source {
+    forall x: Int :: { mk_is_ppcall_target(x) }
+      mk_is_ppcall_target(x) ==> !mk_is_protected_source(x)
+  }
+
+  axiom irq_channel_roles {
+    forall x: Int :: { mk_is_irq_channel(x) }
+      mk_is_irq_channel(x) ==>
+        mk_is_notified_source(x) &&
+        !mk_is_protected_source(x) &&
+        !mk_is_ppcall_target(x) &&
+        !mk_is_notify_target(x)
+  }
+
+  axiom cap_pointer_bounds {
+    forall x: Int :: { pansel4_has_cap(x) }
+      pansel4_has_cap(x) ==> bounded64(x)
+  }
+
+  axiom endpoint_cap_exists {
+    forall x: Int :: { pansel4_has_endpoint_cap(x) }
+      pansel4_has_endpoint_cap(x) ==> pansel4_has_cap(x)
+  }
+
+  axiom notification_cap_exists {
+    forall x: Int :: { pansel4_has_notification_cap(x) }
+      pansel4_has_notification_cap(x) ==> pansel4_has_cap(x)
+  }
+
+  axiom reply_cap_exists {
+    forall x: Int :: { pansel4_has_reply_cap(x) }
+      pansel4_has_reply_cap(x) ==> pansel4_has_cap(x)
+  }
+
+  axiom page_table_cap_exists {
+    forall x: Int :: { pansel4_has_page_table_cap(x) }
+      pansel4_has_page_table_cap(x) ==> pansel4_has_cap(x)
+  }
+
+  axiom irq_handler_cap_exists {
+    forall x: Int :: { pansel4_has_irq_handler_cap(x) }
+      pansel4_has_irq_handler_cap(x) ==> pansel4_has_cap(x)
+  }
+
+  axiom tcb_cap_exists {
+    forall x: Int :: { pansel4_has_tcb_cap(x) }
+      pansel4_has_tcb_cap(x) ==> pansel4_has_cap(x)
+  }
+
+  axiom vcpu_cap_exists {
+    forall x: Int :: { pansel4_has_vcpu_cap(x) }
+      pansel4_has_vcpu_cap(x) ==> pansel4_has_cap(x)
+  }
+
+  axiom ioport_cap_exists {
+    forall x: Int :: { pansel4_has_ioport_cap(x) }
+      pansel4_has_ioport_cap(x) ==> pansel4_has_cap(x)
+  }
+
+  axiom arm_smc_cap_exists {
+    forall x: Int :: { pansel4_has_arm_smc_cap(x) }
+      pansel4_has_arm_smc_cap(x) ==> pansel4_has_cap(x)
+  }
+
+  axiom fixed_caps {
+    (pansel4_has_endpoint_cap(1) ||
+      pansel4_has_notification_cap(1)) &&
+    pansel4_has_endpoint_cap(2) &&
+    pansel4_has_page_table_cap(3) &&
+    pansel4_has_reply_cap(4)
+  }
+
+  axiom protected_source_input_cap {
+    forall x: Int :: { mk_is_protected_source(x) }
+      mk_is_protected_source(x) ==>
+        pansel4_has_endpoint_cap(1)
+  }
+
+  axiom child_input_cap {
+    forall x: Int :: { mk_is_child(x) }
+      mk_is_child(x) ==>
+        pansel4_has_endpoint_cap(1)
+  }
+
+  axiom notify_target_cap {
+    forall x: Int :: { mk_is_notify_target(x) }
+      mk_is_notify_target(x) ==>
+        pansel4_has_notification_cap(10 + x)
+  }
+
+  axiom notify_cap_slots {
+    forall x: Int :: { mk_is_notify_target(x) }
+      0 <= x && x < 64 ==>
+        (pansel4_has_cap(10 + x) <==> mk_is_notify_target(x))
+  }
+
+  axiom ppcall_target_cap {
+    forall x: Int :: { mk_is_ppcall_target(x) }
+      mk_is_ppcall_target(x) ==>
+        pansel4_has_endpoint_cap(74 + x)
+  }
+
+  axiom ppcall_cap_slots {
+    forall x: Int :: { mk_is_ppcall_target(x) }
+      0 <= x && x < 64 ==>
+        (pansel4_has_cap(74 + x) <==> mk_is_ppcall_target(x))
+  }
+
+  axiom irq_channel_cap {
+    forall x: Int :: { mk_is_irq_channel(x) }
+      mk_is_irq_channel(x) ==>
+        pansel4_has_irq_handler_cap(138 + x)
+  }
+
+  axiom irq_cap_slots {
+    forall x: Int :: { mk_is_irq_channel(x) }
+      0 <= x && x < 64 ==>
+        (pansel4_has_cap(138 + x) <==> mk_is_irq_channel(x))
+  }
+
+  axiom child_tcb_cap {
+    forall x: Int :: { mk_is_child(x) }
+      mk_is_child(x) ==>
+        pansel4_has_tcb_cap(202 + x)
+  }
+
+  axiom child_tcb_cap_slots {
+    forall x: Int :: { mk_is_child(x) }
+      0 <= x && x < 64 ==>
+        (pansel4_has_cap(202 + x) <==> mk_is_child(x))
+  }
+
+  axiom readable_address_bounds {
+    forall x: Int :: { mem_readable(x) }
+      mem_readable(x) ==> bounded64(x)
+  }
+
+  axiom writeable_is_readable {
+    forall x: Int :: { mem_writeable(x) }
+      mem_writeable(x) ==> mem_readable(x)
+  }
+}
+
+define f_mk_is_protected_source(heap,gv,x)
+  (mk_is_protected_source(x))
+
+define f_mk_is_ppcall_target(heap,gv,x)
+  (mk_is_ppcall_target(x))
+
+define f_mk_is_notified_source(heap,gv,x)
+  (mk_is_notified_source(x))
+
+define f_mk_is_notify_target(heap,gv,x)
+  (mk_is_notify_target(x))
+
+define f_mk_is_irq_channel(heap,gv,x)
+  (mk_is_irq_channel(x))
+
+define f_mk_is_child(heap,gv,x)
+  (mk_is_child(x))
+
+define f_pansel4_has_cap(heap,gv,x)
+  (pansel4_has_cap(x))
+
+define f_pansel4_has_endpoint_cap(heap,gv,x)
+  (pansel4_has_endpoint_cap(x))
+
+define f_pansel4_has_notification_cap(heap,gv,x)
+  (pansel4_has_notification_cap(x))
+
+define f_pansel4_has_reply_cap(heap,gv,x)
+  (pansel4_has_reply_cap(x))
+
+define f_pansel4_has_page_table_cap(heap,gv,x)
+  (pansel4_has_page_table_cap(x))
+
+define f_pansel4_has_irq_handler_cap(heap,gv,x)
+  (pansel4_has_irq_handler_cap(x))
+
+define f_pansel4_has_tcb_cap(heap,gv,x)
+  (pansel4_has_tcb_cap(x))
+
+define f_pansel4_has_vcpu_cap(heap,gv,x)
+  (pansel4_has_vcpu_cap(x))
+
+define f_pansel4_has_ioport_cap(heap,gv,x)
+  (pansel4_has_ioport_cap(x))
+
+define f_pansel4_has_arm_smc_cap(heap,gv,x)
+  (pansel4_has_arm_smc_cap(x))
+
+define f_mem_readable(heap,gv,x)
+  (mem_readable(x))
+
+define f_mem_writeable(heap,gv,x)
+  (mem_writeable(x))
+// END abstract cap predicates
