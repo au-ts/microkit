@@ -9,6 +9,7 @@
 
 #pragma once
 
+#define __thread
 #include <sel4/sel4.h>
 
 typedef unsigned int microkit_channel;
@@ -508,4 +509,29 @@ static inline void microkit_deferred_irq_ack(microkit_channel ch)
     microkit_have_signal = seL4_True;
     microkit_signal_msg = seL4_MessageInfo_new(IRQAckIRQ, 0, 0, 0);
     microkit_signal_cap = (BASE_IRQ_CAP + ch);
+}
+
+
+// this also assumes that I have the tcb caps mapped in
+static inline void microkit_pd_reload(microkit_child pd, seL4_Word entry_point, seL4_Word stack_ptr)
+{
+    seL4_Error err;
+    seL4_UserContext context = {
+        .pc = entry_point,
+        .sp = stack_ptr,
+    };
+
+    // I might be writing more than one register
+    err = seL4_TCB_WriteRegisters(
+        BASE_TCB_CAP + pd,
+        seL4_True,
+        0, /* No flags */
+        2, /* writing 2 registers as we now include a stack ptr */
+        &context
+    );
+
+    if (err != seL4_NoError) {
+        microkit_dbg_puts("microkit_pd_restart: error writing TCB registers\n");
+        microkit_internal_crash(err);
+    }
 }
