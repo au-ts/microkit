@@ -10,6 +10,7 @@ use std::{
     collections::HashMap,
 };
 
+use rkyv::collections::swiss_table::table;
 use sel4_capdl_initializer_types::{
     object, CapTableEntry, Fill, FillEntry, FillEntryContent, NamedObject, Object, ObjectId, Spec,
     Word,
@@ -776,7 +777,7 @@ pub fn build_capdl_spec(
         ));
 
         // Step 3-6 Create cap to Monitor's endpoint for passive PDs.
-        if pd.passive {
+        if pd.passive || pd.name == "reloader" {
             let pd_monitor_ep_cap = capdl_util_make_endpoint_cap(
                 mon_fault_ep_obj_id,
                 true,
@@ -1301,6 +1302,7 @@ pub fn build_capdl_spec(
                     }
                 };
             }
+
             // Finally, patch the table_metadata into the elf
             #[allow(unused_mut)]
             let mut elf_obj = &mut elfs[pd_global_idx];

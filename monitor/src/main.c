@@ -718,6 +718,8 @@ static void aarch64_print_vm_fault()
 }
 #endif
 
+#define RELOADER_PD_ID 0
+
 static void monitor(void)
 {
     for (;;) {
@@ -730,6 +732,27 @@ static void monitor(void)
 
         seL4_Word pd_id = badge - 1;
         seL4_Word tcb_cap = BASE_PD_TCB_CAP + pd_id;
+
+        if (pd_id == RELOADER_PD_ID) {
+            puts("we recieved a message now!\n");
+            int target_pd = seL4_GetMR(0);
+            tcb_cap = BASE_PD_TCB_CAP + target_pd;
+            puts("\nMON|INFO: PD '");
+            puts(pd_names[target_pd]);
+
+            err = seL4_SchedContext_UnbindObject(BASE_SCHED_CONTEXT_CAP + target_pd, BASE_NOTIFICATION_CAP + target_pd);
+            err = seL4_SchedContext_Bind(BASE_SCHED_CONTEXT_CAP + target_pd, tcb_cap);
+            if (err != seL4_NoError) {
+                puts("MON|INFO: PD '");
+                puts(pd_names[target_pd]);
+                puts("MON|ERROR: the call from the reloader did not work");
+            } else {
+                puts("MON|INFO: PD '");
+                puts(pd_names[target_pd]);
+                puts("' is ready to go back into init again!\n");
+            }
+            continue; // I need to reply to unblock the reloader now
+        }
 
         if (label == seL4_Fault_NullFault && pd_id < MAX_PDS) {
             /* This is a request from our PD to become passive */
