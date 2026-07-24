@@ -80,11 +80,7 @@ define f_user_acc_ghost_state(heap, gv, state)
 
 define user_guard_microkit_notify(ch, state)
 (
-    true
-    // Pump may notify anybody at any time. This should break any global proof
-    // attempt trying to show that `pump.handled_cmds` is at all times a subset
-    // of `keypad.issued_cmds`. The right guard would rule out notifications
-    // while `pump.has_control`
+    true // May notify anybody at any time.
 )
 define f_user_guard_microkit_notify(heap, gv, ch, state)
   (user_guard_microkit_notify(ch, state))
