@@ -312,14 +312,35 @@ fun handler_loop() {
     var panseL4_Word irqs_to_ack = patched_microkit_irqs;
     /@ assert apply_bv64_lshr0_sem(irqs_to_ack_orig) @/
     while (irqs_to_ack != 0) {
-        /@ invariant acc(heap[LIBSEL4_FFI_OFFSET]) &&
+        /@ invariant acc(gv.microkit_have_signal) &&
+                     acc(gv.microkit_signal_cap) &&
+                     acc(gv.microkit_signal_msg) &&
+                     acc(heap[LIBSEL4_FFI_OFFSET]) &&
+                     (
+                       (gv.microkit_have_signal == 0) ||
+                       IsAbsMsgInfo(gv.microkit_signal_msg)
+                     ) &&
+                     ( 
+                       (gv.microkit_have_signal == 0) ||
+                       pansel4_has_cap(gv.microkit_signal_cap)
+                     ) &&
+                     (
+                       gv.microkit_have_signal == 0 ||
+                       pansel4_has_endpoint_cap(gv.microkit_signal_cap) ||
+                       pansel4_has_notification_cap(gv.microkit_signal_cap)
+                     ) &&
                      (0 <= irq_index) &&
                      irq_index <= 64 &&
                      bounded64(irqs_to_ack) &&
                      irqs_to_ack == builtin_lshr(irqs_to_ack_orig, irq_index) &&
                      mk_is_patched_irqs(irqs_to_ack_orig) &&
-                     user_acc_ghost_state(userGhost())
+                     user_acc_ghost_state(userGhost()) &&
+                     user_handler_loop_entry(userGhost())
         @/
+        // We need to preserve user_handler_loop_entry here since acking an
+        // IRQ may trigger a state transition. The user may have to expand the
+        // LSM with an "IRQ ack" counter to account for these spurious
+        // transitions.
         /@ assert apply_bv64_lshr64_zero(irqs_to_ack_orig) @/
         if (irqs_to_ack & 1) {
             microkit_irq_ack(irq_index);
