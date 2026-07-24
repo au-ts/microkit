@@ -77,6 +77,10 @@ fun uep_protected(microkit_channel ch, microkit_msginfo msginfo) {
     /@ requires acc(heap[1]) @/
     /@ requires acc(heap[2]) @/
     /@ requires acc(heap[3]) @/
+    /@ ensures acc(heap[0]) @/
+    /@ ensures acc(heap[1]) @/
+    /@ ensures acc(heap[2]) @/
+    /@ ensures acc(heap[3]) @/
     /@ ensures IsAbsMsgInfo(retval) @/
     @microkit_report_debug(0, 0, 0, 3);
     var 1 res = panseL4_MessageInfo_new(0,0,0,0);
