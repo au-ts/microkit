@@ -234,9 +234,6 @@ define f_mk_is_patched_irqs(heap,gv,badge)
 // code does not deal with or modify the handler loop ghost state in unexpected
 // ways.
 
-define f_mk_explicit_notified_postconditions(heap,gv,ch)
-  (mk_explicit_notified_postconditions(ch))
-
 define mk_notified_preconditions(ch)
 (
   acc(mkGhost().pending_notified) &&
