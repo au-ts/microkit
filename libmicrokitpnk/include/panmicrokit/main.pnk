@@ -26,7 +26,7 @@
 /@ extern function mk_notified_preconditions(ch: Int): Bool @/
 /@ extern function mk_notified_postconditions(ch: Int): Bool @/
 /@ extern function mk_protected_preconditions(ch: Int): Bool @/
-/@ extern function mk_protected_postconditions(ch: Int): Bool @/
+/@ extern function mk_protected_postconditions(): Bool @/
 /@ extern function mk_fault_preconditions(ch: Int): Bool @/
 /@ extern function mk_fault_postconditions(ch: Int, needs_reply: Int): Bool @/
 /@ extern function mk_is_patched_irqs(badge: Int): Bool @/
@@ -317,7 +317,8 @@ fun handler_loop() {
                      irq_index <= 64 &&
                      bounded64(irqs_to_ack) &&
                      irqs_to_ack == builtin_lshr(irqs_to_ack_orig, irq_index) &&
-                     mk_is_patched_irqs(irqs_to_ack_orig)
+                     mk_is_patched_irqs(irqs_to_ack_orig) &&
+                     user_acc_ghost_state(userGhost())
         @/
         /@ assert apply_bv64_lshr64_zero(irqs_to_ack_orig) @/
         if (irqs_to_ack & 1) {
@@ -383,7 +384,9 @@ fun handler_loop() {
             if (is_endpoint) {
                 have_reply = true;
                 /@ assert apply_bv64_lshr63_bit(badge) @/
+                /@ exhale mk_protected_preconditions(badge & CHANNEL_MASK) @/
                 reply_tag = uep_protected(badge & CHANNEL_MASK, tag);
+                /@ inhale mk_protected_postconditions() @/
             } else {
                 var 1 channel_index = 0;
                 var 1 badge_orig = badge;

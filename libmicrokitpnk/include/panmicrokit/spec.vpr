@@ -258,7 +258,7 @@ define mk_protected_preconditions(ch)
   mkGhost().pending_protected_call == ch
 )
 
-define mk_protected_postconditions(ch)
+define mk_protected_postconditions()
 (
   acc(mkGhost().pending_protected_call) &&
   mkGhost().pending_protected_call == -1
@@ -288,8 +288,8 @@ define f_mk_notified_postconditions(heap,gv,ch)
 define f_mk_protected_preconditions(heap,gv,ch)
   (mk_protected_preconditions(ch))
 
-define f_mk_protected_postconditions(heap,gv,ch)
-  (mk_protected_postconditions(ch))
+define f_mk_protected_postconditions(heap,gv)
+  (mk_protected_postconditions())
 
 define f_mk_fault_preconditions(heap,gv,ch)
   (mk_fault_preconditions(ch))
