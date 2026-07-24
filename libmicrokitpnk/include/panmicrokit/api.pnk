@@ -123,7 +123,7 @@ export fun microkit_msginfo microkit_ppcall(microkit_channel ch, microkit_msginf
     /@ requires user_guard_microkit_ppcall(ch, msginfo, userGhost()) @/
 
     /@ ensures acc(heap[LIBSEL4_FFI_OFFSET]) @/
-    /@ ensures IsAbsMsgInfo(msginfo) @/
+    /@ ensures IsAbsMsgInfo(retval) @/
 
     /@ ensures user_acc_ghost_state(userGhost()) @/
     /@ ensures user_transition_microkit_ppcall(ch, msginfo, retval, userGhost()) @/
