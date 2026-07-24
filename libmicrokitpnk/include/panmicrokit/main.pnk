@@ -449,6 +449,8 @@ fun handler_loop() {
         }
         /@ assert mk_no_pending_tasks(mkGhost()) @/
     }
+    // the handler_loop never terminates
+    /@ assert false @/
     return 0;
 }
 
