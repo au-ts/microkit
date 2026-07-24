@@ -98,14 +98,14 @@ fun panseL4_Response mk_Recv() {
     /@ ensures mk_received_tasks(panseL4_Response_badge(retval), mkGhost()) @/
     /@ ensures user_acc_ghost_state(userGhost()) @/
     /@ ensures user_transition_Recv(
-                 retval,
+                 panseL4_Response_tag(retval),
                  mkGhost().pending_protected_call,
                  mkGhost().pending_fault_call,
                  mkGhost().pending_notified,
                  userGhost())
     @/
     /@ ensures user_rely_Recv(
-                 retval,
+                 panseL4_Response_tag(retval),
                  mkGhost().pending_protected_call,
                  mkGhost().pending_fault_call,
                  mkGhost().pending_notified,
@@ -120,14 +120,14 @@ fun panseL4_Response mk_Recv() {
     /@ exhale mk_no_pending_tasks(mkGhost()) @/
     /@ inhale mk_received_tasks(panseL4_Response_badge(response), mkGhost()) @/
     /@ assume user_transition_Recv(
-                response,
+                panseL4_Response_tag(response),
                 mkGhost().pending_protected_call,
                 mkGhost().pending_fault_call,
                 mkGhost().pending_notified,
                 userGhost())
     @/
     /@ assume user_rely_Recv(
-                response,
+                panseL4_Response_tag(response),
                 mkGhost().pending_protected_call,
                 mkGhost().pending_fault_call,
                 mkGhost().pending_notified,
@@ -163,7 +163,7 @@ fun panseL4_Response mk_ReplyRecv(panseL4_MessageInfo_t reply_tag) {
     /@ ensures user_acc_ghost_state(userGhost()) @/
     /@ ensures user_transition_ReplyRecv(
                 reply_tag,
-                retval,
+                panseL4_Response_tag(retval),
                 mkGhost().pending_protected_call,
                 mkGhost().pending_fault_call,
                 mkGhost().pending_notified,
@@ -171,7 +171,7 @@ fun panseL4_Response mk_ReplyRecv(panseL4_MessageInfo_t reply_tag) {
     @/
     /@ ensures user_rely_ReplyRecv(
                 reply_tag,
-                retval,
+                panseL4_Response_tag(retval),
                 mkGhost().pending_protected_call,
                 mkGhost().pending_fault_call,
                 mkGhost().pending_notified,
@@ -187,7 +187,7 @@ fun panseL4_Response mk_ReplyRecv(panseL4_MessageInfo_t reply_tag) {
     /@ inhale mk_received_tasks(panseL4_Response_badge(response), mkGhost()) @/
     /@ assume user_transition_ReplyRecv(
                 reply_tag,
-                response,
+                panseL4_Response_tag(response),
                 mkGhost().pending_protected_call,
                 mkGhost().pending_fault_call,
                 mkGhost().pending_notified,
@@ -195,7 +195,7 @@ fun panseL4_Response mk_ReplyRecv(panseL4_MessageInfo_t reply_tag) {
     @/
     /@ assume user_rely_ReplyRecv(
                 reply_tag,
-                response,
+                panseL4_Response_tag(response),
                 mkGhost().pending_protected_call,
                 mkGhost().pending_fault_call,
                 mkGhost().pending_notified,
@@ -237,7 +237,7 @@ fun panseL4_Response mk_NBSendRecv() {
     /@ ensures user_transition_NBSendRecv(
                  gv.microkit_signal_cap,
                  gv.microkit_signal_msg,
-                 retval,
+                 panseL4_Response_tag(retval),
                  mkGhost().pending_protected_call,
                  mkGhost().pending_fault_call,
                  mkGhost().pending_notified,
@@ -246,7 +246,7 @@ fun panseL4_Response mk_NBSendRecv() {
     /@ ensures user_rely_NBSendRecv(
                  gv.microkit_signal_cap,
                  gv.microkit_signal_msg,
-                 retval,
+                 panseL4_Response_tag(retval),
                  mkGhost().pending_protected_call,
                  mkGhost().pending_fault_call,
                  mkGhost().pending_notified,
@@ -267,7 +267,7 @@ fun panseL4_Response mk_NBSendRecv() {
     /@ assume user_transition_NBSendRecv(
                 gv.microkit_signal_cap,
                 gv.microkit_signal_msg,
-                response,
+                panseL4_Response_tag(response),
                 mkGhost().pending_protected_call,
                 mkGhost().pending_fault_call,
                 mkGhost().pending_notified,
@@ -276,7 +276,7 @@ fun panseL4_Response mk_NBSendRecv() {
     /@ assume user_rely_NBSendRecv(
                 gv.microkit_signal_cap,
                 gv.microkit_signal_msg,
-                response,
+                panseL4_Response_tag(response),
                 mkGhost().pending_protected_call,
                 mkGhost().pending_fault_call,
                 mkGhost().pending_notified,
