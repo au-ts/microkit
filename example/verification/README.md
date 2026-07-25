@@ -13,7 +13,7 @@ configuration, the Pancake version of `libmicrokit` behaves as follows:
    an ordinary receive when no response or deferred signal is pending; a
    reply-and-receive when the previous event requires a response; a
    send-and-receive operation when Microkit has queued a deferred notification.
-3. Every response returned by the receive operation is handled according to the
+3. Every response returned by the receive operation is handled
    properly: a protected procedure call on channel `c` with message `m` causes
    exactly one call to `uep_protected(c, m)` user entry point; a fault from
    child `c` with message `m` causes exactly one call to `uep_fault(c, m)`; and
@@ -52,7 +52,9 @@ The proof does not show that arbitrary user entry point code will use the
 `deferred_notify` mechanism correctly: it is possible to misuse this mechanism
 in various ways (e.g. by overwriting `have_signal` to abort a notification).
 Correct use of `deferred_notify` has to be shown during the concrete PD proofs
-(see `example/ivpump`).
+(see `example/ivpump`). The most recent version of the C `libmicrokit` (2.3.0)
+calls `deferred_flush()` before a `ReplyRecv` to prevent such misuse, but the
+verified version is based on version 2.1.0, which does not.
 
 ## Building
 
