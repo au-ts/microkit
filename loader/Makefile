@@ -50,7 +50,7 @@ endif
 CFLAGS := -std=gnu11 -g -O3 -nostdlib -ffreestanding \
 					-MP -MD $(CFLAGS_ARCH) -DBOARD_$(BOARD) -I$(SEL4_SDK)/include \
 					-Wall -Werror -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations \
-					-Wundef -Wno-nonnull -Wnested-externs
+					-Wundef -Wno-nonnull -Wnested-externs -ffunction-sections -fdata-sections
 
 ASM_FLAGS := $(ASM_FLAGS_ARCH) -g -MP -MD -I$(SEL4_SDK)/include
 
@@ -89,5 +89,7 @@ all: $(OBJPROG)
 $(LINKSCRIPT): $(LINKSCRIPT_INPUT)
 	$(CPP) -DLINK_ADDRESS=$(LINK_ADDRESS) $< | grep -v "^#" > $@
 
+LDFLAGS := -T$(LINKSCRIPT) --gc-sections
+
 $(OBJPROG): $(addprefix $(BUILD_DIR)/, $(OBJECTS)) $(LINKSCRIPT)
-	$(LD) -T$(LINKSCRIPT) $(addprefix $(BUILD_DIR)/, $(OBJECTS)) -o $@
+	$(LD) $(LDFLAGS) $(addprefix $(BUILD_DIR)/, $(OBJECTS)) -o $@

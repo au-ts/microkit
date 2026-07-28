@@ -17,9 +17,11 @@ SECTIONS
     .text :
     {
         _text = .;
-        *(.text.start)
+        KEEP(*(.text.start))
         *(.text*)
+        *(.text.*)
         *(.rodata)
+        *(.rodata.*)
         _text_end = .;
     } :all
 
@@ -27,6 +29,8 @@ SECTIONS
     {
         _data = .;
         *(.data)
+        *(.data.*)
+        KEEP(*(.data.uart_addr))
         _data_end = .;
     } :all
 
@@ -34,6 +38,7 @@ SECTIONS
     {
         _bss = .;
         *(.bss)
+        *(.bss.*)
         *(COMMON)
         . = ALIGN(4);
         _bss_end = .;
