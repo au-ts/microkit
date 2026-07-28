@@ -445,6 +445,7 @@ SUPPORTED_CONFIGS = (
             "KernelPrinting": True,
             "KernelVerificationBuild": False,
             "HardwareDebugAPI": True,
+            "ThreadLocalPMU": True,
         },
         kernel_options_arch={},
     ),
