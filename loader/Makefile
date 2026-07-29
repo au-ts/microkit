@@ -35,15 +35,19 @@ else
   LD = $(TARGET_TRIPLE)-ld
 endif
 
+RUSTC := rustc
+
 ifeq ($(ARCH),aarch64)
 	CFLAGS_AARCH64 := -mcpu=$(GCC_CPU) -mgeneral-regs-only -mstrict-align -mno-outline-atomics
 	CFLAGS_ARCH := $(CFLAGS_AARCH64) -DARCH_aarch64
 	ASM_FLAGS_ARCH := -mcpu=$(GCC_CPU)
 	ARCH_DIR := aarch64
+	RUST_TARGET_TRIPLE := aarch64-unknown-none
 else ifeq ($(ARCH),riscv64)
 	CFLAGS_RISCV64 := -mcmodel=medany -march=rv64imac_zicsr_zifencei -mabi=lp64
 	CFLAGS_ARCH := $(CFLAGS_RISCV64) -DARCH_riscv64
 	ASM_FLAGS_ARCH := -march=rv64imac_zicsr_zifencei -mabi=lp64
+	RUST_TARGET_TRIPLE := riscv64gc-unknown-none-elf
 	ARCH_DIR := riscv
 endif
 
@@ -54,8 +58,10 @@ CFLAGS := -std=gnu11 -g -O3 -nostdlib -ffreestanding \
 
 ASM_FLAGS := $(ASM_FLAGS_ARCH) -g -MP -MD -I$(SEL4_SDK)/include
 
+RUSTFLAGS := --target $(RUST_TARGET_TRIPLE) --edition 2024 -g -C opt-level=2
+
 PROGS := loader.elf
-OBJECTS := loader.o crt0.o uart.o cutil.o
+OBJECTS := loader.o crt0.o uart.o cutil.o libpage_tables.a
 
 ifeq ($(ARCH),aarch64)
 	OBJECTS += util64.o el.o exceptions.o init.o mmu.o cpus.o
@@ -80,7 +86,19 @@ $(BUILD_DIR)/%.o : src/$(ARCH_DIR)/%.c
 $(BUILD_DIR)/%.o : src/%.c
 	$(CC) -c $(CFLAGS) $< -o $@
 
+# Note: having multiple rlib with staticlib will give duplicate linker symbol
+# issues. Use "--crate-type rlib" instead, but then we need to link a single
+# copy of the rust corelibs.
+$(BUILD_DIR)/lib%.a : src/%.rs
+	$(RUSTC) $(RUSTFLAGS) \
+		--emit dep-info,metadata,link \
+		--out-dir $(BUILD_DIR) -L dependency=$(BUILD_DIR) \
+		--crate-type staticlib \
+		--crate-name $(patsubst lib%.a,%,$(notdir $@)) \
+		$<
+
 -include $(BUILD_DIR)/*.d
+-include $(BUILD_DIR)/mmu.d
 
 OBJPROG = $(addprefix $(BUILD_DIR)/, $(PROGS))
 
@@ -92,4 +110,5 @@ $(LINKSCRIPT): $(LINKSCRIPT_INPUT)
 LDFLAGS := -T$(LINKSCRIPT) --gc-sections
 
 $(OBJPROG): $(addprefix $(BUILD_DIR)/, $(OBJECTS)) $(LINKSCRIPT)
-	$(LD) $(LDFLAGS) $(addprefix $(BUILD_DIR)/, $(OBJECTS)) -o $@
+	$(LD) $(LDFLAGS) --start-group $(addprefix $(BUILD_DIR)/, $(OBJECTS)) --end-group -o $@
+

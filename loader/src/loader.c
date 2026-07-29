@@ -100,7 +100,6 @@ static int print_lock = 0;
 
 void start_kernel(int logical_cpu)
 {
-    LDR_PRINT("INFO", logical_cpu, "enabling MMU\n");
     int r = arch_mmu_enable(logical_cpu);
     if (r != 0) {
         LDR_PRINT("ERROR", logical_cpu, "failed to enable MMU: ");
