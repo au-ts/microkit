@@ -561,7 +561,11 @@ pub fn build_capdl_spec(
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
 
+    let mut pd_id_vspace_obj_id: Map<usize, u32> = HashMap::new();
+    let mut pd_name_idx: Map<String, usize> = HashMap::new();
+
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
+        pd_name_idx.insert(pd.name, pd_global_idx);
         let elf_obj = &elfs[pd_global_idx];
 
         let mut caps_to_bind_to_tcb: Vec<CapTableEntry> = Vec::new();
@@ -572,7 +576,7 @@ pub fn build_capdl_spec(
             .add_elf_to_spec(kernel_config, &pd.name, pd.cpu, pd_global_idx, elf_obj)
             .unwrap();
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec_container, pd_tcb_obj_id);
-
+        pd_id_vspace_obj_id.insert(pd_global_idx, pd_vspace_obj_id);
         // In the benchmark configuration, we allow PDs to access their own TCB.
         // This is necessary for accessing kernel's benchmark API.
         if kernel_config.benchmark {
@@ -1094,6 +1098,15 @@ pub fn build_capdl_spec(
                 capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0),
             );
         }
+    }
+
+    if let Some((pager_idx, pager)) = system.protection_domains.iter().enumerate.find(|i, x| x.name == "pager") {
+        let mut vspace_idxs: [u32; 64] = [0; 64];
+        for (child_idx, child) in pager.child_pds.iter().enumerate() {
+            let thing = pd_name_idx[child.name];
+            vspace_idxs[child_idx] = pd_id_vspace_obj_id[thing].0;
+        }
+        elfs[pager_idx].write_symbol("vspaces_vaddr", vspace_idxs.iter().flat_map(|&f| f.to_ne_bytes()).collect::<Vec<_>>().as_slice());
     }
 
     // *********************************
