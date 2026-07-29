@@ -159,6 +159,9 @@ impl<'a> Loader<'a> {
         // the return object.
         let loader_image = image_segment.data().clone();
 
+        println!("kernel_first_vaddr: {kernel_first_vaddr:?}");
+        println!("kernel_first_paddr: {kernel_first_paddr:?}");
+
         if image_vaddr != loader_elf.entry {
             panic!("The loader entry point must be the first byte in the image");
         }

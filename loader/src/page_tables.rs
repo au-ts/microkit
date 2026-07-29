@@ -622,9 +622,21 @@ pub extern "C" fn aarch64_setup_pagetables(
         table_descriptor, BLOCK_BITS_1GB, BLOCK_BITS_2MB, BLOCK_BITS_512GB, PAGE_BITS_4KB,
     };
 
+    let kernel_first_vaddr = 551366426624;
+    let kernel_first_paddr = 1610612736;
+
     const PAGE_TABLE_ENTRIES: usize = PAGE_TABLE_SIZE / mem::size_of::<u64>();
 
     let mut serialise_page_table_to_paddr = {
+        #[repr(align(4096))]
+        struct PtBytes([[u8; 4096]; 100]);
+        static mut PAGE_TABLE_BYTES: PtBytes = PtBytes([[0; _]; _]);
+        // SAFETY: Trust me (lol)
+        #[allow(static_mut_refs)]
+        let mut page_table_bytes = unsafe { &mut PAGE_TABLE_BYTES.0 };
+
+        let page_tables_paddr_start = &raw mut PAGE_TABLE_BYTES as u64;
+
         assert!(
             page_tables_paddr_start
                 == page_tables_paddr_start.next_multiple_of(PAGE_TABLE_SIZE as u64)
@@ -632,11 +644,18 @@ pub extern "C" fn aarch64_setup_pagetables(
 
         // This maintains the current end of the PT array.
         let mut next_pt_paddr = page_tables_paddr_start;
+        let mut i = 0;
 
         move |page_table: &mut [u64; PAGE_TABLE_ENTRIES]| -> u64 {
             let pt_paddr = next_pt_paddr;
-            // page_table_bytes.extend(page_table.iter().flat_map(|pte| pte.to_le_bytes()));
+            page_table
+                .iter()
+                .flat_map(|pte| pte.to_le_bytes())
+                .zip(page_table_bytes[i].iter_mut())
+                .for_each(|(byte, dest)| *dest = byte);
+
             next_pt_paddr += PAGE_TABLE_SIZE as u64;
+            i += 0;
             page_table.fill(0);
             pt_paddr
         }
@@ -646,52 +665,64 @@ pub extern "C" fn aarch64_setup_pagetables(
         start: u64,
         end: u64,
     }
+    let ram_regions = [
+        Region { start: 0x60000000, end: 0xc0000000 },
+    ];
 
-    let identity_mapped_regions: &[(Region, u64)] = &[];
-    // let identity_mapped_regions = {
-    //     let ram_regions = config
-    //         .normal_regions
-    //         .as_ref()
-    //         .expect("AArch64 should have normal_regions");
+    const MAX_NUM_REGIONS: usize = 16;
 
-    //     // println!("{:#x?}", ram_regions);
+    let mut regions = [const { core::mem::MaybeUninit::uninit() }; MAX_NUM_REGIONS];
+    let identity_mapped_regions: &mut [(Region, _)] = {
+        // Conceptually want we want is an 'arrayvec', but to not pull in more
+        // code we implement this less-efficiently MaybeUninit.
+        // We implement something very similar to the currently-unstable
+        // write_iter implementation:
+        // https://github.com/rust-lang/rust/blob/1.97.1/library/core/src/mem/maybe_uninit.rs#L1384-L1406
+        let mut regions_len = 0;
 
-    //     let mut regions: Vec<_> = ram_regions
-    //         .iter()
-    //         .cloned()
-    //         .map(|region| (region, MT_DEVICE_nGnRnE))
-    //         .collect();
+        assert!(ram_regions.len() <= regions.len());
 
-    //     // FIXME: Derive from the kernel build system.
-    //     if let Some(uart_base) = read_symbol_maybe(elf, "uart_addr") {
-    //         let uart_base = align_down(uart_base, PAGE_BITS_4KB);
-    //         regions.push((
-    //             PlatformConfigRegion {
-    //                 start: uart_base,
-    //                 end: uart_base + (1 << PAGE_BITS_4KB),
-    //             },
-    //             MT_DEVICE_nGnRnE,
-    //         ));
-    //     }
+        let ram_regions_it = ram_regions.into_iter().map(|r| (r, MT_DEVICE_nGnRnE));
 
-    //     // FIXME: This is currently assuming implementation details of the BCM2711/
-    //     //        Raspberry Pi 4B spin table implementation, as it is the only
-    //     //        platform we have that uses spin tables. Specifically, that
-    //     //        it is always located at the 0 page.
-    //     if elf.find_symbol("cpus_release_addr").is_ok() {
-    //         regions.push((
-    //             PlatformConfigRegion {
-    //                 start: 0x0,
-    //                 end: 1 << PAGE_BITS_4KB,
-    //             },
-    //             MT_DEVICE_nGnRnE,
-    //         ));
-    //     }
+        let all_regions_it = ram_regions_it.chain([(Region { start: 0x9000000, end: 0x9001000 }, MT_DEVICE_nGnRnE)]);
 
-    //     regions.sort_by_key(|(region, _)| region.start);
+        //     // FIXME: Derive from the kernel build system.
+        //     if let Some(uart_base) = read_symbol_maybe(elf, "uart_addr") {
+        //         let uart_base = align_down(uart_base, PAGE_BITS_4KB);
+        //         regions.push((
+        //             PlatformConfigRegion {
+        //                 start: uart_base,
+        //                 end: uart_base + (1 << PAGE_BITS_4KB),
+        //             },
+        //             MT_DEVICE_nGnRnE,
+        //         ));
+        //     }
+        //     // FIXME: This is currently assuming implementation details of the BCM2711/
+        //     //        Raspberry Pi 4B spin table implementation, as it is the only
+        //     //        platform we have that uses spin tables. Specifically, that
+        //     //        it is always located at the 0 page.
+        //     if elf.find_symbol("cpus_release_addr").is_ok() {
+        //         regions.push((
+        //             PlatformConfigRegion {
+        //                 start: 0x0,
+        //                 end: 1 << PAGE_BITS_4KB,
+        //             },
+        //             MT_DEVICE_nGnRnE,
+        //         ));
+        //     }
 
-    //     regions
-    // };
+        for (entry, region) in regions.iter_mut().zip(all_regions_it) {
+            entry.write(region);
+            regions_len += 1;
+        }
+
+        let regions = unsafe { (&mut regions[0..regions_len]).assume_init_mut() };
+
+        // Need to use 'sort_unstable_by_key' as sort_by_key is not in-place.
+        regions.sort_unstable_by_key(|(region, _)| region.start);
+
+        regions
+    };
 
     // Manufacture the constants as per the diagram.
     let k = align_down(kernel_first_vaddr, BLOCK_BITS_512GB);
@@ -750,7 +781,7 @@ pub extern "C" fn aarch64_setup_pagetables(
         // top value we rotate to a new PT.
 
         struct PageTableConstructor<const LEVELS: usize, const ENTRIES: usize, PTE, Addr> {
-            invalid: PTE,
+            empty: PTE,
             levels: [[PTE; ENTRIES]; LEVELS],
             level_top: [Addr; LEVELS],
         }
@@ -758,10 +789,10 @@ pub extern "C" fn aarch64_setup_pagetables(
         impl<const LEVELS: usize, const ENTRIES: usize, PTE: Copy + PartialEq, Addr>
             PageTableConstructor<LEVELS, ENTRIES, PTE, Addr>
         {
-            const fn new(invalid: PTE, level_top: [Addr; LEVELS]) -> Self {
+            const fn new(empty: PTE, level_top: [Addr; LEVELS]) -> Self {
                 Self {
-                    invalid,
-                    levels: [[invalid; ENTRIES]; LEVELS],
+                    empty,
+                    levels: [[empty; ENTRIES]; LEVELS],
                     level_top: level_top,
                 }
             }
@@ -778,7 +809,7 @@ pub extern "C" fn aarch64_setup_pagetables(
 
             fn lvl_is_empty(&self, lvl: usize) -> bool {
                 assert!(lvl < LEVELS);
-                self.levels[lvl] != [self.invalid; ENTRIES]
+                self.levels[lvl] == [self.empty; ENTRIES]
             }
         }
 

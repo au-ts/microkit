@@ -30,12 +30,10 @@ extern struct ret aarch64_setup_pagetables(uint64_t kernel_first_vaddr, uint64_t
 
 int arch_mmu_enable(int logical_cpu)
 {
-    puts("setup1\n");
     struct ret x = aarch64_setup_pagetables(0, 0, 0);
-    aarch64_pt_ttbr0_el1 = x.a;
-    aarch64_pt_ttbr1_el1 = x.b;
-    aarch64_pt_ttbr0_el2 = x.c;
-    puts("setup\n");
+    aarch64_pt_ttbr0_el2 = x.a;
+    aarch64_pt_ttbr0_el1 = x.b;
+    aarch64_pt_ttbr1_el1 = x.c;
 
     int r;
     enum el el;
