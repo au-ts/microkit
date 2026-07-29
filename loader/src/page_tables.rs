@@ -685,14 +685,12 @@ pub extern "C" fn aarch64_setup_pagetables(
 
         move |page_table: &mut [u64; PAGE_TABLE_ENTRIES]| -> u64 {
             let pt_paddr = next_pt_paddr;
-            page_table
-                .iter()
-                .flat_map(|pte| pte.to_le_bytes())
-                .zip(page_table_bytes[i].iter_mut())
-                .for_each(|(byte, dest)| *dest = byte);
+            for (j, byte) in page_table.iter().flat_map(|pte| pte.to_le_bytes()).enumerate() {
+                page_table_bytes[i][j] = byte;
+            }
 
             next_pt_paddr += PAGE_TABLE_SIZE as u64;
-            i += 0;
+            i += 1;
             page_table.fill(0);
             pt_paddr
         }
