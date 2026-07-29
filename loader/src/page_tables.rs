@@ -549,6 +549,43 @@ pub extern "C" fn riscv64_setup_pagetables(
     serialise_page_table_to_paddr(&mut boot_lvl1_pt)
 }
 
+pub struct Writer;
+
+impl fmt::Write for Writer {
+    fn write_str(&mut self, s: &str) -> Result<(), fmt::Error> {
+        for c in s.bytes() {
+            unsafe {
+                puts(core::ffi::CStr::from_bytes_with_nul_unchecked(&[c.into(), 0]).as_ptr())
+            };
+        }
+        Ok(())
+    }
+}
+
+#[allow(unused)]
+pub fn print(args: fmt::Arguments) {
+    use fmt::Write;
+    Writer{}.write_fmt(args).unwrap();
+}
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {{
+        print(format_args!($($arg)*));
+    }}
+}
+
+#[macro_export]
+macro_rules! println {
+    () => {{
+        print!("\n");
+    }};
+
+    ($($arg:tt)*) => {{
+        print!("{}\n", format_args!($($arg)*));
+    }}
+}
+
 /// AArch64 loader page tables have two variations:
 ///  - Loader in EL2, then Stage 1 translations in use, so we have the
 ///    singular TTBR0_EL2 register containing the Level 0 table;
@@ -780,54 +817,15 @@ pub extern "C" fn aarch64_setup_pagetables(
         // When the current vaddr (/paddr, as identity mapped) exceeds the
         // top value we rotate to a new PT.
 
-        struct PageTableConstructor<const LEVELS: usize, const ENTRIES: usize, PTE, Addr> {
-            empty: PTE,
-            levels: [[PTE; ENTRIES]; LEVELS],
-            level_top: [Addr; LEVELS],
-        }
-
-        impl<const LEVELS: usize, const ENTRIES: usize, PTE: Copy + PartialEq, Addr>
-            PageTableConstructor<LEVELS, ENTRIES, PTE, Addr>
-        {
-            const fn new(empty: PTE, level_top: [Addr; LEVELS]) -> Self {
-                Self {
-                    empty,
-                    levels: [[empty; ENTRIES]; LEVELS],
-                    level_top: level_top,
-                }
-            }
-
-            fn lvl(&mut self, lvl: usize) -> &mut [PTE; ENTRIES] {
-                assert!(lvl < LEVELS);
-                &mut self.levels[lvl]
-            }
-
-            fn lvl_top(&mut self, lvl: usize) -> &mut Addr {
-                assert!(lvl < LEVELS);
-                &mut self.level_top[lvl]
-            }
-
-            fn lvl_is_empty(&self, lvl: usize) -> bool {
-                assert!(lvl < LEVELS);
-                self.levels[lvl] == [self.empty; ENTRIES]
-            }
-        }
-
-        static mut PTS: PageTableConstructor<4, PAGE_TABLE_ENTRIES, u64, u64> =
-            PageTableConstructor::new(
-                0,
-                [
-                    u64::MAX,
-                    1 << BLOCK_BITS_512GB,
-                    1 << BLOCK_BITS_1GB,
-                    1 << BLOCK_BITS_2MB,
-                ],
-            );
-
-        // SAFETY: Trust me. This function is not, and can not, be reentrant,
-        // and more than that, can only be called once.
-        #[allow(static_mut_refs)]
-        let pts = unsafe { &mut PTS };
+        let mut lvl1_pt = [0u64; PAGE_TABLE_ENTRIES];
+        let mut lvl2_pt = [0u64; PAGE_TABLE_ENTRIES];
+        let mut lvl3_pt = [0u64; PAGE_TABLE_ENTRIES];
+        // TODO: These should be defines. Note that the top is the size of 1 level of the next level up.
+        // TODO: LVL1_ENTRY_RANGE? idk
+        #[allow(unused_mut)]
+        let mut lvl1_vaddr_top = 1 << BLOCK_BITS_512GB;
+        let mut lvl2_vaddr_top = 1 << BLOCK_BITS_1GB;
+        let mut lvl3_vaddr_top = 1 << BLOCK_BITS_2MB;
 
         // TODO: Tests...
         // This is similar to aligned_power_of_two_regions() for the kernel UT,
@@ -837,62 +835,62 @@ pub extern "C" fn aarch64_setup_pagetables(
         // Allowed externally for the final iteration
         let mut base = 0u64;
         for &(ref region, attr_index) in identity_mapped_regions.iter() {
-            // println!("RAM Region: {:#x}..{:#x}", base, region.end);
-            // println!(
-            //     "  - Current Lvl1: {:#x}..{:#x}, entries: {}",
-            //     (*pts.lvl_top(1) - (1 << BLOCK_BITS_512GB)),
-            //     *pts.lvl_top(1),
-            //     lvl1_pt.iter().filter(|&&v| v != 0).count()
-            // );
-            // println!(
-            //     "  - Current Lvl2: {:#x}..{:#x}, entries: {}",
-            //     (*pts.lvl_top(2) - (1 << BLOCK_BITS_1GB)),
-            //     *pts.lvl_top(2),
-            //     lvl2_pt.iter().filter(|&&v| v != 0).count()
-            // );
-            // println!(
-            //     "  - Current Lvl3: {:#x}..{:#x}, entries: {}",
-            //     (lvl3_vaddr_top - (1 << BLOCK_BITS_2MB)),
-            //     lvl3_vaddr_top,
-            //     lvl3_pt.iter().filter(|&&v| v != 0).count()
-            // );
+            println!("RAM Region: {:#x}..{:#x}", base, region.end);
+            println!(
+                "  - Current Lvl1: {:#x}..{:#x}, entries: {}",
+                (lvl1_vaddr_top - (1 << BLOCK_BITS_512GB)),
+                lvl1_vaddr_top,
+                lvl1_pt.iter().filter(|&&v| v != 0).count()
+            );
+            println!(
+                "  - Current Lvl2: {:#x}..{:#x}, entries: {}",
+                (lvl2_vaddr_top - (1 << BLOCK_BITS_1GB)),
+                lvl2_vaddr_top,
+                lvl2_pt.iter().filter(|&&v| v != 0).count()
+            );
+            println!(
+                "  - Current Lvl3: {:#x}..{:#x}, entries: {}",
+                (lvl3_vaddr_top - (1 << BLOCK_BITS_2MB)),
+                lvl3_vaddr_top,
+                lvl3_pt.iter().filter(|&&v| v != 0).count()
+            );
 
             // Handle the fact that the regions are not contiguous and that
             // we might need to skip PT.
 
             {
-                if region.start >= *pts.lvl_top(3) {
-                    if !pts.lvl_is_empty(3) {
-                        let lvl3_pt_paddr = serialise_page_table_to_paddr(&mut pts.lvl(3));
-                        // println!("[iter] Serialise lvl3 table: {lvl3_pt_paddr:#x} for to {:#x}..{pts.lvl_top(3):#x}", (pts.lvl_top(3) - (1 << BLOCK_BITS_2MB)));
-                        assert!(pts.lvl(2)[lvl2_index(base)] == 0);
-                        pts.lvl(2)[lvl2_index(base)] = table_descriptor(lvl3_pt_paddr);
+                if region.start >= lvl3_vaddr_top {
+                    if lvl3_pt != [0; _] {
+                        let lvl3_pt_paddr = serialise_page_table_to_paddr(&mut lvl3_pt);
+                        println!("[iter] Serialise lvl3 table: {lvl3_pt_paddr:#x} for to {:#x}..{lvl3_vaddr_top:#x}", (lvl3_vaddr_top - (1 << BLOCK_BITS_2MB)));
+                        assert!(lvl2_pt[lvl2_index(base)] == 0);
+                        lvl2_pt[lvl2_index(base)] = table_descriptor(lvl3_pt_paddr);
                     }
 
                     // TODO: just compute it.
-                    while region.start >= *pts.lvl_top(3) {
-                        *pts.lvl_top(3) += 1 << BLOCK_BITS_2MB;
+                    while region.start >= lvl3_vaddr_top {
+                        lvl3_vaddr_top += 1 << BLOCK_BITS_2MB;
                     }
                 }
 
-                if region.start >= *pts.lvl_top(2) {
-                    if !pts.lvl_is_empty(2) {
-                        let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut pts.lvl(2));
-                        // println!("[iter] Serialise lvl2 table: {lvl2_pt_paddr:#x} for to {:#x}..{*pts.lvl_top(2):#x}, base: {:#x} lvl1_index(base): {:#x}", (*pts.lvl_top(2) - (1 << BLOCK_BITS_1GB)), base, lvl1_index(base));
-                        assert!(pts.lvl(1)[lvl1_index(base)] == 0);
-                        pts.lvl(1)[lvl1_index(base)] = table_descriptor(lvl2_pt_paddr);
+                if region.start >= lvl2_vaddr_top {
+                    if lvl2_pt != [0; _] {
+                        let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut lvl2_pt);
+                        println!("[iter] Serialise lvl2 table: {lvl2_pt_paddr:#x} for to {:#x}..{lvl2_vaddr_top:#x}, base: {:#x} lvl1_index(base): {:#x}", (lvl2_vaddr_top - (1 << BLOCK_BITS_1GB)), base, lvl1_index(base));
+                        assert!(lvl1_pt[lvl1_index(base)] == 0);
+                        lvl1_pt[lvl1_index(base)] = table_descriptor(lvl2_pt_paddr);
                     }
 
                     // TODO: just compute it.
-                    while region.start >= *pts.lvl_top(2) {
-                        *pts.lvl_top(2) += 1 << BLOCK_BITS_1GB;
+                    while region.start >= lvl2_vaddr_top {
+                        lvl2_vaddr_top += 1 << BLOCK_BITS_1GB;
                     }
                 }
 
-                if region.start >= *pts.lvl_top(1) {
+                if region.start >= lvl1_vaddr_top {
                     unreachable!(
                         "impossible as everything should fit here: {:#x}",
-                        *pts.lvl_top(1)
+                        lvl1_vaddr_top
                     );
                 }
             }
@@ -934,38 +932,38 @@ pub extern "C" fn aarch64_setup_pagetables(
                 let pt_region_size = 1u64 << bits;
                 let top = base + pt_region_size;
 
-                // println!("- Aligned PT region: {:#x}..{:#x} (size_bits: {}, align_bits: {}, bits: {})", base, top, size_bits, align_bits, bits);
-                // println!(
-                //     "  - Current Lvl1: {:#x}..{:#x}, entries: {}",
-                //     (*pts.lvl_top(1) - (1 << BLOCK_BITS_512GB)),
-                //     *pts.lvl_top(1),
-                //     lvl1_pt.iter().filter(|&&v| v != 0).count()
-                // );
-                // println!(
-                //     "  - Current Lvl2: {:#x}..{:#x}, entries: {}",
-                //     (*pts.lvl_top(2) - (1 << BLOCK_BITS_1GB)),
-                //     *pts.lvl_top(2),
-                //     lvl2_pt.iter().filter(|&&v| v != 0).count()
-                // );
-                // println!(
-                //     "  - Current Lvl3: {:#x}..{:#x}, entries: {}",
-                //     (pts.lvl_top(3) - (1 << BLOCK_BITS_2MB)),
-                //     pts.lvl_top(3),
-                //     lvl3_pt.iter().filter(|&&v| v != 0).count()
-                // );
+                println!("- Aligned PT region: {:#x}..{:#x} (size_bits: {}, align_bits: {}, bits: {})", base, top, size_bits, align_bits, bits);
+                println!(
+                    "  - Current Lvl1: {:#x}..{:#x}, entries: {}",
+                    (lvl1_vaddr_top - (1 << BLOCK_BITS_512GB)),
+                    lvl1_vaddr_top,
+                    lvl1_pt.iter().filter(|&&v| v != 0).count()
+                );
+                println!(
+                    "  - Current Lvl2: {:#x}..{:#x}, entries: {}",
+                    (lvl2_vaddr_top - (1 << BLOCK_BITS_1GB)),
+                    lvl2_vaddr_top,
+                    lvl2_pt.iter().filter(|&&v| v != 0).count()
+                );
+                println!(
+                    "  - Current Lvl3: {:#x}..{:#x}, entries: {}",
+                    (lvl3_vaddr_top - (1 << BLOCK_BITS_2MB)),
+                    lvl3_vaddr_top,
+                    lvl3_pt.iter().filter(|&&v| v != 0).count()
+                );
 
                 match level {
                     1 => {
                         // If it belongs in Level 1 PT, then it must go in
-                        // lvl1 pt. By the inavariant, base < *pts.lvl_top(1).
-                        assert!(base < *pts.lvl_top(1));
-                        // top is <= *pts.lvl_top(1) (the case where it is the topmost entry)
-                        assert!(top <= *pts.lvl_top(1));
+                        // lvl1 pt. By the inavariant, base < lvl1_vaddr_top.
+                        assert!(base < lvl1_vaddr_top);
+                        // top is <= lvl1_vaddr_top (the case where it is the topmost entry)
+                        assert!(top <= lvl1_vaddr_top);
 
-                        assert!(pts.lvl(1)[lvl1_index(base)] == 0);
-                        pts.lvl(1)[lvl1_index(base)] = block_descriptor(1, base, attr_index);
+                        assert!(lvl1_pt[lvl1_index(base)] == 0);
+                        lvl1_pt[lvl1_index(base)] = block_descriptor(1, base, attr_index);
 
-                        if top == *pts.lvl_top(1) {
+                        if top == lvl1_vaddr_top {
                             // Invariant maintenance: if the new top would be now equal
                             // the end of the page table's region top, we need a new
                             // page table object and add it to the list.
@@ -975,73 +973,73 @@ pub extern "C" fn aarch64_setup_pagetables(
                         }
 
                         // Invariant: Lower levels are empty.
-                        assert!(pts.lvl_is_empty(2));
-                        assert!(pts.lvl_is_empty(3));
+                        assert!(lvl2_pt == [0; _]);
+                        assert!(lvl3_pt == [0; _]);
                         // Invariant maintenance: vaddr_top is right range for current PT.
                         // it's empty so we need to increment the top to be current top (1G aligned) + 2MIB (512 lvl3 entries)
-                        *pts.lvl_top(3) = top + (1 << BLOCK_BITS_2MB);
+                        lvl3_vaddr_top = top + (1 << BLOCK_BITS_2MB);
                         // it's empty so we need to increment the top to be current top (1G aligned) + 1G (512 lvl2 entries)
-                        *pts.lvl_top(2) = top + (1 << BLOCK_BITS_1GB);
+                        lvl2_vaddr_top = top + (1 << BLOCK_BITS_1GB);
                     }
                     2 => {
                         // If it is a 2MiB block, it must go in the Level 2 PT;
-                        // by our invariants: base < *pts.lvl_top(2) and top <= *pts.lvl_top(2)
-                        assert!(base < *pts.lvl_top(2));
-                        assert!(top <= *pts.lvl_top(2));
+                        // by our invariants: base < lvl2_vaddr_top and top <= lvl2_vaddr_top
+                        assert!(base < lvl2_vaddr_top);
+                        assert!(top <= lvl2_vaddr_top);
 
-                        assert!(pts.lvl(2)[lvl2_index(base)] == 0);
-                        pts.lvl(2)[lvl2_index(base)] = block_descriptor(2, base, attr_index);
+                        assert!(lvl2_pt[lvl2_index(base)] == 0);
+                        lvl2_pt[lvl2_index(base)] = block_descriptor(2, base, attr_index);
 
-                        if top == *pts.lvl_top(2) {
+                        if top == lvl2_vaddr_top {
                             // Invariant maintenance: keep for current address range.
                             // As we're the top of the range, we can serialise the table.
 
-                            let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut pts.lvl(2));
-                            // println!("Serialise lvl2 table: {lvl2_pt_paddr:#x} up to {*pts.lvl_top(2):#x}");
-                            *pts.lvl_top(2) += 1 << BLOCK_BITS_1GB;
+                            let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut lvl2_pt);
+                            // println!("Serialise lvl2 table: {lvl2_pt_paddr:#x} up to {lvl2_vaddr_top:#x}");
+                            lvl2_vaddr_top += 1 << BLOCK_BITS_1GB;
 
-                            pts.lvl(1)[lvl1_index(base)] = table_descriptor(lvl2_pt_paddr);
+                            lvl1_pt[lvl1_index(base)] = table_descriptor(lvl2_pt_paddr);
 
-                            if top == *pts.lvl_top(1) {
+                            if top == lvl1_vaddr_top {
                                 todo!("handle the case where top of lvl1 is occupied - this would be near the top of 512GiB");
                             }
                         }
 
                         // Invariant: Lower levels are empty.
-                        assert!(pts.lvl_is_empty(3));
+                        assert!(lvl3_pt == [0; _]);
                         // Invariant maintenance: vaddr_top is right range for current PT.
                         // it's empty so we need to increment the top to be current top (2MIB aligned) + 2MIB (512 lvl3 entries)
-                        *pts.lvl_top(3) = top + (1 << BLOCK_BITS_2MB);
+                        lvl3_vaddr_top = top + (1 << BLOCK_BITS_2MB);
                     }
                     3 => {
                         // If it is a 4K page, it must go in the Level 3 PT;
-                        // by our invariants: base < pts.lvl_top(3) and top <= pts.lvl_top(3)
-                        assert!(base < *pts.lvl_top(3));
-                        assert!(top <= *pts.lvl_top(3));
+                        // by our invariants: base < lvl3_vaddr_top and top <= lvl3_vaddr_top
+                        assert!(base < lvl3_vaddr_top);
+                        assert!(top <= lvl3_vaddr_top);
 
-                        assert!(pts.lvl(3)[lvl3_index(base)] == 0);
-                        pts.lvl(3)[lvl3_index(base)] = page_descriptor(base, attr_index);
+                        assert!(lvl3_pt[lvl3_index(base)] == 0);
+                        lvl3_pt[lvl3_index(base)] = page_descriptor(base, attr_index);
 
-                        if top == *pts.lvl_top(3) {
+                        if top == lvl3_vaddr_top {
                             // Invariant maintenance: keep for current address range.
                             // As we're the top of the range, we can serialise the table.
 
-                            let lvl3_pt_paddr = serialise_page_table_to_paddr(&mut pts.lvl(3));
-                            // println!("Serialise lvl3 table: {lvl3_pt_paddr:#x} for to {:#x}..{pts.lvl_top(3):#x}", (pts.lvl_top(3) - (1 << BLOCK_BITS_2MB)));
-                            *pts.lvl_top(3) += 1 << BLOCK_BITS_2MB;
+                            let lvl3_pt_paddr = serialise_page_table_to_paddr(&mut lvl3_pt);
+                            println!("Serialise lvl3 table: {lvl3_pt_paddr:#x} for to {:#x}..{lvl3_vaddr_top:#x}", (lvl3_vaddr_top - (1 << BLOCK_BITS_2MB)));
+                            lvl3_vaddr_top += 1 << BLOCK_BITS_2MB;
 
-                            assert!(pts.lvl(2)[lvl2_index(base)] == 0);
-                            pts.lvl(2)[lvl2_index(base)] = table_descriptor(lvl3_pt_paddr);
+                            assert!(lvl2_pt[lvl2_index(base)] == 0);
+                            lvl2_pt[lvl2_index(base)] = table_descriptor(lvl3_pt_paddr);
 
-                            if top == *pts.lvl_top(2) {
-                                let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut pts.lvl(2));
-                                // println!("Serialise lvl2 table: {lvl2_pt_paddr:#x} for to {:#x}..{*pts.lvl_top(2):#x}", (*pts.lvl_top(2) - (1 << BLOCK_BITS_1GB)));
-                                *pts.lvl_top(2) += 1 << BLOCK_BITS_1GB;
+                            if top == lvl2_vaddr_top {
+                                let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut lvl2_pt);
+                                println!("Serialise lvl2 table: {lvl2_pt_paddr:#x} for to {:#x}..{lvl2_vaddr_top:#x}", (lvl2_vaddr_top - (1 << BLOCK_BITS_1GB)));
+                                lvl2_vaddr_top += 1 << BLOCK_BITS_1GB;
 
-                                assert!(pts.lvl(1)[lvl1_index(base)] == 0);
-                                pts.lvl(1)[lvl1_index(base)] = table_descriptor(lvl2_pt_paddr);
+                                assert!(lvl1_pt[lvl1_index(base)] == 0);
+                                lvl1_pt[lvl1_index(base)] = table_descriptor(lvl2_pt_paddr);
 
-                                if top == *pts.lvl_top(1) {
+                                if top == lvl1_vaddr_top {
                                     todo!("handle the case where top of lvl1 is occupied - this would be near the top of 512GiB");
                                 }
                             }
@@ -1061,25 +1059,25 @@ pub extern "C" fn aarch64_setup_pagetables(
         // page tables that have been partially filled out, and we need to
         // serialise these.
 
-        if !pts.lvl_is_empty(3) {
-            let lvl3_pt_paddr = serialise_page_table_to_paddr(&mut pts.lvl(3));
-            // println!("[end] Serialise lvl3 table: {lvl3_pt_paddr:#x}");
-            assert!(pts.lvl(2)[lvl2_index(base)] == 0);
-            pts.lvl(2)[lvl2_index(base)] = table_descriptor(lvl3_pt_paddr);
+        if lvl3_pt != [0; _] {
+            let lvl3_pt_paddr = serialise_page_table_to_paddr(&mut lvl3_pt);
+            println!("[end] Serialise lvl3 table: {lvl3_pt_paddr:#x}");
+            assert!(lvl2_pt[lvl2_index(base)] == 0);
+            lvl2_pt[lvl2_index(base)] = table_descriptor(lvl3_pt_paddr);
         }
 
-        if !pts.lvl_is_empty(2) {
-            let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut pts.lvl(2));
-            // println!("[end] Serialise lvl2 table: {lvl2_pt_paddr:#x} for to {:#x}..{*pts.lvl_top(2):#x}, base: {:#x} lvl1_index(base): {:#x}", (*pts.lvl_top(2) - (1 << BLOCK_BITS_1GB)), base, lvl1_index(base));
-            assert!(pts.lvl(1)[lvl1_index(base)] == 0);
-            pts.lvl(1)[lvl1_index(base)] = table_descriptor(lvl2_pt_paddr);
+        if lvl2_pt != [0; _] {
+            let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut lvl2_pt);
+            println!("[end] Serialise lvl2 table: {lvl2_pt_paddr:#x} for to {:#x}..{lvl2_vaddr_top:#x}, base: {:#x} lvl1_index(base): {:#x}", (lvl2_vaddr_top - (1 << BLOCK_BITS_1GB)), base, lvl1_index(base));
+            assert!(lvl1_pt[lvl1_index(base)] == 0);
+            lvl1_pt[lvl1_index(base)] = table_descriptor(lvl2_pt_paddr);
         }
 
         // the level1 pt should not be empty. lol.
-        assert!(!pts.lvl_is_empty(1));
+        assert!(lvl1_pt != [0; _]);
 
         // println!("New lvl1 table");
-        serialise_page_table_to_paddr(pts.lvl(1))
+        serialise_page_table_to_paddr(&mut lvl1_pt)
     };
 
     struct Config {
