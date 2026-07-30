@@ -1020,7 +1020,7 @@ pub fn build_capdl_spec(
                             sp: Word(0),
                             gprs: [].to_vec(),
                             master_fault_ep: None, // Not used on MCS kernel.
-                            domain: None,
+                            domain: pd.domain,
                         }),
                     };
                     let vm_vcpu_tcb_obj_id = spec_container.add_root_object(NamedObject {
