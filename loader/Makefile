@@ -86,9 +86,9 @@ $(BUILD_DIR)/%.o : src/$(ARCH_DIR)/%.c
 $(BUILD_DIR)/%.o : src/%.c
 	$(CC) -c $(CFLAGS) $< -o $@
 
-# Note: having multiple rlib with staticlib will give duplicate linker symbol
+# Note: having multiple libs with staticlib will give duplicate linker symbol
 # issues. Use "--crate-type rlib" instead, but then we need to link a single
-# copy of the rust corelibs.
+# copy of the rust corelibs. For now this is fine.
 $(BUILD_DIR)/lib%.a : src/%.rs
 	$(RUSTC) $(RUSTFLAGS) \
 		--emit dep-info,metadata,link \
@@ -98,7 +98,6 @@ $(BUILD_DIR)/lib%.a : src/%.rs
 		$<
 
 -include $(BUILD_DIR)/*.d
--include $(BUILD_DIR)/mmu.d
 
 OBJPROG = $(addprefix $(BUILD_DIR)/, $(PROGS))
 
