@@ -7,7 +7,7 @@
 use super::consts::*;
 use super::pd_vm::ProtectionDomain;
 use super::util::{check_attributes, checked_lookup, loc_string, value_error};
-use super::{SdfNode, XmlSystemDescription};
+use super::{SdfNode, SystemDescriptionFile};
 
 use crate::util::str_to_bool;
 
@@ -28,7 +28,7 @@ pub struct Channel {
 
 impl ChannelEnd {
     fn from_xml<'a>(
-        xml_sdf: &'a XmlSystemDescription,
+        xml_sdf: &'a SystemDescriptionFile,
         node: &'a dyn SdfNode,
         pds: &[ProtectionDomain],
     ) -> Result<ChannelEnd, String> {
@@ -102,7 +102,7 @@ impl Channel {
     /// with all the Protection Domains that could potentially be connected with
     /// the channel.
     pub(super) fn from_xml<'a>(
-        xml_sdf: &'a XmlSystemDescription,
+        xml_sdf: &'a SystemDescriptionFile,
         node: &'a dyn SdfNode,
         pds: &[ProtectionDomain],
     ) -> Result<Channel, String> {

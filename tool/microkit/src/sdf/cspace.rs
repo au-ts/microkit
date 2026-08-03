@@ -6,7 +6,7 @@
 
 use super::consts::*;
 use super::util::{check_attributes, checked_lookup, loc_string, sdf_parse_number, value_error};
-use super::{SdfLocation, SdfNode, XmlSystemDescription};
+use super::{SdfLocation, SdfNode, SystemDescriptionFile};
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
 pub enum CapMapType {
@@ -43,7 +43,7 @@ pub struct CSpace {
 impl CapMap {
     fn from_xml(
         cap_type: CapMapType,
-        xml_sdf: &XmlSystemDescription,
+        xml_sdf: &SystemDescriptionFile,
         node: &dyn SdfNode,
     ) -> Result<CapMap, String> {
         // At the moment the four cap maps we support all have the 'pd' element,
@@ -85,7 +85,7 @@ impl CapMap {
 
 impl CSpace {
     pub(super) fn from_xml(
-        xml_sdf: &XmlSystemDescription,
+        xml_sdf: &SystemDescriptionFile,
         node: &dyn SdfNode,
     ) -> Result<Self, String> {
         check_attributes(xml_sdf, node, &[])?;

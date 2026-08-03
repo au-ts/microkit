@@ -11,7 +11,7 @@ use std::str::FromStr;
 use super::memory_region::SysIOMap;
 use super::pci::{PciDevice, PciDeviceParseError};
 use super::util::{check_attributes, checked_lookup, loc_string, sdf_parse_number, value_error};
-use super::{SdfNode, XmlSystemDescription};
+use super::{SdfNode, SystemDescriptionFile};
 
 use crate::{sel4::Arch, Config};
 
@@ -73,7 +73,7 @@ impl fmt::Display for IommuDeviceIdentifierParseError {
 impl IOAddressSpace {
     pub(super) fn from_xml(
         config: &Config,
-        xml_sdf: &XmlSystemDescription,
+        xml_sdf: &SystemDescriptionFile,
         node: &dyn SdfNode,
         names: &mut HashSet<String>,
         domain_ids: &mut HashSet<u64>,

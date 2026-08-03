@@ -125,9 +125,8 @@ impl<'a> SdfNode<'a> for roxmltree::Node<'a, '_> {
     }
 }
 
-pub(crate) struct XmlSystemDescription<'a> {
+pub(crate) struct SystemDescriptionFile<'a> {
     filename: &'a Path,
-    doc: &'a roxmltree::Document<'a>,
 }
 
 #[derive(Debug)]
@@ -150,10 +149,7 @@ pub fn parse(
         Err(err) => return Err(format!("Could not parse '{0}': {err}", filename.display())),
     };
 
-    let xml_sdf = XmlSystemDescription {
-        filename,
-        doc: &doc,
-    };
+    let xml_sdf = SystemDescriptionFile { filename };
 
     let mut root_pds = vec![];
     let mut mrs = vec![];

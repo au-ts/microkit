@@ -18,7 +18,7 @@ use super::pci::PciDevice;
 use super::util::{
     check_attributes, checked_add_setvar, checked_lookup, loc_string, sdf_parse_number, value_error,
 };
-use super::{SdfLocation, SdfNode, XmlSystemDescription};
+use super::{SdfLocation, SdfNode, SystemDescriptionFile};
 
 use crate::sel4::{Arch, ArmRiscvIrqTrigger, X86IoapicIrqPolarity, X86IoapicIrqTrigger};
 use crate::util::str_to_bool;
@@ -135,7 +135,7 @@ impl ProtectionDomain {
 
     pub(super) fn from_xml(
         config: &Config,
-        xml_sdf: &XmlSystemDescription,
+        xml_sdf: &SystemDescriptionFile,
         node: &dyn SdfNode,
         is_child: bool,
         domains: &Domains,
@@ -810,7 +810,7 @@ impl ProtectionDomain {
 /// In doing so the representation is changed from "Node with list of children",
 /// to each node having a parent link instead.
 pub fn pd_flatten(
-    xml_sdf: &XmlSystemDescription,
+    xml_sdf: &SystemDescriptionFile,
     pds: Vec<ProtectionDomain>,
 ) -> Result<Vec<ProtectionDomain>, String> {
     let mut all_pds = vec![];
@@ -830,7 +830,7 @@ pub fn pd_flatten(
 /// For example if PD A had children B, C then we would have [A, B, C].
 /// If we had the same example but child B also had a child D, we would have [A, B, D, C].
 fn pd_tree_to_list(
-    xml_sdf: &XmlSystemDescription,
+    xml_sdf: &SystemDescriptionFile,
     mut pd: ProtectionDomain,
     idx: usize,
 ) -> Result<Vec<ProtectionDomain>, String> {
@@ -898,7 +898,7 @@ pub struct VirtualCpu {
 impl VirtualMachine {
     fn from_xml(
         config: &Config,
-        xml_sdf: &XmlSystemDescription,
+        xml_sdf: &SystemDescriptionFile,
         node: &dyn SdfNode,
     ) -> Result<VirtualMachine, String> {
         if config.arch == Arch::Aarch64 {

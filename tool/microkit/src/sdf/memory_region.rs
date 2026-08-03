@@ -14,7 +14,7 @@ use sel4_capdl_initializer_types::FillEntryContentBootInfoId;
 use super::iommu::IommuDeviceIdentifier;
 use super::util::location_suffix_format;
 use super::util::{check_attributes, checked_lookup, sdf_parse_number, value_error};
-use super::{SdfLocation, SdfNode, XmlSystemDescription};
+use super::{SdfLocation, SdfNode, SystemDescriptionFile};
 
 use crate::util::get_full_path;
 use crate::util::round_up;
@@ -255,7 +255,7 @@ pub struct SysIOMap {
 
 impl SysMap {
     pub(super) fn from_xml(
-        xml_sdf: &XmlSystemDescription,
+        xml_sdf: &SystemDescriptionFile,
         node: &dyn SdfNode,
         allow_setvar: bool,
         max_vaddr: u64,
@@ -333,7 +333,7 @@ impl SysMap {
 impl SysIOMap {
     pub(super) fn from_xml(
         _config: &Config,
-        xml_sdf: &XmlSystemDescription,
+        xml_sdf: &SystemDescriptionFile,
         node: &dyn SdfNode,
         name: &str,
         identifier: IommuDeviceIdentifier,
@@ -388,7 +388,7 @@ impl SysIOMap {
 
 impl SysMemoryRegion {
     fn determine_size(
-        xml_sdf: &XmlSystemDescription,
+        xml_sdf: &SystemDescriptionFile,
         node: &dyn SdfNode,
         prefill_bytes_maybe: &Option<Vec<u8>>,
         prefill_bootinfo_maybe: Option<FillEntryContentBootInfoId>,
@@ -448,7 +448,7 @@ impl SysMemoryRegion {
 
     pub(super) fn from_xml(
         config: &Config,
-        xml_sdf: &XmlSystemDescription,
+        xml_sdf: &SystemDescriptionFile,
         node: &dyn SdfNode,
         search_paths: &Vec<PathBuf>,
     ) -> Result<SysMemoryRegion, String> {
@@ -594,7 +594,7 @@ impl SysMemoryRegion {
 
 // max_end is the first invalid virtual address
 pub fn check_maps<'a, M, I>(
-    xml_sdf: &XmlSystemDescription,
+    xml_sdf: &SystemDescriptionFile,
     mrs: &[SysMemoryRegion],
     maps: I,
     address_space: &str,
@@ -672,7 +672,7 @@ where
 }
 
 pub fn check_io_maps(
-    xml_sdf: &XmlSystemDescription,
+    xml_sdf: &SystemDescriptionFile,
     mrs: &[SysMemoryRegion],
     iomaps: &[SysIOMap],
 ) -> Result<(), String> {

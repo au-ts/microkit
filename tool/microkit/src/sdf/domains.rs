@@ -10,7 +10,7 @@ use std::num::NonZero;
 use sel4_capdl_initializer_types::{DomainSchedDuration, DomainSchedEntry};
 
 use super::util::{check_attributes, checked_lookup, loc_string, sdf_parse_number, value_error};
-use super::{SdfNode, XmlSystemDescription};
+use super::{SdfNode, SystemDescriptionFile};
 
 use crate::Config;
 
@@ -25,7 +25,7 @@ pub struct Domains {
 impl Domains {
     pub(super) fn from_xml(
         config: &Config,
-        xml_sdf: &XmlSystemDescription,
+        xml_sdf: &SystemDescriptionFile,
         node: &dyn SdfNode,
     ) -> Result<Self, String> {
         check_attributes(xml_sdf, node, &[])?;
@@ -137,7 +137,7 @@ impl Domains {
 
     fn domain_from_xml(
         config: &Config,
-        xml_sdf: &XmlSystemDescription,
+        xml_sdf: &SystemDescriptionFile,
         node: &dyn SdfNode,
     ) -> Result<(String, Option<u8>), String> {
         check_attributes(xml_sdf, node, &["name", "id"])?;
@@ -171,7 +171,7 @@ impl Domains {
 
     fn domain_schedule_from_xml(
         config: &Config,
-        xml_sdf: &XmlSystemDescription,
+        xml_sdf: &SystemDescriptionFile,
         node: &dyn SdfNode,
         name_to_id_map: HashMap<String, u8>,
     ) -> Result<Domains, String> {
@@ -264,7 +264,7 @@ impl Domains {
     }
 
     fn schedule_entry_from_xml(
-        xml_sdf: &XmlSystemDescription,
+        xml_sdf: &SystemDescriptionFile,
         node: &dyn SdfNode,
         name_to_id_map: &HashMap<String, u8>,
     ) -> Result<DomainSchedEntry, String> {

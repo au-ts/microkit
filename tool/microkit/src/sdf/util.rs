@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
-use super::{SdfLocation, SdfNode, SysSetVar, XmlSystemDescription};
+use super::{SdfLocation, SdfNode, SysSetVar, SystemDescriptionFile};
 
 /// The purpose of this function is to parse an integer that could
 /// either be in decimal or hex format, unlike the normal parsing
@@ -31,14 +31,14 @@ pub fn sdf_parse_number(s: &str, node: &dyn SdfNode) -> Result<u64, String> {
     }
 }
 
-pub fn loc_string(xml_sdf: &XmlSystemDescription, pos: SdfLocation) -> String {
+pub fn loc_string(xml_sdf: &SystemDescriptionFile, pos: SdfLocation) -> String {
     format!("{}:{}:{}", xml_sdf.filename.display(), pos.row, pos.col)
 }
 
 pub fn checked_add_setvar(
     setvars: &mut Vec<SysSetVar>,
     setvar: SysSetVar,
-    xml_sdf: &XmlSystemDescription<'_>,
+    xml_sdf: &SystemDescriptionFile<'_>,
     node: &dyn SdfNode<'_>,
 ) -> Result<(), String> {
     // Check that the symbol does not already exist
@@ -57,9 +57,12 @@ pub fn checked_add_setvar(
     Ok(())
 }
 
-pub fn check_no_text(xml_sdf: &XmlSystemDescription, node: &roxmltree::Node) -> Result<(), String> {
+pub fn check_no_text(
+    xml_sdf: &SystemDescriptionFile,
+    node: &roxmltree::Node,
+) -> Result<(), String> {
     let name = node.tag_name().name();
-    let pos = xml_sdf.doc.text_pos_at(node.range().start);
+    let pos = node.document().text_pos_at(node.range().start);
     let pos = SdfLocation {
         row: pos.row,
         col: pos.col,
@@ -94,7 +97,7 @@ pub fn check_no_text(xml_sdf: &XmlSystemDescription, node: &roxmltree::Node) -> 
 }
 
 pub fn check_attributes(
-    xml_sdf: &XmlSystemDescription,
+    xml_sdf: &SystemDescriptionFile,
     node: &dyn SdfNode,
     attributes: &[&'static str],
 ) -> Result<(), String> {
@@ -112,7 +115,7 @@ pub fn check_attributes(
 }
 
 pub fn checked_lookup<'a>(
-    xml_sdf: &XmlSystemDescription,
+    xml_sdf: &SystemDescriptionFile,
     node: &'a dyn SdfNode,
     attribute: &'static str,
 ) -> Result<&'a str, String> {
@@ -131,7 +134,7 @@ pub fn checked_lookup<'a>(
     }
 }
 
-pub fn value_error(xml_sdf: &XmlSystemDescription, node: &dyn SdfNode, err: String) -> String {
+pub fn value_error(xml_sdf: &SystemDescriptionFile, node: &dyn SdfNode, err: String) -> String {
     let pos = node.range().start;
     format!(
         "Error: {} on element '{}': {}:{}:{}",
@@ -144,7 +147,7 @@ pub fn value_error(xml_sdf: &XmlSystemDescription, node: &dyn SdfNode, err: Stri
 }
 
 pub fn location_suffix_format(
-    xml_sdf: &XmlSystemDescription,
+    xml_sdf: &SystemDescriptionFile,
     text_pos: Option<SdfLocation>,
 ) -> String {
     text_pos
