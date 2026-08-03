@@ -278,6 +278,7 @@ pub struct ProtectionDomain {
     /// If true, CapDL initialiser will hand off all remaining untyped
     /// capabilities to this PD. (Can only be set by one PD)
     pub receive_all_untypeds: bool,
+    pub backed: bool,
     /// Location in the parsed SDF file
     text_pos: Option<roxmltree::TextPos>,
 }
@@ -463,6 +464,7 @@ impl ProtectionDomain {
             // but we do the error-checking further down.
             "smc",
             "cpu",
+            "backed"
         ];
         if is_child {
             attrs.push("id");
@@ -518,6 +520,15 @@ impl ProtectionDomain {
             sdf_parse_number(xml_stack_size, node)?
         } else {
             PD_DEFAULT_STACK_SIZE
+        };
+
+        let backed: bool = if let Some(xml_backed) = node.attribute("backed") {
+            match str_to_bool(xml_backed) {
+                Some(val) => val,
+                None => true
+            } 
+        } else {
+            false
         };
 
         let smc = if let Some(xml_smc) = node.attribute("smc") {
@@ -1093,6 +1104,7 @@ impl ProtectionDomain {
             setvar_id,
             receive_all_untypeds: false,
             text_pos: Some(xml_sdf.doc.text_pos_at(node.range().start)),
+            backed,
         })
     }
 }

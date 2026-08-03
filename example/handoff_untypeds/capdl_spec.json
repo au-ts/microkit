@@ -1,0 +1,1037 @@
+{
+  "objects": [
+    {
+      "name": "cnode_hello",
+      "object": {
+        "CNode": {
+          "size_bits": 9,
+          "slots": [
+            {
+              "slot": 1,
+              "cap": {
+                "Notification": {
+                  "object": 30,
+                  "badge": 0,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": false,
+                    "grant_reply": false
+                  }
+                }
+              }
+            },
+            {
+              "slot": 2,
+              "cap": {
+                "Endpoint": {
+                  "object": 33,
+                  "badge": 1,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": true,
+                    "grant_reply": false
+                  }
+                }
+              }
+            },
+            {
+              "slot": 3,
+              "cap": {
+                "PageTable": {
+                  "object": 3
+                }
+              }
+            },
+            {
+              "slot": 4,
+              "cap": {
+                "Reply": {
+                  "object": 31
+                }
+              }
+            }
+          ],
+          "receive_all_untypeds": false
+        }
+      }
+    },
+    {
+      "name": "cnode_monitor",
+      "object": {
+        "CNode": {
+          "size_bits": 9,
+          "slots": [
+            {
+              "slot": 1,
+              "cap": {
+                "Endpoint": {
+                  "object": 33,
+                  "badge": 0,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": true,
+                    "grant_reply": false
+                  }
+                }
+              }
+            },
+            {
+              "slot": 2,
+              "cap": {
+                "Reply": {
+                  "object": 32
+                }
+              }
+            },
+            {
+              "slot": 10,
+              "cap": {
+                "Tcb": {
+                  "object": 26
+                }
+              }
+            }
+          ],
+          "receive_all_untypeds": false
+        }
+      }
+    },
+    {
+      "name": "cnode_hello_receiving_untypeds",
+      "object": {
+        "CNode": {
+          "size_bits": 8,
+          "slots": [
+            {
+              "slot": 0,
+              "cap": {
+                "CNode": {
+                  "object": 2,
+                  "guard": 0,
+                  "guard_size": 50
+                }
+              }
+            }
+          ],
+          "receive_all_untypeds": true
+        }
+      }
+    },
+    {
+      "name": "pud_hello",
+      "object": {
+        "PageTable": {
+          "x86_ept": false,
+          "is_root": true,
+          "level": 1,
+          "slots": [
+            {
+              "slot": 0,
+              "cap": {
+                "PageTable": {
+                  "object": 18
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "pud_monitor",
+      "object": {
+        "PageTable": {
+          "x86_ept": false,
+          "is_root": true,
+          "level": 1,
+          "slots": [
+            {
+              "slot": 0,
+              "cap": {
+                "PageTable": {
+                  "object": 19
+                }
+              }
+            },
+            {
+              "slot": 1023,
+              "cap": {
+                "PageTable": {
+                  "object": 20
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "frame_elf_hello_000000000",
+      "object": {
+        "Frame": {
+          "size_bits": 12,
+          "paddr": null,
+          "init": {
+            "entries": [
+              {
+                "range": {
+                  "start": 0,
+                  "end": 3179
+                },
+                "content": {
+                  "Data": {
+                    "elf_id": 0,
+                    "elf_seg_idx": 0,
+                    "elf_seg_data_range": {
+                      "start": 0,
+                      "end": 3179
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "receive_all_untypeds": false
+        }
+      }
+    },
+    {
+      "name": "frame_elf_hello_000000001",
+      "object": {
+        "Frame": {
+          "size_bits": 12,
+          "paddr": null,
+          "init": {
+            "entries": [
+              {
+                "range": {
+                  "start": 0,
+                  "end": 152
+                },
+                "content": {
+                  "Data": {
+                    "elf_id": 0,
+                    "elf_seg_idx": 1,
+                    "elf_seg_data_range": {
+                      "start": 0,
+                      "end": 152
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "receive_all_untypeds": false
+        }
+      }
+    },
+    {
+      "name": "frame_elf_monitor_000000000",
+      "object": {
+        "Frame": {
+          "size_bits": 12,
+          "paddr": null,
+          "init": {
+            "entries": [
+              {
+                "range": {
+                  "start": 0,
+                  "end": 4096
+                },
+                "content": {
+                  "Data": {
+                    "elf_id": 1,
+                    "elf_seg_idx": 0,
+                    "elf_seg_data_range": {
+                      "start": 0,
+                      "end": 4096
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "receive_all_untypeds": false
+        }
+      }
+    },
+    {
+      "name": "frame_elf_monitor_000000001",
+      "object": {
+        "Frame": {
+          "size_bits": 12,
+          "paddr": null,
+          "init": {
+            "entries": [
+              {
+                "range": {
+                  "start": 0,
+                  "end": 4096
+                },
+                "content": {
+                  "Data": {
+                    "elf_id": 1,
+                    "elf_seg_idx": 0,
+                    "elf_seg_data_range": {
+                      "start": 4096,
+                      "end": 8192
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "receive_all_untypeds": false
+        }
+      }
+    },
+    {
+      "name": "frame_elf_monitor_000000002",
+      "object": {
+        "Frame": {
+          "size_bits": 12,
+          "paddr": null,
+          "init": {
+            "entries": [
+              {
+                "range": {
+                  "start": 0,
+                  "end": 3056
+                },
+                "content": {
+                  "Data": {
+                    "elf_id": 1,
+                    "elf_seg_idx": 0,
+                    "elf_seg_data_range": {
+                      "start": 8192,
+                      "end": 11248
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "receive_all_untypeds": false
+        }
+      }
+    },
+    {
+      "name": "frame_elf_monitor_000000003",
+      "object": {
+        "Frame": {
+          "size_bits": 12,
+          "paddr": null,
+          "init": {
+            "entries": [
+              {
+                "range": {
+                  "start": 0,
+                  "end": 4096
+                },
+                "content": {
+                  "Data": {
+                    "elf_id": 1,
+                    "elf_seg_idx": 1,
+                    "elf_seg_data_range": {
+                      "start": 0,
+                      "end": 4096
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "receive_all_untypeds": false
+        }
+      }
+    },
+    {
+      "name": "frame_elf_monitor_000000004",
+      "object": {
+        "Frame": {
+          "size_bits": 12,
+          "paddr": null,
+          "init": {
+            "entries": [
+              {
+                "range": {
+                  "start": 0,
+                  "end": 4096
+                },
+                "content": {
+                  "Data": {
+                    "elf_id": 1,
+                    "elf_seg_idx": 1,
+                    "elf_seg_data_range": {
+                      "start": 4096,
+                      "end": 8192
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "receive_all_untypeds": false
+        }
+      }
+    },
+    {
+      "name": "frame_elf_monitor_000000005",
+      "object": {
+        "Frame": {
+          "size_bits": 12,
+          "paddr": null,
+          "init": {
+            "entries": [
+              {
+                "range": {
+                  "start": 0,
+                  "end": 544
+                },
+                "content": {
+                  "Data": {
+                    "elf_id": 1,
+                    "elf_seg_idx": 1,
+                    "elf_seg_data_range": {
+                      "start": 8192,
+                      "end": 8736
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "receive_all_untypeds": false
+        }
+      }
+    },
+    {
+      "name": "frame_ipcbuf_hello",
+      "object": {
+        "Frame": {
+          "size_bits": 12,
+          "paddr": null,
+          "init": {
+            "entries": []
+          },
+          "receive_all_untypeds": false
+        }
+      }
+    },
+    {
+      "name": "frame_ipcbuf_monitor",
+      "object": {
+        "Frame": {
+          "size_bits": 12,
+          "paddr": null,
+          "init": {
+            "entries": []
+          },
+          "receive_all_untypeds": false
+        }
+      }
+    },
+    {
+      "name": "frame_monitor_stack",
+      "object": {
+        "Frame": {
+          "size_bits": 12,
+          "paddr": null,
+          "init": {
+            "entries": []
+          },
+          "receive_all_untypeds": false
+        }
+      }
+    },
+    {
+      "name": "frame_mr_remaining_untypeds_000000000",
+      "object": {
+        "Frame": {
+          "size_bits": 12,
+          "paddr": null,
+          "init": {
+            "entries": []
+          },
+          "receive_all_untypeds": true
+        }
+      }
+    },
+    {
+      "name": "frame_mr_remaining_untypeds_000000001",
+      "object": {
+        "Frame": {
+          "size_bits": 12,
+          "paddr": null,
+          "init": {
+            "entries": []
+          },
+          "receive_all_untypeds": false
+        }
+      }
+    },
+    {
+      "name": "pd_hello_vaddr_0x0",
+      "object": {
+        "PageTable": {
+          "x86_ept": false,
+          "is_root": false,
+          "level": 2,
+          "slots": [
+            {
+              "slot": 1,
+              "cap": {
+                "PageTable": {
+                  "object": 21
+                }
+              }
+            },
+            {
+              "slot": 256,
+              "cap": {
+                "PageTable": {
+                  "object": 22
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "pd_monitor_vaddr_0x0",
+      "object": {
+        "PageTable": {
+          "x86_ept": false,
+          "is_root": false,
+          "level": 2,
+          "slots": [
+            {
+              "slot": 1,
+              "cap": {
+                "PageTable": {
+                  "object": 23
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "pd_monitor_vaddr_0xffc0000000",
+      "object": {
+        "PageTable": {
+          "x86_ept": false,
+          "is_root": false,
+          "level": 2,
+          "slots": [
+            {
+              "slot": 511,
+              "cap": {
+                "PageTable": {
+                  "object": 24
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "pt_hello_vaddr_0x200000",
+      "object": {
+        "PageTable": {
+          "x86_ept": false,
+          "is_root": false,
+          "level": 3,
+          "slots": [
+            {
+              "slot": 0,
+              "cap": {
+                "Frame": {
+                  "object": 5,
+                  "rights": {
+                    "read": true,
+                    "write": false,
+                    "grant": false,
+                    "grant_reply": false
+                  },
+                  "cached": true,
+                  "executable": true
+                }
+              }
+            },
+            {
+              "slot": 1,
+              "cap": {
+                "Frame": {
+                  "object": 6,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": false,
+                    "grant_reply": false
+                  },
+                  "cached": true,
+                  "executable": false
+                }
+              }
+            },
+            {
+              "slot": 2,
+              "cap": {
+                "Frame": {
+                  "object": 13,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": false,
+                    "grant_reply": false
+                  },
+                  "cached": true,
+                  "executable": false
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "pt_hello_vaddr_0x20000000",
+      "object": {
+        "PageTable": {
+          "x86_ept": false,
+          "is_root": false,
+          "level": 3,
+          "slots": [
+            {
+              "slot": 0,
+              "cap": {
+                "Frame": {
+                  "object": 16,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": false,
+                    "grant_reply": false
+                  },
+                  "cached": true,
+                  "executable": false
+                }
+              }
+            },
+            {
+              "slot": 1,
+              "cap": {
+                "Frame": {
+                  "object": 17,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": false,
+                    "grant_reply": false
+                  },
+                  "cached": true,
+                  "executable": false
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "pt_monitor_vaddr_0x200000",
+      "object": {
+        "PageTable": {
+          "x86_ept": false,
+          "is_root": false,
+          "level": 3,
+          "slots": [
+            {
+              "slot": 0,
+              "cap": {
+                "Frame": {
+                  "object": 7,
+                  "rights": {
+                    "read": true,
+                    "write": false,
+                    "grant": false,
+                    "grant_reply": false
+                  },
+                  "cached": true,
+                  "executable": true
+                }
+              }
+            },
+            {
+              "slot": 1,
+              "cap": {
+                "Frame": {
+                  "object": 8,
+                  "rights": {
+                    "read": true,
+                    "write": false,
+                    "grant": false,
+                    "grant_reply": false
+                  },
+                  "cached": true,
+                  "executable": true
+                }
+              }
+            },
+            {
+              "slot": 2,
+              "cap": {
+                "Frame": {
+                  "object": 9,
+                  "rights": {
+                    "read": true,
+                    "write": false,
+                    "grant": false,
+                    "grant_reply": false
+                  },
+                  "cached": true,
+                  "executable": true
+                }
+              }
+            },
+            {
+              "slot": 3,
+              "cap": {
+                "Frame": {
+                  "object": 10,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": false,
+                    "grant_reply": false
+                  },
+                  "cached": true,
+                  "executable": false
+                }
+              }
+            },
+            {
+              "slot": 4,
+              "cap": {
+                "Frame": {
+                  "object": 11,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": false,
+                    "grant_reply": false
+                  },
+                  "cached": true,
+                  "executable": false
+                }
+              }
+            },
+            {
+              "slot": 5,
+              "cap": {
+                "Frame": {
+                  "object": 12,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": false,
+                    "grant_reply": false
+                  },
+                  "cached": true,
+                  "executable": false
+                }
+              }
+            },
+            {
+              "slot": 6,
+              "cap": {
+                "Frame": {
+                  "object": 14,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": false,
+                    "grant_reply": false
+                  },
+                  "cached": true,
+                  "executable": false
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "pt_monitor_vaddr_0xffffe00000",
+      "object": {
+        "PageTable": {
+          "x86_ept": false,
+          "is_root": false,
+          "level": 3,
+          "slots": [
+            {
+              "slot": 511,
+              "cap": {
+                "Frame": {
+                  "object": 15,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": false,
+                    "grant_reply": false
+                  },
+                  "cached": true,
+                  "executable": false
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "cnode_hello_root",
+      "object": {
+        "CNode": {
+          "size_bits": 6,
+          "slots": [
+            {
+              "slot": 0,
+              "cap": {
+                "CNode": {
+                  "object": 0,
+                  "guard": 0,
+                  "guard_size": 49
+                }
+              }
+            },
+            {
+              "slot": 1,
+              "cap": {
+                "CNode": {
+                  "object": 2,
+                  "guard": 0,
+                  "guard_size": 50
+                }
+              }
+            }
+          ],
+          "receive_all_untypeds": false
+        }
+      }
+    },
+    {
+      "name": "tcb_hello",
+      "object": {
+        "Tcb": {
+          "slots": [
+            {
+              "slot": 0,
+              "cap": {
+                "CNode": {
+                  "object": 25,
+                  "guard": 0,
+                  "guard_size": 0
+                }
+              }
+            },
+            {
+              "slot": 1,
+              "cap": {
+                "PageTable": {
+                  "object": 3
+                }
+              }
+            },
+            {
+              "slot": 4,
+              "cap": {
+                "Frame": {
+                  "object": 13,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": false,
+                    "grant_reply": false
+                  },
+                  "cached": true,
+                  "executable": false
+                }
+              }
+            },
+            {
+              "slot": 5,
+              "cap": {
+                "Endpoint": {
+                  "object": 33,
+                  "badge": 1,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": true,
+                    "grant_reply": false
+                  }
+                }
+              }
+            },
+            {
+              "slot": 6,
+              "cap": {
+                "SchedContext": {
+                  "object": 28
+                }
+              }
+            },
+            {
+              "slot": 8,
+              "cap": {
+                "Notification": {
+                  "object": 30,
+                  "badge": 0,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": false,
+                    "grant_reply": false
+                  }
+                }
+              }
+            }
+          ],
+          "extra": {
+            "ipc_buffer_addr": 2105344,
+            "affinity": 0,
+            "prio": 0,
+            "max_prio": 0,
+            "resume": true,
+            "ip": 2097152,
+            "sp": 1099511627776,
+            "gprs": [],
+            "master_fault_ep": null
+          }
+        }
+      }
+    },
+    {
+      "name": "tcb_monitor",
+      "object": {
+        "Tcb": {
+          "slots": [
+            {
+              "slot": 1,
+              "cap": {
+                "PageTable": {
+                  "object": 4
+                }
+              }
+            },
+            {
+              "slot": 4,
+              "cap": {
+                "Frame": {
+                  "object": 14,
+                  "rights": {
+                    "read": true,
+                    "write": true,
+                    "grant": false,
+                    "grant_reply": false
+                  },
+                  "cached": true,
+                  "executable": false
+                }
+              }
+            },
+            {
+              "slot": 0,
+              "cap": {
+                "CNode": {
+                  "object": 1,
+                  "guard": 0,
+                  "guard_size": 55
+                }
+              }
+            },
+            {
+              "slot": 6,
+              "cap": {
+                "SchedContext": {
+                  "object": 29
+                }
+              }
+            }
+          ],
+          "extra": {
+            "ipc_buffer_addr": 2121728,
+            "affinity": 0,
+            "prio": 255,
+            "max_prio": 255,
+            "resume": true,
+            "ip": 2097152,
+            "sp": 1099511627776,
+            "gprs": [],
+            "master_fault_ep": null
+          }
+        }
+      }
+    },
+    {
+      "name": "sched_context_hello",
+      "object": {
+        "SchedContext": {
+          "size_bits": 8,
+          "extra": {
+            "period": 1000,
+            "budget": 1000,
+            "badge": 256
+          }
+        }
+      }
+    },
+    {
+      "name": "sched_context_monitor",
+      "object": {
+        "SchedContext": {
+          "size_bits": 8,
+          "extra": {
+            "period": 1000,
+            "budget": 1000,
+            "badge": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "ntfn_hello",
+      "object": "Notification"
+    },
+    {
+      "name": "reply_hello",
+      "object": "Reply"
+    },
+    {
+      "name": "reply_monitor",
+      "object": "Reply"
+    },
+    {
+      "name": "ep_fault_monitor",
+      "object": "Endpoint"
+    }
+  ],
+  "irqs": [],
+  "asid_slots": [],
+  "root_objects": {
+    "start": 0,
+    "end": 34
+  },
+  "untyped_covers": [],
+  "cached_orig_cap_slots": null,
+  "log_level": null
+}
