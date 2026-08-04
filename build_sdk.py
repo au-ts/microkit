@@ -78,7 +78,7 @@ DEFAULT_KERNEL_OPTIONS_AARCH64: KERNEL_OPTIONS = {
 DEFAULT_KERNEL_OPTIONS_X86_64: KERNEL_OPTIONS = {
     "KernelPlatform": "pc99",
     "KernelX86MicroArch": "generic",
-    "KernelIOMMU": True,
+    "KernelIOMMU": False,
 }
 
 
