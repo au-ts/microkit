@@ -651,7 +651,7 @@ pub fn build_capdl_spec(
     // Keep track of the global count of vCPU objects so we can bind them to the monitor for setting TCB name in debug config.
     // Only used on ARM and RISC-V as on x86-64 VMs share the same TCB as PD's which will have their TCB name set separately.
     let mut monitor_vcpu_idx = 0;
-
+    let mut pc_vspace_idxs: [u32; 10] = [0; 10];
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
 
@@ -668,6 +668,12 @@ pub fn build_capdl_spec(
 
         let pd_tcb_obj_id = pd_elf_spec.tcb;
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec_container, pd_tcb_obj_id);
+
+        if let Some(pager_idx) = pd.parent {
+            if (system.protection_domains[pager_idx].name == "pager") {
+                pc_vspace_idxs[system.protection_domains[pd_global_idx].id.unwrap() as usize] = pd_vspace_obj_id.0;
+            }   
+        }
 
         // In the benchmark configuration, we allow PDs to access their own TCB.
         // This is necessary for accessing kernel's benchmark API.
@@ -744,34 +750,37 @@ pub fn build_capdl_spec(
             ipcbuf_frame_cap,
         ));
 
-        // Step 4-3b: Create and map in the stack (bottom up)
-        let mut cur_stack_vaddr = kernel_config.pd_stack_bottom(pd.stack_size);
-        pd_stack_bottoms.push(cur_stack_vaddr);
-        let num_stack_frames = pd.stack_size / PageSize::Small as u64;
-        for stack_frame_seq in 0..num_stack_frames {
-            let stack_frame_obj_id = capdl_util_make_frame_obj(
-                &mut spec_container,
-                Fill {
-                    entries: [].to_vec(),
-                },
-                &format!("{}_stack_{:09}", pd.name, stack_frame_seq),
-                None,
-                PageSize::Small.fixed_size_bits(kernel_config) as u8,
-            );
-            let stack_frame_cap =
-                capdl_util_make_frame_cap(stack_frame_obj_id, true, true, false, true);
-            pd_elf_spec
-                .address_space
-                .map_page(
+        if (pd.backed) {
+            // Step 4-3b: Create and map in the stack (bottom up)
+            let mut cur_stack_vaddr = kernel_config.pd_stack_bottom(pd.stack_size);
+            pd_stack_bottoms.push(cur_stack_vaddr);
+            let num_stack_frames = pd.stack_size / PageSize::Small as u64;
+            for stack_frame_seq in 0..num_stack_frames {
+                let stack_frame_obj_id = capdl_util_make_frame_obj(
                     &mut spec_container,
-                    kernel_config,
-                    stack_frame_cap,
-                    PageSize::Small as u64,
-                    cur_stack_vaddr,
-                )
-                .unwrap();
-            cur_stack_vaddr += PageSize::Small as u64;
+                    Fill {
+                        entries: [].to_vec(),
+                    },
+                    &format!("{}_stack_{:09}", pd.name, stack_frame_seq),
+                    None,
+                    PageSize::Small.fixed_size_bits(kernel_config) as u8,
+                );
+                let stack_frame_cap =
+                    capdl_util_make_frame_cap(stack_frame_obj_id, true, true, false, true);
+                pd_elf_spec
+                    .address_space
+                    .map_page(
+                        &mut spec_container,
+                        kernel_config,
+                        stack_frame_cap,
+                        PageSize::Small as u64,
+                        cur_stack_vaddr,
+                    )
+                    .unwrap();
+                cur_stack_vaddr += PageSize::Small as u64;
+            }
         }
+        
 
         // Step 4-4 Create Scheduling Context
         let pd_sc_obj_id = capdl_util_make_sc_obj(
@@ -1182,6 +1191,19 @@ pub fn build_capdl_spec(
                 tcb: pd_tcb_obj_id,
             },
         );
+    }
+
+    if let Some((pager_idx, pager)) = system.protection_domains.iter().enumerate().find(|x| x.1.name == "pager") {
+        println!("There are {} children for the pager!", pager.child_pds.len());
+        // for (child_idx, child) in pager.child_pds.iter().enumerate() {
+        //     let thing = pd_name_idx[&child.name];
+        //     println!("inserting for child idx {child_idx} vspace of {}", pd_id_vspace_obj_id[&thing]);
+        //     pc_vspace_idxs[child_idx] = pd_id_vspace_obj_id[&thing];
+        // }
+        for i in  0..10 {
+            println!("index at {i} is {}", pc_vspace_idxs[i]);
+        }
+        elfs[pager_idx].write_symbol("vspaces", pc_vspace_idxs.iter().flat_map(|&f| f.to_ne_bytes()).collect::<Vec<_>>().as_slice());
     }
 
     // *********************************

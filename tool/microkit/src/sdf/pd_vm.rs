@@ -99,6 +99,7 @@ pub struct ProtectionDomain {
     pub setvar_id: Option<String>,
     /// Location in the parsed SDF file
     pub text_pos: Option<SdfLocation>,
+    pub backed: bool,
 }
 
 impl ProtectionDomain {
@@ -153,6 +154,7 @@ impl ProtectionDomain {
             "cpu",
             "domain",
             "fpu",
+            "backed",
         ];
         if is_child {
             attrs.push("id");
@@ -202,6 +204,21 @@ impl ProtectionDomain {
             }
         } else {
             false
+        };
+
+        let backed = if let Some(xml_backed) = node.attribute("backed") {
+            match str_to_bool(xml_backed) {
+                Some(val) => val,
+                None => {
+                    return Err(value_error(
+                        xml_sdf,
+                        node,
+                        "backed must be 'true' or 'false'".to_string(),
+                    ))
+                }
+            }
+        } else {
+            true
         };
 
         let stack_size = if let Some(xml_stack_size) = node.attribute("stack_size") {
@@ -800,6 +817,7 @@ impl ProtectionDomain {
             parent: None,
             setvar_id,
             text_pos: Some(node.range().start),
+            backed,
         })
     }
 }
