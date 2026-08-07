@@ -67,6 +67,12 @@ pub struct SysSetVar {
     pub kind: SysSetVarKind,
 }
 
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct SysVirtualPmu {
+    pub vpmu_idx: usize,
+    pub irq_ch: Option<u64>,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct ProtectionDomain {
     /// Only populated for child protection domains
@@ -88,6 +94,7 @@ pub struct ProtectionDomain {
     pub setvars: Vec<SysSetVar>,
     pub cap_maps: Vec<CapMap>,
     pub virtual_machine: Option<VirtualMachine>,
+    pub vpmus: Vec<SysVirtualPmu>,
     /// Only used when parsing child PDs. All elements will be removed
     /// once we flatten each PD and its children into one list.
     pub child_pds: Vec<ProtectionDomain>,
@@ -307,6 +314,7 @@ impl ProtectionDomain {
         let mut maps = Vec::new();
         let mut irqs = Vec::new();
         let mut ioports = Vec::new();
+        let mut vpmus = Vec::new();
         let mut setvars: Vec<SysSetVar> = Vec::new();
         let mut child_pds = Vec::new();
 
@@ -348,6 +356,28 @@ impl ProtectionDomain {
 
         for child in node.children() {
             match child.tag_name() {
+                "vpmu" => {
+                    if vpmus.len() >= 64 {
+                        println!("!!!Suspiciously large amount of vpmus instantiated, amount: {}", vpmus.len());
+                        return Err(value_error(xml_sdf, &*child, "Max of 64 VPMU's per PD".to_string()));
+                    }
+                    let vpmu_idx = vpmus.len();
+                    if let Some(xml_virq_id) = child.attribute("virq_id") {
+                        let virq_id = xml_virq_id.parse::<u64>().unwrap();
+
+                        if virq_id > PD_MAX_ID as u64 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &*child,
+                                format!("id must be < {}", PD_MAX_ID + 1),
+                            ));
+                        }
+                        
+                        vpmus.push(SysVirtualPmu { vpmu_idx, irq_ch: Some(virq_id)});
+                    } else {
+                        vpmus.push(SysVirtualPmu { vpmu_idx, irq_ch: None })
+                    }
+                }
                 "program_image" => {
                     check_attributes(xml_sdf, &*child, &["path", "path_for_symbols"])?;
                     if program_image.is_some() {
@@ -796,6 +826,7 @@ impl ProtectionDomain {
             cap_maps: cspace.map(|cspace| cspace.cap_maps).unwrap_or_default(),
             child_pds,
             virtual_machine,
+            vpmus,
             has_children,
             parent: None,
             setvar_id,

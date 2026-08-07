@@ -145,7 +145,8 @@ pub fn get_cap_view(
             | Cap::SchedContext(_)
             | Cap::IOSpace(_)
             | Cap::IOPageTable(_)
-            | Cap::Untyped(_) => {
+            | Cap::Untyped(_)
+            | Cap::Vpmu(_)=> {
                 /* ^ The caps above can occupy CSpace slots, but Viper
                  * verification currently has no use for them, so we
                  * intentionally do not emit anything here.

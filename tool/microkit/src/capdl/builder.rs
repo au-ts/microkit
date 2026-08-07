@@ -92,6 +92,7 @@ const PD_BASE_PD_TCB_CAP: u64 = PD_BASE_IRQ_CAP + 64;
 const PD_BASE_VM_TCB_CAP: u64 = PD_BASE_PD_TCB_CAP + 64;
 const PD_BASE_VCPU_CAP: u64 = PD_BASE_VM_TCB_CAP + 64;
 const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
+const PD_BASE_VPMU_CAP: u64 = PD_BASE_IOPORT_CAP + 64;
 
 /* This should be kept in sync with `PD_ROOT_CAP_BITS` in libmicrokit/include/microkit.h */
 const PD_ROOT_CAP_SIZE: u32 = 64;
@@ -865,6 +866,17 @@ pub fn build_capdl_spec(
                 (PD_BASE_IOPORT_CAP + ioport.id) as u32,
                 ioport_cap,
             ));
+        }
+
+        for vpmu in pd.vpmus.iter() {
+            println!("vpmu: ({}, {:?})", vpmu.vpmu_idx, vpmu.irq_ch);
+            // for now ignore irq_ch.
+
+            let vpmu_obj_id = capdl_util_make_vpmu_obj(&mut spec_container, &pd.name);
+            let vpmu_cap = capdl_util_make_vpmu_cap(vpmu_obj_id);
+            caps_to_insert_to_pd_cspace.push(
+                capdl_util_make_cte((PD_BASE_VPMU_CAP + vpmu.vpmu_idx as u64) as u32, vpmu_cap)
+            );
         }
 
         // Step 3-11 Create VM Spec.
