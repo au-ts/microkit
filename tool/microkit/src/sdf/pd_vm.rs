@@ -680,7 +680,7 @@ impl ProtectionDomain {
                         ));
                     }
 
-                    cspace = Some(CSpace::from_xml(xml_sdf, &*child)?);
+                    cspace = Some(CSpace::from_xml(config, xml_sdf, &*child)?);
                 }
                 _ => {
                     let pos = child.range().start;

@@ -1126,14 +1126,22 @@ It supports no attributes, but supports the following elements as children:
 * `cap_sc`: A capability to a protection domain's Scheduling Context (SC).
   If the protection domain is passive, this is a capability to the notification's scheduling context.
 * `cap_vspace`: A capability to a protection domain's VSpace.
+* `cap_smc`: (only on ARM) A badged capability for performing specific SMC calls.
 
 All of the elements support the `slot` attribute, which is is an opaque identifier used to address the capability at runtime.
 To convert the `slot` to an `seL4_CPtr`, use the [`seL4_CPtr microkit_cspace_root_slot_to_cptr(seL4_Word slot)`](#libmicrokit_cspace_root_slot_to_cptr) function.
 
 See the 'cap_sharing' example packaged in your SDK or [on GitHub](https://github.com/seL4/microkit/tree/main/example/cap_sharing).
 
-All capability elements (currently) all support the `pd` attribute, the name of the protection domain that the capability is from.
+The 'tcb', 'sc' and 'vspace' elements support `pd` attribute, the name of the protection domain that the capability is from.
 For instance, `<cap_tcb slot="1" pd="alpha">` will place the TCB of PD 'alpha' in the CSpace of the current PD.
+
+The `cap_smc` elements supports the `function_id` attribute. This is an allowlisted function ID permitted
+for an invocation on the SMC capability. If you want to support multiple SMC function invocations, create
+multiple `cap_smc` for each function ID. For example; to permit calls to the `PSCI_VERSION` (0x84000000)
+function, add `<cap_smc slot="1" function_id="0x84000000" />`. If you do not care about isolation,
+or are experimenting, specifying a `function_id="0"` grants an unbadged SMC capability that allows
+any SMC function invocations.
 
 ## `io_address_space`
 

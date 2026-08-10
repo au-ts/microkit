@@ -8,6 +8,7 @@ use core::ops::Range;
 use std::{
     cmp::{min, Ordering},
     collections::{BTreeMap, HashMap},
+    num::NonZeroU64,
     rc::Rc,
 };
 
@@ -604,18 +605,16 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 3. Create the PDs' spec
     // *********************************
-    // On ARM, check if we need to create the SMC object
-    let arm_smc_obj_id = if kernel_config.arch == Arch::Aarch64
-        && kernel_config.arm_smc.unwrap_or(false)
-        && system.protection_domains.values().any(|pd| pd.smc)
-    {
-        Some(spec_container.add_root_object(NamedObject {
-            name: "arm_smc".to_owned().into(),
-            object: Object::ArmSmc,
-        }))
-    } else {
-        None
-    };
+    // On ARM (only), get the SMC root cap object ID.
+    let arm_smc_obj_id =
+        if kernel_config.arch == Arch::Aarch64 && kernel_config.arm_smc.unwrap_or(false) {
+            Some(spec_container.add_root_object(NamedObject {
+                name: "arm_smc".to_owned().into(),
+                object: Object::ArmSmc,
+            }))
+        } else {
+            None
+        };
 
     // This object keeps track of object IDs for various 'important' / nameable kernel objects for
     // each PD so that we can make various references to them at later steps.
@@ -1273,6 +1272,10 @@ pub fn build_capdl_spec(
                         }
                     }
                 }
+                CapMapRefData::ArmSmcFunction { function_id } => capdl_util_make_arm_smc_cap(
+                    arm_smc_obj_id.unwrap(),
+                    function_id.map(NonZeroU64::get).unwrap_or(0).into(),
+                ),
             };
 
             // Map this into the destination pd's cspace and the specified slot.
