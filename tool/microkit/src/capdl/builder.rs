@@ -85,7 +85,6 @@ const PD_REPLY_CAP_IDX: u64 = 4;
 const PD_MONITOR_EP_CAP_IDX: u64 = 5;
 // Valid only in benchmark configuration.
 const PD_TCB_CAP_IDX: u64 = 6;
-const PD_ARM_SMC_CAP_IDX: u64 = 7;
 
 const PD_BASE_OUTPUT_NOTIFICATION_CAP: u64 = 10;
 const PD_BASE_OUTPUT_ENDPOINT_CAP: u64 = PD_BASE_OUTPUT_NOTIFICATION_CAP + 64;
@@ -1047,15 +1046,6 @@ pub fn build_capdl_spec(
                     monitor_vcpu_idx += 1;
                 }
             }
-        }
-
-        // Step 3-12 Create ARM SMC cap if requested.
-        if pd.smc {
-            caps_to_insert_to_pd_cspace.push(capdl_util_make_cte(
-                PD_ARM_SMC_CAP_IDX as u32,
-                // PD level SMC cap is all-function-id
-                capdl_util_make_arm_smc_cap(arm_smc_obj_id.unwrap(), 0.into()),
-            ));
         }
 
         // Step 3-13 Create CSpace and add all caps that the PD code and libmicrokit need to access.
