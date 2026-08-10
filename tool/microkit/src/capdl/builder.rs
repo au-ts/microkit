@@ -1054,7 +1054,8 @@ pub fn build_capdl_spec(
         if pd.smc {
             caps_to_insert_to_pd_cspace.push(capdl_util_make_cte(
                 PD_ARM_SMC_CAP_IDX as u32,
-                capdl_util_make_arm_smc_cap(arm_smc_obj_id.unwrap()),
+                // PD level SMC cap is all-function-id
+                capdl_util_make_arm_smc_cap(arm_smc_obj_id.unwrap(), 0.into()),
             ));
         }
 
