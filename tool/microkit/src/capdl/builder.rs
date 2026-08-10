@@ -654,7 +654,7 @@ pub fn build_capdl_spec(
     let mut pc_vspace_idxs: [u32; 10] = [0; 10];
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
-
+    let mut pd_id_to_cspace_id: HashMap<usize, ObjectId> = HashMap::new();
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
         let elf_obj = &elfs[pd_global_idx];
 
@@ -1104,6 +1104,9 @@ pub fn build_capdl_spec(
             caps_to_insert_to_pd_cspace,
             false,
         );
+
+        pd_id_to_cspace_id.insert(pd_global_idx, pd_cnode_obj_id);
+
         let pd_guard_size =
             kernel_config.cap_address_bits - PD_CAP_BITS as u64 - PD_ROOT_CAP_BITS as u64;
         let pd_cnode_cap = capdl_util_make_cnode_cap(pd_cnode_obj_id, 0, pd_guard_size as u8);
@@ -1194,12 +1197,30 @@ pub fn build_capdl_spec(
     }
 
     if let Some((pager_idx, pager)) = system.protection_domains.iter().enumerate().find(|x| x.1.name == "pager") {
+        const PAGER_CSPACE_SLOT: u32 = 5;
+        let mut cspace_idx: u32 = 0;
         println!("There are {} children for the pager!", pager.child_pds.len());
         // for (child_idx, child) in pager.child_pds.iter().enumerate() {
         //     let thing = pd_name_idx[&child.name];
         //     println!("inserting for child idx {child_idx} vspace of {}", pd_id_vspace_obj_id[&thing]);
         //     pc_vspace_idxs[child_idx] = pd_id_vspace_obj_id[&thing];
         // }
+        
+        for (pd_idx, pd_obj) in system.protection_domains.iter().enumerate() {
+            if let Some(parent) = pd_obj.parent {
+                if (parent == pager_idx) {
+                    capdl_util_insert_cap_into_cspace(
+                        &mut spec_container, 
+                        pd_id_to_cspace_id[&pager_idx], 
+                        PAGER_CSPACE_SLOT + cspace_idx as u32, 
+                        capdl_util_make_page_table_cap(ObjectId(pc_vspace_idxs[pd_obj.id.unwrap() as usize]))
+                    );
+                    pc_vspace_idxs[pd_obj.id.unwrap() as usize] = (PAGER_CSPACE_SLOT + cspace_idx) as u32;
+                    cspace_idx += 1;
+                }
+
+            }
+        }
         for i in  0..10 {
             println!("index at {i} is {}", pc_vspace_idxs[i]);
         }
