@@ -20,9 +20,33 @@ pub enum CapMapType {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub enum CapMapRefDataPdKind {
+    Tcb,
+    Sc,
+    VSpace,
+}
+
+impl From<CapMapType> for CapMapRefDataPdKind {
+    fn from(value: CapMapType) -> Self {
+        match value {
+            CapMapType::Tcb => CapMapRefDataPdKind::Tcb,
+            CapMapType::Sc => CapMapRefDataPdKind::Sc,
+            CapMapType::VSpace => CapMapRefDataPdKind::VSpace,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum CapMapRefData {
+    Pd {
+        pd: Rc<str>,
+        kind: CapMapRefDataPdKind,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct CapMap {
-    pub cap_type: CapMapType,
-    pub pd: Rc<str>,
+    pub ref_data: CapMapRefData,
     // The destination "slot" in the CSpace: note that this is "opaque" and
     // can be shifted depending on the location in the CSpace to work as the CPtr,
     // but here it is given as the index into the CNode.
@@ -45,9 +69,19 @@ impl CapMap {
         // At the moment the four cap maps we support all have the 'pd' element,
         // so we can include it here. When that stops being the case we will
         // have to rework this a bit.
-        check_attributes(xml_sdf, node, &["slot", "pd"])?;
 
-        let pd = Rc::from(checked_lookup(xml_sdf, node, "pd")?);
+        let ref_data = match cap_type {
+            CapMapType::Tcb | CapMapType::Sc | CapMapType::VSpace => {
+                check_attributes(xml_sdf, node, &["slot", "pd"])?;
+
+                let pd = Rc::from(checked_lookup(xml_sdf, node, "pd")?);
+
+                CapMapRefData::Pd {
+                    pd,
+                    kind: cap_type.into(),
+                }
+            }
+        };
 
         let slot: u64 = sdf_parse_required_attribute(xml_sdf, node, "slot")?;
 
@@ -69,11 +103,20 @@ impl CapMap {
         }
 
         Ok(CapMap {
-            cap_type,
-            pd,
+            ref_data,
             slot,
             text_pos: node.range().start,
         })
+    }
+
+    pub(crate) fn format_for_slot_collision(&self, xml_sdf: &SystemDescriptionFile) -> String {
+        let loc = loc_string(xml_sdf, self.text_pos);
+
+        match &self.ref_data {
+            CapMapRefData::Pd { pd, kind, .. } => {
+                format!("pd '{pd}'s {kind:?} at '{loc}'")
+            }
+        }
     }
 }
 

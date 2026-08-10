@@ -1488,8 +1488,8 @@ mod system {
             &DEFAULT_AARCH64_KERNEL_CONFIG,
             "pd_cap_mappings_overlapping.system",
             r#"Error: overlapping user caps in slot 3 of protection domain 'pd_b':
-  type VSpace from 'pd_a' at 'pd_cap_mappings_overlapping.system:23:13'
-  type VSpace from 'pd_a' at 'pd_cap_mappings_overlapping.system:25:13'"#,
+  pd 'pd_a's VSpace at 'pd_cap_mappings_overlapping.system:23:13'
+  pd 'pd_a's VSpace at 'pd_cap_mappings_overlapping.system:25:13'"#,
         )
     }
 

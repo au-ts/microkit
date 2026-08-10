@@ -25,8 +25,8 @@ use crate::{
     },
     elf::ElfFile,
     sdf::{
-        CapMapType, CpuCore, Map, SystemDescription, BUDGET_DEFAULT, MONITOR_DOMAIN,
-        MONITOR_PD_NAME, MONITOR_PRIORITY,
+        CapMapRefData, CapMapRefDataPdKind, CpuCore, Map, SystemDescription, BUDGET_DEFAULT,
+        MONITOR_DOMAIN, MONITOR_PD_NAME, MONITOR_PRIORITY,
     },
     sel4::{Arch, Config, PageSize},
     util::{ranges_overlap, round_down, round_up},
@@ -1257,14 +1257,21 @@ pub fn build_capdl_spec(
     // *********************************
     for pd in system.protection_domains.values() {
         for cap_map in pd.cap_maps.iter() {
-            // TODO: Once we add more CapMap options, they might not all have
-            // the pd_name. But for now, they do.
-            let pd_src_shadow_cspace = &pd_shadow_cspaces[&cap_map.pd];
-
-            let cap_map_obj = match cap_map.cap_type {
-                CapMapType::Tcb => capdl_util_make_tcb_cap(pd_src_shadow_cspace.tcb),
-                CapMapType::Sc => capdl_util_make_sc_cap(pd_src_shadow_cspace.sched_context),
-                CapMapType::VSpace => capdl_util_make_page_table_cap(pd_src_shadow_cspace.vspace),
+            let cap_map_obj = match &cap_map.ref_data {
+                CapMapRefData::Pd { pd, kind, .. } => {
+                    let pd_src_shadow_cspace = &pd_shadow_cspaces[pd];
+                    match kind {
+                        CapMapRefDataPdKind::Tcb => {
+                            capdl_util_make_tcb_cap(pd_src_shadow_cspace.tcb)
+                        }
+                        CapMapRefDataPdKind::Sc => {
+                            capdl_util_make_sc_cap(pd_src_shadow_cspace.sched_context)
+                        }
+                        CapMapRefDataPdKind::VSpace => {
+                            capdl_util_make_page_table_cap(pd_src_shadow_cspace.vspace)
+                        }
+                    }
+                }
             };
 
             // Map this into the destination pd's cspace and the specified slot.
