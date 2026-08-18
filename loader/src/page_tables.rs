@@ -6,6 +6,9 @@
 
 #![no_std]
 
+// We prefer indices as it matches the semantics of PT indices
+#![allow(clippy::needless_range_loop)]
+
 mod c_interop;
 
 use core::cmp::min;

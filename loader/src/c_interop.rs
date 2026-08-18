@@ -50,7 +50,7 @@ mod real_hardware {
     fn panic(info: &PanicInfo) -> ! {
         println!("panicked");
 
-        if let Err(_) = writeln!(Writer, "{}", info) {
+        if writeln!(Writer, "{}", info).is_err() {
             // If writeln!() fails (which it should never as our fmt::Write) never
             // fails, then just don't print the extra information.
             println!("panicked (information unknown)");

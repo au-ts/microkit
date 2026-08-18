@@ -808,6 +808,13 @@ def test_loader(build_dir: Path) -> None:
     if r != 0:
         raise Exception(f"Tests failed: loader")
 
+    # We don't pass CLIPPYARGS, so this is warning-only
+    r = system(
+        f"make -C loader clippy {make_args}"
+    )
+    if r != 0:
+        raise Exception(f"Clippy failed: loader")
+
 
 def build_elf_component(
     component_name: str,

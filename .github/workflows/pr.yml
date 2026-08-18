@@ -27,6 +27,8 @@ jobs:
       - name: Run Clippy
         # Make sure CI fails on all warnings, including Clippy lints
         run: nix develop --ignore-environment -c bash -c "cd tool/microkit && cargo-clippy --all-targets --all-features -- -D warnings -Wclippy::get_unwrap"
+      - name: Run Clippy (Loader)
+        run: nix develop --ignore-environment -c bash -c 'make -C loader clippy CLIPPYFLAGS="-D warnings -Wclippy::get_unwrap" BUILD_DIR=$(mktemp -d) ARCH=dummy BOARD=dummy SEL4_SDK=dummy TARGET_TRIPLE=dummy LLVM=False LINK_ADDRESS=0'
 
   rustfmt_check:
     runs-on: [self-hosted, macos, ARM64]

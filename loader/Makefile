@@ -122,15 +122,20 @@ rusttest_%: src/%.rs
 		--crate-name "$@" \
 		$<
 
+tests: rusttest_page_tables
+	$(BUILD_DIR)/rusttest_page_tables
+
+
+CLIPPYFLAGS ?=
+
 rustclippy_%: src/%.rs
 	$(CLIPPY) $(RUSTFLAGS) \
 		--emit dep-info,metadata,link \
 		--out-dir $(BUILD_DIR) -L dependency=$(BUILD_DIR) \
-		-Dwarnings \
+		$(CLIPPYFLAGS) \
 		-Cpanic=abort \
 		--crate-type staticlib \
 		--crate-name "$@" \
 		$<
 
-tests: rusttest_page_tables rustclippy_page_tables
-	$(BUILD_DIR)/rusttest_page_tables
+clippy: rustclippy_page_tables
