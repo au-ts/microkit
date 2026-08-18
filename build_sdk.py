@@ -800,7 +800,7 @@ def test_loader(build_dir: Path) -> None:
     build_dir = build_dir / "loader"
     build_dir.mkdir(exist_ok=True, parents=True)
 
-    make_args = f"BUILD_DIR={build_dir.absolute()} ARCH=dummy BOARD=dummy SEL4_SDK=dummy TARGET_TRIPLE=dummy LLVM=False LINK_ADDRESS=0"
+    make_args = f"BUILD_DIR={build_dir.absolute()} RUST_ONLY=True"
 
     r = system(
         f"make -C loader tests {make_args}"

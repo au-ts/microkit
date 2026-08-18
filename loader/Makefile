@@ -3,6 +3,15 @@
 #
 # SPDX-License-Identifier: BSD-2-Clause
 #
+
+ifneq ($(strip $(RUST_ONLY)),)
+	ARCH := dummy
+	BOARD := dummy
+	LINK_ADDRESS := dummy
+	TARGET_TRIPLE := dummy
+	SEL4_SDK := dummy
+endif
+
 ifeq ($(strip $(BUILD_DIR)),)
 $(error BUILD_DIR must be specified)
 endif
@@ -37,6 +46,7 @@ endif
 
 RUSTC := rustc
 CLIPPY := clippy-driver
+RUSTFMT := rustfmt
 
 ifeq ($(ARCH),aarch64)
 	CFLAGS_AARCH64 := -mcpu=$(GCC_CPU) -mgeneral-regs-only -mstrict-align -mno-outline-atomics
@@ -59,7 +69,9 @@ CFLAGS := -std=gnu11 -g -O3 -nostdlib -ffreestanding \
 
 ASM_FLAGS := $(ASM_FLAGS_ARCH) -g -MP -MD -I$(SEL4_SDK)/include
 
-RUSTFLAGS := --edition 2024 -g -C opt-level=2
+RUST_EDITION := 2024
+RUSTFLAGS := --edition $(RUST_EDITION) -g -C opt-level=2
+CLIPPY_FLAGS ?=
 
 PROGS := loader.elf
 OBJECTS := loader.o crt0.o uart.o cutil.o libpage_tables.a
@@ -69,6 +81,8 @@ ifeq ($(ARCH),aarch64)
 else ifeq ($(ARCH),riscv64)
 	OBJECTS += exceptions.o init.o mmu.o cpus.o sbi.o
 endif
+
+RUST_CRATES := page_tables
 
 LINKSCRIPT_INPUT := $(ARCH).ld
 LINKSCRIPT := $(BUILD_DIR)/link.ld
@@ -122,11 +136,8 @@ rusttest_%: src/%.rs
 		--crate-name "$@" \
 		$<
 
-tests: rusttest_page_tables
+tests: $(addprefix rusttest_, $(RUST_CRATES))
 	$(BUILD_DIR)/rusttest_page_tables
-
-
-CLIPPYFLAGS ?=
 
 rustclippy_%: src/%.rs
 	$(CLIPPY) $(RUSTFLAGS) \
@@ -138,4 +149,14 @@ rustclippy_%: src/%.rs
 		--crate-name "$@" \
 		$<
 
-clippy: rustclippy_page_tables
+clippy: $(addprefix rustclippy_, $(RUST_CRATES))
+
+rustfmt_%: src/%.rs
+	$(RUSTFMT) $(RUSTFMT_FLAGS) \
+		--edition $(RUST_EDITION) --style-edition $(RUST_EDITION) \
+		$<
+
+rustfmt: $(addprefix rustfmt_, $(RUST_CRATES))
+
+rustfmt-check: RUSTFMT_FLAGS += --check
+rustfmt-check: rustfmt

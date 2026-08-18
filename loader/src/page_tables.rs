@@ -5,7 +5,6 @@
 //
 
 #![no_std]
-
 // We prefer indices as it matches the semantics of PT indices
 #![allow(clippy::needless_range_loop)]
 
@@ -31,11 +30,7 @@ const fn mask(n: u64) -> u64 {
 
 const fn round_down(n: u64, x: u64) -> u64 {
     let (_, m) = divmod(n, x);
-    if m == 0 {
-        n
-    } else {
-        n - m
-    }
+    if m == 0 { n } else { n - m }
 }
 
 const fn align_down(n: u64, bits: u64) -> u64 {
@@ -408,7 +403,7 @@ pub extern "C" fn riscv64_setup_pagetables(
     kernel_first_paddr: u64,
     page_tables_paddr_start: u64,
 ) -> u64 {
-    use riscv64::{pt_index, pte_leaf, pte_next, BLOCK_BITS_1GB, BLOCK_BITS_2MB, PAGE_BITS_4K};
+    use riscv64::{BLOCK_BITS_1GB, BLOCK_BITS_2MB, PAGE_BITS_4K, pt_index, pte_leaf, pte_next};
 
     let text_addr = &raw const _text as u64;
 
@@ -628,9 +623,10 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
     page_table_bytes: &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; MAX_NUM_PAGE_TABLES],
 ) -> AArch64ReturnValue {
     use aarch64::{
-        block_descriptor, lvl0_index, lvl1_index, lvl2_index, lvl3_index, page_descriptor,
+        BLOCK_BITS_1GB, BLOCK_BITS_2MB, BLOCK_BITS_512GB, PAGE_BITS_4KB, block_descriptor,
+        lvl0_index, lvl1_index, lvl2_index, lvl3_index, page_descriptor,
         s1_mair_attr_index::{MT_DEVICE_nGnRnE, MT_NORMAL},
-        table_descriptor, BLOCK_BITS_1GB, BLOCK_BITS_2MB, BLOCK_BITS_512GB, PAGE_BITS_4KB,
+        table_descriptor,
     };
 
     const PAGE_TABLE_ENTRIES: usize = PAGE_TABLE_SIZE / mem::size_of::<u64>();
@@ -807,7 +803,13 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
                 if region.start >= lvl2_vaddr_top {
                     if lvl2_pt != [0; _] {
                         let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut lvl2_pt);
-                        println!("[iter] Serialise lvl2 table: {:#x} for to {:#x}..{lvl2_vaddr_top:#x}, base: {:#x} lvl1_index(base): {:#x}", lvl2_pt_paddr as usize, (lvl2_vaddr_top - (1 << BLOCK_BITS_1GB)), base, lvl1_index(base));
+                        println!(
+                            "[iter] Serialise lvl2 table: {:#x} for to {:#x}..{lvl2_vaddr_top:#x}, base: {:#x} lvl1_index(base): {:#x}",
+                            lvl2_pt_paddr as usize,
+                            (lvl2_vaddr_top - (1 << BLOCK_BITS_1GB)),
+                            base,
+                            lvl1_index(base)
+                        );
                         assert!(lvl1_pt[lvl1_index(base)] == 0);
                         lvl1_pt[lvl1_index(base)] = table_descriptor(lvl2_pt_paddr);
                     }
@@ -903,7 +905,9 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
                             // page table object and add it to the list.
 
                             // This should be possible to handle - we just need to break out of this loop
-                            todo!("handle the case where top of lvl1 is occupied - this would be near the top of 512GiB");
+                            todo!(
+                                "handle the case where top of lvl1 is occupied - this would be near the top of 512GiB"
+                            );
                         }
 
                         // Invariant: Lower levels are empty.
@@ -935,7 +939,9 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
                             lvl1_pt[lvl1_index(base)] = table_descriptor(lvl2_pt_paddr);
 
                             if top == lvl1_vaddr_top {
-                                todo!("handle the case where top of lvl1 is occupied - this would be near the top of 512GiB");
+                                todo!(
+                                    "handle the case where top of lvl1 is occupied - this would be near the top of 512GiB"
+                                );
                             }
                         }
 
@@ -982,7 +988,9 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
                                 lvl1_pt[lvl1_index(base)] = table_descriptor(lvl2_pt_paddr);
 
                                 if top == lvl1_vaddr_top {
-                                    todo!("handle the case where top of lvl1 is occupied - this would be near the top of 512GiB");
+                                    todo!(
+                                        "handle the case where top of lvl1 is occupied - this would be near the top of 512GiB"
+                                    );
                                 }
                             }
                         }
@@ -1010,7 +1018,13 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
 
         if lvl2_pt != [0; _] {
             let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut lvl2_pt);
-            println!("[end] Serialise lvl2 table: {:#x} for to {:#x}..{lvl2_vaddr_top:#x}, base: {:#x} lvl1_index(base): {:#x}", lvl2_pt_paddr as usize, (lvl2_vaddr_top - (1 << BLOCK_BITS_1GB)), base, lvl1_index(base));
+            println!(
+                "[end] Serialise lvl2 table: {:#x} for to {:#x}..{lvl2_vaddr_top:#x}, base: {:#x} lvl1_index(base): {:#x}",
+                lvl2_pt_paddr as usize,
+                (lvl2_vaddr_top - (1 << BLOCK_BITS_1GB)),
+                base,
+                lvl1_index(base)
+            );
             assert!(lvl1_pt[lvl1_index(base)] == 0);
             lvl1_pt[lvl1_index(base)] = table_descriptor(lvl2_pt_paddr);
         }
