@@ -727,7 +727,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
     let kernel_lvl1_pt_paddr = {
         // First, the Level 2 Upr table.
         let lvl2_pt_paddr = {
-            let mut lvl2_pt_kernel = &mut pt_temporaries[0];
+            let lvl2_pt_kernel = &mut pt_temporaries[0];
 
             let mut vaddr = m;
             let mut paddr = p;
@@ -738,14 +738,14 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
                 paddr += 1 << BLOCK_BITS_2MB;
             }
 
-            serialise_page_table_to_paddr(&mut lvl2_pt_kernel)
+            serialise_page_table_to_paddr(lvl2_pt_kernel)
         };
 
         // Then, the Level 1 Upr table.
-        let mut lvl1_pt_kernel = &mut pt_temporaries[0];
+        let lvl1_pt_kernel = &mut pt_temporaries[0];
         lvl1_pt_kernel[lvl1_index(l)] = table_descriptor(lvl2_pt_paddr);
 
-        serialise_page_table_to_paddr(&mut lvl1_pt_kernel)
+        serialise_page_table_to_paddr(lvl1_pt_kernel)
     };
 
     // Manufacture the RAM page tables, which is a little bit more complicated.
@@ -773,17 +773,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         // When the current vaddr (/paddr, as identity mapped) exceeds the
         // top value we rotate to a new PT.
 
-        // let mut lvl1_pt = &mut pt_temporaries[1];
-        // let mut lvl2_pt = &mut pt_temporaries[2];
-        // let mut lvl3_pt = &mut pt_temporaries[3];
-
-        let (_, rest) = pt_temporaries.split_at_mut(1);
-        let (lvl1_pt, rest) = rest.split_at_mut(1);
-        let (lvl2_pt, rest) = rest.split_at_mut(1);
-        let (lvl3_pt, rest) = rest.split_at_mut(1);
-        let mut lvl1_pt = &mut lvl1_pt[0];
-        let mut lvl2_pt = &mut lvl2_pt[0];
-        let mut lvl3_pt = &mut lvl3_pt[0];
+        let [lvl1_pt, lvl2_pt, lvl3_pt] = pt_temporaries.get_disjoint_mut([1, 2, 3]).unwrap();
 
         // TODO: These should be defines. Note that the top is the size of 1 level of the next level up.
         // TODO: LVL1_ENTRY_RANGE? idk
@@ -832,7 +822,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
             {
                 if region.start >= lvl3_vaddr_top {
                     if lvl3_pt != &[0; _] {
-                        let lvl3_pt_paddr = serialise_page_table_to_paddr(&mut lvl3_pt);
+                        let lvl3_pt_paddr = serialise_page_table_to_paddr(lvl3_pt);
                         println!(
                             "[iter] Serialise lvl3 table: {:#x} for to {:#x}..{lvl3_vaddr_top:#x}",
                             lvl3_pt_paddr as usize,
@@ -850,7 +840,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
 
                 if region.start >= lvl2_vaddr_top {
                     if lvl2_pt != &[0; _] {
-                        let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut lvl2_pt);
+                        let lvl2_pt_paddr = serialise_page_table_to_paddr(lvl2_pt);
                         println!(
                             "[iter] Serialise lvl2 table: {:#x} for to {:#x}..{lvl2_vaddr_top:#x}, base: {:#x} lvl1_index(base): {:#x}",
                             lvl2_pt_paddr as usize,
@@ -980,7 +970,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
                             // Invariant maintenance: keep for current address range.
                             // As we're the top of the range, we can serialise the table.
 
-                            let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut lvl2_pt);
+                            let lvl2_pt_paddr = serialise_page_table_to_paddr(lvl2_pt);
                             // println!("Serialise lvl2 table: {lvl2_pt_paddr:#x} up to {lvl2_vaddr_top:#x}");
                             lvl2_vaddr_top += 1 << BLOCK_BITS_1GB;
 
@@ -1012,7 +1002,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
                             // Invariant maintenance: keep for current address range.
                             // As we're the top of the range, we can serialise the table.
 
-                            let lvl3_pt_paddr = serialise_page_table_to_paddr(&mut lvl3_pt);
+                            let lvl3_pt_paddr = serialise_page_table_to_paddr(lvl3_pt);
                             println!(
                                 "Serialise lvl3 table: {:#x} for to {:#x}..{lvl3_vaddr_top:#x}",
                                 lvl3_pt_paddr as usize,
@@ -1024,7 +1014,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
                             lvl2_pt[lvl2_index(base)] = table_descriptor(lvl3_pt_paddr);
 
                             if top == lvl2_vaddr_top {
-                                let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut lvl2_pt);
+                                let lvl2_pt_paddr = serialise_page_table_to_paddr(lvl2_pt);
                                 println!(
                                     "Serialise lvl2 table: {:#x} for to {:#x}..{lvl2_vaddr_top:#x}",
                                     lvl2_pt_paddr as usize,
@@ -1058,14 +1048,14 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         // serialise these.
 
         if lvl3_pt != &[0; _] {
-            let lvl3_pt_paddr = serialise_page_table_to_paddr(&mut lvl3_pt);
+            let lvl3_pt_paddr = serialise_page_table_to_paddr(lvl3_pt);
             println!("[end] Serialise lvl3 table: {:#x}", lvl3_pt_paddr as usize);
             assert!(lvl2_pt[lvl2_index(base)] == 0);
             lvl2_pt[lvl2_index(base)] = table_descriptor(lvl3_pt_paddr);
         }
 
         if lvl2_pt != &[0; _] {
-            let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut lvl2_pt);
+            let lvl2_pt_paddr = serialise_page_table_to_paddr(lvl2_pt);
             println!(
                 "[end] Serialise lvl2 table: {:#x} for to {:#x}..{lvl2_vaddr_top:#x}, base: {:#x} lvl1_index(base): {:#x}",
                 lvl2_pt_paddr as usize,
@@ -1081,7 +1071,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         assert!(lvl1_pt != &[0; _]);
 
         // println!("New lvl1 table");
-        serialise_page_table_to_paddr(&mut lvl1_pt)
+        serialise_page_table_to_paddr(lvl1_pt)
     };
 
     struct Config {
@@ -1097,13 +1087,13 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         // Manufacture the Level 0 table, containing the kernel table
         // and the RAM tables.
 
-        let mut ttbr0_el2_pt = &mut pt_temporaries[0];
+        let ttbr0_el2_pt = &mut pt_temporaries[0];
 
         assert!(lvl0_index(k) != lvl0_index(0));
         ttbr0_el2_pt[lvl0_index(k)] = table_descriptor(kernel_lvl1_pt_paddr);
         ttbr0_el2_pt[lvl0_index(0)] = table_descriptor(ram_lvl1_pt_paddr);
 
-        let ttbr0_el2 = serialise_page_table_to_paddr(&mut ttbr0_el2_pt);
+        let ttbr0_el2 = serialise_page_table_to_paddr(ttbr0_el2_pt);
 
         AArch64ReturnValue {
             ttbr0_el2,
@@ -1111,18 +1101,15 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
             ttbr1_el1: AArch64ReturnValue::INVALID,
         }
     } else {
-        // let mut ttbr0_el1_pt = &mut pt_temporaries[0];
-        let mut ttbr1_el1_pt = &mut pt_temporaries[1];
+        let [ttbr0_el1_pt, ttbr1_el1_pt] = pt_temporaries.get_disjoint_mut([0, 1]).unwrap();
 
         // Kernel in TTBR1 (Upper)
         ttbr1_el1_pt[lvl0_index(k)] = table_descriptor(kernel_lvl1_pt_paddr);
-        let ttbr1_el1 = serialise_page_table_to_paddr(&mut ttbr1_el1_pt);
-        let mut ttbr0_el1_pt = &mut pt_temporaries[0];
         // Identity-mapped RAM in TTBR0 (Lower)
         ttbr0_el1_pt[lvl0_index(0)] = table_descriptor(ram_lvl1_pt_paddr);
 
-        let ttbr0_el1 = serialise_page_table_to_paddr(&mut ttbr0_el1_pt);
-        // let ttbr1_el1 = serialise_page_table_to_paddr(&mut ttbr1_el1_pt);
+        let ttbr0_el1 = serialise_page_table_to_paddr(ttbr0_el1_pt);
+        let ttbr1_el1 = serialise_page_table_to_paddr(ttbr1_el1_pt);
 
         AArch64ReturnValue {
             ttbr0_el2: AArch64ReturnValue::INVALID,
