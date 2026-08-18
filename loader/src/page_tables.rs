@@ -11,6 +11,7 @@ mod c_interop;
 use core::cmp::min;
 use core::mem;
 use core::mem::MaybeUninit;
+use core::slice;
 
 use c_interop::println;
 
@@ -512,14 +513,23 @@ pub extern "C" fn riscv64_setup_pagetables(
 #[repr(C)]
 #[derive(Debug)]
 pub struct AArch64ReturnValue {
-    ttbr0_el2: *const u8,
-    ttbr0_el1: *const u8,
-    ttbr1_el1: *const u8,
+    pub ttbr0_el2: *const u8,
+    pub ttbr0_el1: *const u8,
+    pub ttbr1_el1: *const u8,
 }
 
 impl AArch64ReturnValue {
     const INVALID: *const u8 = usize::MAX as *const _;
 }
+
+#[derive(Debug, Copy, Clone)]
+pub struct Region {
+    pub start: u64,
+    pub end: u64,
+}
+
+pub const MAX_NUM_PAGE_TABLES: usize = 64;
+pub const MAX_NUM_REGIONS: usize = 16;
 
 /// AArch64 loader page tables have two variations:
 ///  - Loader in EL2, then Stage 1 translations in use, so we have the
@@ -586,7 +596,13 @@ impl AArch64ReturnValue {
 pub extern "C" fn aarch64_setup_pagetables(
     kernel_first_vaddr: u64,
     kernel_first_paddr: u64,
-    page_table_bytes: &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; 100],
+    ram_regions_ptr: *const Region,
+    ram_regions_len: usize,
+    device_regions_ptr: *const Region,
+    device_regions_len: usize,
+    // Both of these are out-params / storage used.
+    page_table_bytes: &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; MAX_NUM_PAGE_TABLES],
+    regions: &mut [MaybeUninit<(Region, u64)>; MAX_NUM_REGIONS],
 ) -> AArch64ReturnValue {
     use aarch64::{
         block_descriptor, lvl0_index, lvl1_index, lvl2_index, lvl3_index, page_descriptor,
@@ -594,8 +610,11 @@ pub extern "C" fn aarch64_setup_pagetables(
         table_descriptor, BLOCK_BITS_1GB, BLOCK_BITS_2MB, BLOCK_BITS_512GB, PAGE_BITS_4KB,
     };
 
-    let kernel_first_vaddr = 551366426624;
-    let kernel_first_paddr = 1610612736;
+    let ram_regions = unsafe { slice::from_raw_parts(ram_regions_ptr, ram_regions_len) };
+    let device_regions = unsafe { slice::from_raw_parts(device_regions_ptr, device_regions_len) };
+
+    println!("{:#x?}", ram_regions);
+    println!("{:#x?}", device_regions);
 
     const PAGE_TABLE_ENTRIES: usize = PAGE_TABLE_SIZE / mem::size_of::<u64>();
 
@@ -628,18 +647,6 @@ pub extern "C" fn aarch64_setup_pagetables(
         }
     };
 
-    struct Region {
-        start: u64,
-        end: u64,
-    }
-    let ram_regions = [Region {
-        start: 0x60000000,
-        end: 0xc0000000,
-    }];
-
-    const MAX_NUM_REGIONS: usize = 16;
-
-    let mut regions = [const { MaybeUninit::uninit() }; MAX_NUM_REGIONS];
     let identity_mapped_regions: &mut [(Region, _)] = {
         // Conceptually want we want is an 'arrayvec', but to not pull in more
         // code we implement this less-efficiently MaybeUninit.
@@ -651,42 +658,12 @@ pub extern "C" fn aarch64_setup_pagetables(
         assert!(ram_regions.len() <= regions.len());
 
         let ram_regions_it = ram_regions.into_iter().map(|r| (r, MT_DEVICE_nGnRnE));
+        let device_regions_it = device_regions.into_iter().map(|r| (r, MT_DEVICE_nGnRnE));
 
-        let all_regions_it = ram_regions_it.chain([(
-            Region {
-                start: 0x9000000,
-                end: 0x9001000,
-            },
-            MT_DEVICE_nGnRnE,
-        )]);
-
-        //     // FIXME: Derive from the kernel build system.
-        //     if let Some(uart_base) = read_symbol_maybe(elf, "uart_addr") {
-        //         let uart_base = align_down(uart_base, PAGE_BITS_4KB);
-        //         regions.push((
-        //             PlatformConfigRegion {
-        //                 start: uart_base,
-        //                 end: uart_base + (1 << PAGE_BITS_4KB),
-        //             },
-        //             MT_DEVICE_nGnRnE,
-        //         ));
-        //     }
-        //     // FIXME: This is currently assuming implementation details of the BCM2711/
-        //     //        Raspberry Pi 4B spin table implementation, as it is the only
-        //     //        platform we have that uses spin tables. Specifically, that
-        //     //        it is always located at the 0 page.
-        //     if elf.find_symbol("cpus_release_addr").is_ok() {
-        //         regions.push((
-        //             PlatformConfigRegion {
-        //                 start: 0x0,
-        //                 end: 1 << PAGE_BITS_4KB,
-        //             },
-        //             MT_DEVICE_nGnRnE,
-        //         ));
-        //     }
+        let all_regions_it = ram_regions_it.chain(device_regions_it);
 
         for (entry, region) in regions.iter_mut().zip(all_regions_it) {
-            entry.write(region);
+            entry.write((*region.0, region.1));
             regions_len += 1;
         }
 
@@ -772,7 +749,7 @@ pub extern "C" fn aarch64_setup_pagetables(
         // Allowed externally for the final iteration
         let mut base = 0u64;
         for &(ref region, attr_index) in identity_mapped_regions.iter() {
-            println!("RAM Region: {:#x}..{:#x}", base, region.end);
+            println!("Identity-Mapped Region: {:#x}..{:#x}", region.start, region.end);
             println!(
                 "  - Current Lvl1: {:#x}..{:#x}, entries: {}",
                 (lvl1_vaddr_top - (1 << BLOCK_BITS_512GB)),
@@ -1088,18 +1065,60 @@ mod tests {
     }
 
     #[test]
-    fn aaaaaaaaaaaaaaaaaaaaaa() {
+    fn qemu_aarch64() {
         #[repr(align(4096))]
-        struct PtBytes([[MaybeUninit<u8>; 4096]; 100]);
+        struct PtBytes([[MaybeUninit<u8>; 4096]; MAX_NUM_PAGE_TABLES]);
+
+        let ram_regions = [Region {
+            start: 0x60000000,
+            end: 0xc0000000,
+        }];
+
+        let device_regions = [
+            // UART
+            Region {
+                start: 0x9000000,
+                end: 0x9001000,
+            },
+        ];
+
+        //     // FIXME: Derive from the kernel build system.
+        //     if let Some(uart_base) = read_symbol_maybe(elf, "uart_addr") {
+        //         let uart_base = align_down(uart_base, PAGE_BITS_4KB);
+        //         regions.push((
+        //             PlatformConfigRegion {
+        //                 start: uart_base,
+        //                 end: uart_base + (1 << PAGE_BITS_4KB),
+        //             },
+        //             MT_DEVICE_nGnRnE,
+        //         ));
+        //     }
+        //     // FIXME: This is currently assuming implementation details of the BCM2711/
+        //     //        Raspberry Pi 4B spin table implementation, as it is the only
+        //     //        platform we have that uses spin tables. Specifically, that
+        //     //        it is always located at the 0 page.
+        //     if elf.find_symbol("cpus_release_addr").is_ok() {
+        //         regions.push((
+        //             PlatformConfigRegion {
+        //                 start: 0x0,
+        //                 end: 1 << PAGE_BITS_4KB,
+        //             },
+        //             MT_DEVICE_nGnRnE,
+        //         ));
+        //     }
 
         let mut page_table_bytes = PtBytes([[MaybeUninit::uninit(); _]; _]);
-        let pt_bases = aarch64_setup_pagetables(0, 0, &mut page_table_bytes.0);
-        panic!("{pt_bases:#x?}");
-    }
+        let mut regions_storage = [MaybeUninit::uninit(); MAX_NUM_REGIONS];
 
-    // #[test]
-    // fn bbbbbbbbbbbbbbbbbbbbbbb() {
-    //     let d = riscv64_setup_pagetables(0, 0, 0);
-    //     // panic!("{a:#x} {b:#x} {c:#x}");
-    // }
+        let pt_bases = aarch64_setup_pagetables(
+            /* kernel_first_vaddr */ 0x8060000000,
+            /* kernel_first_paddr */ 0x60000000,
+            ram_regions.as_ptr(),
+            ram_regions.len(),
+            device_regions.as_ptr(),
+            device_regions.len(),
+            &mut page_table_bytes.0,
+            &mut regions_storage,
+        );
+    }
 }
