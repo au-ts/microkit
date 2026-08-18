@@ -153,7 +153,7 @@ clippy: $(addprefix rustclippy_, $(RUST_CRATES))
 
 rustfmt_%: src/%.rs
 	$(RUSTFMT) $(RUSTFMT_FLAGS) \
-		--edition $(RUST_EDITION) --style-edition $(RUST_EDITION) \
+		--edition $(RUST_EDITION) \
 		$<
 
 rustfmt: $(addprefix rustfmt_, $(RUST_CRATES))

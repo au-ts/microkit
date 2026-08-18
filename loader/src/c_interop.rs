@@ -1,7 +1,7 @@
 #[cfg(not(test))]
 mod real_hardware {
-    use core::ffi::CStr;
     use core::ffi::c_char;
+    use core::ffi::CStr;
     use core::fmt;
     use core::fmt::Write;
     use core::panic::PanicInfo;

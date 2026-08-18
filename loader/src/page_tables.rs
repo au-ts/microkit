@@ -30,7 +30,11 @@ const fn mask(n: u64) -> u64 {
 
 const fn round_down(n: u64, x: u64) -> u64 {
     let (_, m) = divmod(n, x);
-    if m == 0 { n } else { n - m }
+    if m == 0 {
+        n
+    } else {
+        n - m
+    }
 }
 
 const fn align_down(n: u64, bits: u64) -> u64 {
@@ -403,7 +407,7 @@ pub extern "C" fn riscv64_setup_pagetables(
     kernel_first_paddr: u64,
     page_tables_paddr_start: u64,
 ) -> u64 {
-    use riscv64::{BLOCK_BITS_1GB, BLOCK_BITS_2MB, PAGE_BITS_4K, pt_index, pte_leaf, pte_next};
+    use riscv64::{pt_index, pte_leaf, pte_next, BLOCK_BITS_1GB, BLOCK_BITS_2MB, PAGE_BITS_4K};
 
     let text_addr = &raw const _text as u64;
 
@@ -623,10 +627,9 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
     page_table_bytes: &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; MAX_NUM_PAGE_TABLES],
 ) -> AArch64ReturnValue {
     use aarch64::{
-        BLOCK_BITS_1GB, BLOCK_BITS_2MB, BLOCK_BITS_512GB, PAGE_BITS_4KB, block_descriptor,
-        lvl0_index, lvl1_index, lvl2_index, lvl3_index, page_descriptor,
+        block_descriptor, lvl0_index, lvl1_index, lvl2_index, lvl3_index, page_descriptor,
         s1_mair_attr_index::{MT_DEVICE_nGnRnE, MT_NORMAL},
-        table_descriptor,
+        table_descriptor, BLOCK_BITS_1GB, BLOCK_BITS_2MB, BLOCK_BITS_512GB, PAGE_BITS_4KB,
     };
 
     const PAGE_TABLE_ENTRIES: usize = PAGE_TABLE_SIZE / mem::size_of::<u64>();
