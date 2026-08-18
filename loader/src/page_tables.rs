@@ -614,7 +614,8 @@ pub const MAX_NUM_PAGE_TABLES: usize = 64;
 ///
 /// # Safety
 /// - regions_ptr must be valid for as long as this function runs,
-///   and regions_len must repsent its length
+///   and regions_len must represent its length
+/// - page_table_bytes must be aligned to PAGE_TABLE_SIZE
 ///
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn aarch64_setup_pagetables(
