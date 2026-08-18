@@ -631,6 +631,42 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
 
     const PAGE_TABLE_ENTRIES: usize = PAGE_TABLE_SIZE / mem::size_of::<u64>();
 
+    const NUM_TEMPORARIES: usize = 4;
+    // FIXME: Replace once https://github.com/rust-lang/rust/issues/90091 is merged
+    let (page_table_bytes, pt_temporaries) = page_table_bytes
+        .split_first_chunk_mut::<{ MAX_NUM_PAGE_TABLES - NUM_TEMPORARIES }>()
+        .unwrap();
+
+    let pt_temporaries = {
+        let pt_temporaries: &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; NUM_TEMPORARIES] =
+            pt_temporaries.try_into().unwrap();
+
+        for pt in pt_temporaries.iter_mut() {
+            for elem in pt {
+                elem.write(0);
+            }
+        }
+
+        // SAFETY: we just initialised it.
+        let pt_temporaries = unsafe {
+            mem::transmute::<
+                &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; NUM_TEMPORARIES],
+                &mut [[u8; PAGE_TABLE_SIZE]; NUM_TEMPORARIES],
+            >(pt_temporaries)
+        };
+
+        // SAFETY:
+        // - all bitpatterns of u8 can be represented in u8.
+        // - alignment requirements are met by input requirements
+        unsafe {
+            assert!((pt_temporaries.as_ptr() as usize).is_multiple_of(PAGE_TABLE_SIZE));
+            mem::transmute::<
+                &mut [[u8; PAGE_TABLE_SIZE]; NUM_TEMPORARIES],
+                &mut [[u64; PAGE_TABLE_ENTRIES]; NUM_TEMPORARIES],
+            >(pt_temporaries)
+        }
+    };
+
     let mut serialise_page_table_to_paddr = {
         let page_tables_paddr_start: *const u8 = page_table_bytes.as_ptr().cast();
 
@@ -688,7 +724,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
     let kernel_lvl1_pt_paddr = {
         // First, the Level 2 Upr table.
         let lvl2_pt_paddr = {
-            let mut lvl2_pt_kernel = [0u64; PAGE_TABLE_ENTRIES];
+            let mut lvl2_pt_kernel = pt_temporaries[0];
 
             let mut vaddr = m;
             let mut paddr = p;
@@ -703,7 +739,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         };
 
         // Then, the Level 1 Upr table.
-        let mut lvl1_pt_kernel = [0u64; PAGE_TABLE_ENTRIES];
+        let mut lvl1_pt_kernel = pt_temporaries[0];
         lvl1_pt_kernel[lvl1_index(l)] = table_descriptor(lvl2_pt_paddr);
 
         serialise_page_table_to_paddr(&mut lvl1_pt_kernel)
@@ -734,9 +770,9 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         // When the current vaddr (/paddr, as identity mapped) exceeds the
         // top value we rotate to a new PT.
 
-        let mut lvl1_pt = [0u64; PAGE_TABLE_ENTRIES];
-        let mut lvl2_pt = [0u64; PAGE_TABLE_ENTRIES];
-        let mut lvl3_pt = [0u64; PAGE_TABLE_ENTRIES];
+        let mut lvl1_pt = pt_temporaries[1];
+        let mut lvl2_pt = pt_temporaries[2];
+        let mut lvl3_pt = pt_temporaries[3];
         // TODO: These should be defines. Note that the top is the size of 1 level of the next level up.
         // TODO: LVL1_ENTRY_RANGE? idk
         #[allow(unused_mut)]
@@ -1049,7 +1085,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         // Manufacture the Level 0 table, containing the kernel table
         // and the RAM tables.
 
-        let mut ttbr0_el2_pt = [0u64; PAGE_TABLE_ENTRIES];
+        let mut ttbr0_el2_pt = pt_temporaries[0];
 
         assert!(lvl0_index(k) != lvl0_index(0));
         ttbr0_el2_pt[lvl0_index(k)] = table_descriptor(kernel_lvl1_pt_paddr);
@@ -1063,8 +1099,8 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
             ttbr1_el1: AArch64ReturnValue::INVALID,
         }
     } else {
-        let mut ttbr0_el1_pt = [0u64; PAGE_TABLE_ENTRIES];
-        let mut ttbr1_el1_pt = [0u64; PAGE_TABLE_ENTRIES];
+        let mut ttbr0_el1_pt = pt_temporaries[0];
+        let mut ttbr1_el1_pt = pt_temporaries[1];
 
         // Kernel in TTBR1 (Upper)
         ttbr1_el1_pt[lvl0_index(k)] = table_descriptor(kernel_lvl1_pt_paddr);
