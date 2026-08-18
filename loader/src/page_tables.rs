@@ -6,44 +6,13 @@
 
 #![no_std]
 
+mod c_interop;
+
 use core::cmp::min;
-use core::ffi::c_char;
-use core::fmt;
-use core::fmt::Write;
 use core::mem;
-use core::panic::PanicInfo;
+use core::mem::MaybeUninit;
 
-unsafe extern "C" {
-    safe fn fail() -> !;
-    // safe fn putc(c: c_char);
-    unsafe fn puts(s: *const c_char);
-}
-
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    unsafe { puts(c"panicked\n".as_ptr()) };
-
-    struct DebugWriter;
-    impl fmt::Write for DebugWriter {
-        fn write_str(&mut self, s: &str) -> fmt::Result {
-            for c in s.bytes() {
-                unsafe {
-                    puts(core::ffi::CStr::from_bytes_with_nul_unchecked(&[c.into(), 0]).as_ptr())
-                };
-            }
-
-            Ok(())
-        }
-    }
-
-    if let Err(_) = writeln!(DebugWriter, "{}", info) {
-        // If writeln!() fails (which it should never as our fmt::Write) never
-        // fails, then just don't print the extra information.
-        unsafe { puts(c"panicked (information unknown)\n".as_ptr()) };
-    }
-
-    fail();
-}
+use c_interop::println;
 
 const PAGE_TABLE_SIZE: usize = 4096;
 
@@ -55,15 +24,6 @@ const fn mask(n: u64) -> u64 {
     (1 << n) - 1
 }
 
-const fn round_up(n: u64, x: u64) -> u64 {
-    let (_, m) = divmod(n, x);
-    if m == 0 {
-        n
-    } else {
-        n + x - m
-    }
-}
-
 const fn round_down(n: u64, x: u64) -> u64 {
     let (_, m) = divmod(n, x);
     if m == 0 {
@@ -71,10 +31,6 @@ const fn round_down(n: u64, x: u64) -> u64 {
     } else {
         n - m
     }
-}
-
-const fn align_up(n: u64, bits: u64) -> u64 {
-    round_up(n, 1 << bits)
 }
 
 const fn align_down(n: u64, bits: u64) -> u64 {
@@ -91,7 +47,7 @@ pub mod aarch64 {
     //! Stage 2 descriptors are only used when in the EL1&0 regime; which is not
     //! the case when in EL2.
 
-    use crate::mask;
+    use super::*;
 
     pub const LVL0_BITS: u64 = 9;
     pub const LVL1_BITS: u64 = 9;
@@ -299,8 +255,10 @@ pub mod aarch64 {
     /// Per "Table D8-50 Stage 1 VMSAv8-64 Table descriptor fields" and
     /// "Figure D8-12 VMSAv8-64 Table descriptor formats" of ARM DDI0487L.b;
     /// specifically subfigure "4KB, 16KB, and 64KB granules, 48-bit OA"
-    pub fn table_descriptor(addr: u64) -> u64 {
+    pub fn table_descriptor(addr: *const u8) -> u64 {
         // Per Table D8-48, Condition for descriptor_type::TABLE is level != 3.
+
+        let addr: u64 = addr.addr().try_into().expect("usize in u64");
 
         // We don't set any of these attributes, most are hardware-feature conditional
         let attributes: u64 = 0;
@@ -549,41 +507,18 @@ pub extern "C" fn riscv64_setup_pagetables(
     serialise_page_table_to_paddr(&mut boot_lvl1_pt)
 }
 
-pub struct Writer;
-
-impl fmt::Write for Writer {
-    fn write_str(&mut self, s: &str) -> Result<(), fmt::Error> {
-        for c in s.bytes() {
-            unsafe {
-                puts(core::ffi::CStr::from_bytes_with_nul_unchecked(&[c.into(), 0]).as_ptr())
-            };
-        }
-        Ok(())
-    }
+/// Note that "0" is a valid return value; instead the invalid value is
+/// '-1', or usize::MAX.
+#[repr(C)]
+#[derive(Debug)]
+pub struct AArch64ReturnValue {
+    ttbr0_el2: *const u8,
+    ttbr0_el1: *const u8,
+    ttbr1_el1: *const u8,
 }
 
-#[allow(unused)]
-pub fn print(args: fmt::Arguments) {
-    use fmt::Write;
-    Writer{}.write_fmt(args).unwrap();
-}
-
-#[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => {{
-        print(format_args!($($arg)*));
-    }}
-}
-
-#[macro_export]
-macro_rules! println {
-    () => {{
-        print!("\n");
-    }};
-
-    ($($arg:tt)*) => {{
-        print!("{}\n", format_args!($($arg)*));
-    }}
+impl AArch64ReturnValue {
+    const INVALID: *const u8 = usize::MAX as *const _;
 }
 
 /// AArch64 loader page tables have two variations:
@@ -651,8 +586,8 @@ macro_rules! println {
 pub extern "C" fn aarch64_setup_pagetables(
     kernel_first_vaddr: u64,
     kernel_first_paddr: u64,
-    page_tables_paddr_start: u64,
-) -> (u64, u64, u64) {
+    page_table_bytes: &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; 100],
+) -> AArch64ReturnValue {
     use aarch64::{
         block_descriptor, lvl0_index, lvl1_index, lvl2_index, lvl3_index, page_descriptor,
         s1_mair_attr_index::{MT_DEVICE_nGnRnE, MT_NORMAL},
@@ -665,31 +600,28 @@ pub extern "C" fn aarch64_setup_pagetables(
     const PAGE_TABLE_ENTRIES: usize = PAGE_TABLE_SIZE / mem::size_of::<u64>();
 
     let mut serialise_page_table_to_paddr = {
-        #[repr(align(4096))]
-        struct PtBytes([[u8; 4096]; 100]);
-        static mut PAGE_TABLE_BYTES: PtBytes = PtBytes([[0; _]; _]);
-        // SAFETY: Trust me (lol)
-        #[allow(static_mut_refs)]
-        let mut page_table_bytes = unsafe { &mut PAGE_TABLE_BYTES.0 };
-
-        let page_tables_paddr_start = &raw mut PAGE_TABLE_BYTES as u64;
+        let page_tables_paddr_start: *const u8 = page_table_bytes.as_ptr().cast();
 
         assert!(
-            page_tables_paddr_start
-                == page_tables_paddr_start.next_multiple_of(PAGE_TABLE_SIZE as u64)
+            (page_tables_paddr_start as usize)
+                == (page_tables_paddr_start as usize).next_multiple_of(PAGE_TABLE_SIZE)
         );
 
         // This maintains the current end of the PT array.
         let mut next_pt_paddr = page_tables_paddr_start;
         let mut i = 0;
 
-        move |page_table: &mut [u64; PAGE_TABLE_ENTRIES]| -> u64 {
+        move |page_table: &mut [u64; PAGE_TABLE_ENTRIES]| -> *const _ {
             let pt_paddr = next_pt_paddr;
-            for (j, byte) in page_table.iter().flat_map(|pte| pte.to_le_bytes()).enumerate() {
-                page_table_bytes[i][j] = byte;
+            for (j, byte) in page_table
+                .iter()
+                .flat_map(|pte| pte.to_le_bytes())
+                .enumerate()
+            {
+                page_table_bytes[i][j].write(byte);
             }
 
-            next_pt_paddr += PAGE_TABLE_SIZE as u64;
+            next_pt_paddr = next_pt_paddr.wrapping_add(PAGE_TABLE_SIZE);
             i += 1;
             page_table.fill(0);
             pt_paddr
@@ -700,13 +632,14 @@ pub extern "C" fn aarch64_setup_pagetables(
         start: u64,
         end: u64,
     }
-    let ram_regions = [
-        Region { start: 0x60000000, end: 0xc0000000 },
-    ];
+    let ram_regions = [Region {
+        start: 0x60000000,
+        end: 0xc0000000,
+    }];
 
     const MAX_NUM_REGIONS: usize = 16;
 
-    let mut regions = [const { core::mem::MaybeUninit::uninit() }; MAX_NUM_REGIONS];
+    let mut regions = [const { MaybeUninit::uninit() }; MAX_NUM_REGIONS];
     let identity_mapped_regions: &mut [(Region, _)] = {
         // Conceptually want we want is an 'arrayvec', but to not pull in more
         // code we implement this less-efficiently MaybeUninit.
@@ -719,7 +652,13 @@ pub extern "C" fn aarch64_setup_pagetables(
 
         let ram_regions_it = ram_regions.into_iter().map(|r| (r, MT_DEVICE_nGnRnE));
 
-        let all_regions_it = ram_regions_it.chain([(Region { start: 0x9000000, end: 0x9001000 }, MT_DEVICE_nGnRnE)]);
+        let all_regions_it = ram_regions_it.chain([(
+            Region {
+                start: 0x9000000,
+                end: 0x9001000,
+            },
+            MT_DEVICE_nGnRnE,
+        )]);
 
         //     // FIXME: Derive from the kernel build system.
         //     if let Some(uart_base) = read_symbol_maybe(elf, "uart_addr") {
@@ -860,7 +799,11 @@ pub extern "C" fn aarch64_setup_pagetables(
                 if region.start >= lvl3_vaddr_top {
                     if lvl3_pt != [0; _] {
                         let lvl3_pt_paddr = serialise_page_table_to_paddr(&mut lvl3_pt);
-                        println!("[iter] Serialise lvl3 table: {lvl3_pt_paddr:#x} for to {:#x}..{lvl3_vaddr_top:#x}", (lvl3_vaddr_top - (1 << BLOCK_BITS_2MB)));
+                        println!(
+                            "[iter] Serialise lvl3 table: {:#x} for to {:#x}..{lvl3_vaddr_top:#x}",
+                            lvl3_pt_paddr as usize,
+                            (lvl3_vaddr_top - (1 << BLOCK_BITS_2MB))
+                        );
                         assert!(lvl2_pt[lvl2_index(base)] == 0);
                         lvl2_pt[lvl2_index(base)] = table_descriptor(lvl3_pt_paddr);
                     }
@@ -874,7 +817,7 @@ pub extern "C" fn aarch64_setup_pagetables(
                 if region.start >= lvl2_vaddr_top {
                     if lvl2_pt != [0; _] {
                         let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut lvl2_pt);
-                        println!("[iter] Serialise lvl2 table: {lvl2_pt_paddr:#x} for to {:#x}..{lvl2_vaddr_top:#x}, base: {:#x} lvl1_index(base): {:#x}", (lvl2_vaddr_top - (1 << BLOCK_BITS_1GB)), base, lvl1_index(base));
+                        println!("[iter] Serialise lvl2 table: {:#x} for to {:#x}..{lvl2_vaddr_top:#x}, base: {:#x} lvl1_index(base): {:#x}", lvl2_pt_paddr as usize, (lvl2_vaddr_top - (1 << BLOCK_BITS_1GB)), base, lvl1_index(base));
                         assert!(lvl1_pt[lvl1_index(base)] == 0);
                         lvl1_pt[lvl1_index(base)] = table_descriptor(lvl2_pt_paddr);
                     }
@@ -930,7 +873,10 @@ pub extern "C" fn aarch64_setup_pagetables(
                 let pt_region_size = 1u64 << bits;
                 let top = base + pt_region_size;
 
-                println!("- Aligned PT region: {:#x}..{:#x} (size_bits: {}, align_bits: {}, bits: {})", base, top, size_bits, align_bits, bits);
+                println!(
+                    "- Aligned PT region: {:#x}..{:#x} (size_bits: {}, align_bits: {}, bits: {})",
+                    base, top, size_bits, align_bits, bits
+                );
                 println!(
                     "  - Current Lvl1: {:#x}..{:#x}, entries: {}",
                     (lvl1_vaddr_top - (1 << BLOCK_BITS_512GB)),
@@ -1023,7 +969,11 @@ pub extern "C" fn aarch64_setup_pagetables(
                             // As we're the top of the range, we can serialise the table.
 
                             let lvl3_pt_paddr = serialise_page_table_to_paddr(&mut lvl3_pt);
-                            println!("Serialise lvl3 table: {lvl3_pt_paddr:#x} for to {:#x}..{lvl3_vaddr_top:#x}", (lvl3_vaddr_top - (1 << BLOCK_BITS_2MB)));
+                            println!(
+                                "Serialise lvl3 table: {:#x} for to {:#x}..{lvl3_vaddr_top:#x}",
+                                lvl3_pt_paddr as usize,
+                                (lvl3_vaddr_top - (1 << BLOCK_BITS_2MB))
+                            );
                             lvl3_vaddr_top += 1 << BLOCK_BITS_2MB;
 
                             assert!(lvl2_pt[lvl2_index(base)] == 0);
@@ -1031,7 +981,11 @@ pub extern "C" fn aarch64_setup_pagetables(
 
                             if top == lvl2_vaddr_top {
                                 let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut lvl2_pt);
-                                println!("Serialise lvl2 table: {lvl2_pt_paddr:#x} for to {:#x}..{lvl2_vaddr_top:#x}", (lvl2_vaddr_top - (1 << BLOCK_BITS_1GB)));
+                                println!(
+                                    "Serialise lvl2 table: {:#x} for to {:#x}..{lvl2_vaddr_top:#x}",
+                                    lvl2_pt_paddr as usize,
+                                    (lvl2_vaddr_top - (1 << BLOCK_BITS_1GB))
+                                );
                                 lvl2_vaddr_top += 1 << BLOCK_BITS_1GB;
 
                                 assert!(lvl1_pt[lvl1_index(base)] == 0);
@@ -1059,14 +1013,14 @@ pub extern "C" fn aarch64_setup_pagetables(
 
         if lvl3_pt != [0; _] {
             let lvl3_pt_paddr = serialise_page_table_to_paddr(&mut lvl3_pt);
-            println!("[end] Serialise lvl3 table: {lvl3_pt_paddr:#x}");
+            println!("[end] Serialise lvl3 table: {:#x}", lvl3_pt_paddr as usize);
             assert!(lvl2_pt[lvl2_index(base)] == 0);
             lvl2_pt[lvl2_index(base)] = table_descriptor(lvl3_pt_paddr);
         }
 
         if lvl2_pt != [0; _] {
             let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut lvl2_pt);
-            println!("[end] Serialise lvl2 table: {lvl2_pt_paddr:#x} for to {:#x}..{lvl2_vaddr_top:#x}, base: {:#x} lvl1_index(base): {:#x}", (lvl2_vaddr_top - (1 << BLOCK_BITS_1GB)), base, lvl1_index(base));
+            println!("[end] Serialise lvl2 table: {:#x} for to {:#x}..{lvl2_vaddr_top:#x}, base: {:#x} lvl1_index(base): {:#x}", lvl2_pt_paddr as usize, (lvl2_vaddr_top - (1 << BLOCK_BITS_1GB)), base, lvl1_index(base));
             assert!(lvl1_pt[lvl1_index(base)] == 0);
             lvl1_pt[lvl1_index(base)] = table_descriptor(lvl2_pt_paddr);
         }
@@ -1099,7 +1053,11 @@ pub extern "C" fn aarch64_setup_pagetables(
 
         let ttbr0_el2 = serialise_page_table_to_paddr(&mut ttbr0_el2_pt);
 
-        (ttbr0_el2, u64::MAX, u64::MAX)
+        AArch64ReturnValue {
+            ttbr0_el2,
+            ttbr0_el1: AArch64ReturnValue::INVALID,
+            ttbr1_el1: AArch64ReturnValue::INVALID,
+        }
     } else {
         let mut ttbr0_el1_pt = [0u64; PAGE_TABLE_ENTRIES];
         let mut ttbr1_el1_pt = [0u64; PAGE_TABLE_ENTRIES];
@@ -1112,6 +1070,36 @@ pub extern "C" fn aarch64_setup_pagetables(
         let ttbr0_el1 = serialise_page_table_to_paddr(&mut ttbr0_el1_pt);
         let ttbr1_el1 = serialise_page_table_to_paddr(&mut ttbr1_el1_pt);
 
-        (u64::MAX, ttbr0_el1, ttbr1_el1)
+        AArch64ReturnValue {
+            ttbr0_el2: AArch64ReturnValue::INVALID,
+            ttbr0_el1,
+            ttbr1_el1,
+        }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_works() {
+        assert_eq!(2 + 2, 4);
+    }
+
+    #[test]
+    fn aaaaaaaaaaaaaaaaaaaaaa() {
+        #[repr(align(4096))]
+        struct PtBytes([[MaybeUninit<u8>; 4096]; 100]);
+
+        let mut page_table_bytes = PtBytes([[MaybeUninit::uninit(); _]; _]);
+        let pt_bases = aarch64_setup_pagetables(0, 0, &mut page_table_bytes.0);
+        panic!("{pt_bases:#x?}");
+    }
+
+    // #[test]
+    // fn bbbbbbbbbbbbbbbbbbbbbbb() {
+    //     let d = riscv64_setup_pagetables(0, 0, 0);
+    //     // panic!("{a:#x} {b:#x} {c:#x}");
+    // }
 }

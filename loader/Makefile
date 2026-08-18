@@ -58,7 +58,7 @@ CFLAGS := -std=gnu11 -g -O3 -nostdlib -ffreestanding \
 
 ASM_FLAGS := $(ASM_FLAGS_ARCH) -g -MP -MD -I$(SEL4_SDK)/include
 
-RUSTFLAGS := --target $(RUST_TARGET_TRIPLE) --edition 2024 -g -C opt-level=2
+RUSTFLAGS := --edition 2024 -g -C opt-level=2
 
 PROGS := loader.elf
 OBJECTS := loader.o crt0.o uart.o cutil.o libpage_tables.a
@@ -93,6 +93,7 @@ $(BUILD_DIR)/lib%.a : src/%.rs
 	$(RUSTC) $(RUSTFLAGS) \
 		--emit dep-info,metadata,link \
 		--out-dir $(BUILD_DIR) -L dependency=$(BUILD_DIR) \
+		--target $(RUST_TARGET_TRIPLE) \
 		--crate-type staticlib \
 		--crate-name $(patsubst lib%.a,%,$(notdir $@)) \
 		$<
@@ -101,7 +102,7 @@ $(BUILD_DIR)/lib%.a : src/%.rs
 
 OBJPROG = $(addprefix $(BUILD_DIR)/, $(PROGS))
 
-all: $(OBJPROG)
+all: $(OBJPROG) test
 
 $(LINKSCRIPT): $(LINKSCRIPT_INPUT)
 	$(CPP) -DLINK_ADDRESS=$(LINK_ADDRESS) $< | grep -v "^#" > $@
@@ -111,3 +112,11 @@ LDFLAGS := -T$(LINKSCRIPT) --gc-sections
 $(OBJPROG): $(addprefix $(BUILD_DIR)/, $(OBJECTS)) $(LINKSCRIPT)
 	$(LD) $(LDFLAGS) --start-group $(addprefix $(BUILD_DIR)/, $(OBJECTS)) --end-group -o $@
 
+test:
+	$(RUSTC) $(RUSTFLAGS) \
+		--emit dep-info,metadata,link \
+		--out-dir $(BUILD_DIR) -L dependency=$(BUILD_DIR) \
+		--test \
+		--crate-name test_page_tables \
+		src/page_tables.rs
+	$(BUILD_DIR)/test_page_tables
