@@ -102,7 +102,7 @@ $(BUILD_DIR)/lib%.a : src/%.rs
 
 OBJPROG = $(addprefix $(BUILD_DIR)/, $(PROGS))
 
-all: $(OBJPROG) test
+all: $(OBJPROG)
 
 $(LINKSCRIPT): $(LINKSCRIPT_INPUT)
 	$(CPP) -DLINK_ADDRESS=$(LINK_ADDRESS) $< | grep -v "^#" > $@
@@ -112,11 +112,14 @@ LDFLAGS := -T$(LINKSCRIPT) --gc-sections
 $(OBJPROG): $(addprefix $(BUILD_DIR)/, $(OBJECTS)) $(LINKSCRIPT)
 	$(LD) $(LDFLAGS) --start-group $(addprefix $(BUILD_DIR)/, $(OBJECTS)) --end-group -o $@
 
-test:
+rusttest_%: src/%.rs
 	$(RUSTC) $(RUSTFLAGS) \
 		--emit dep-info,metadata,link \
 		--out-dir $(BUILD_DIR) -L dependency=$(BUILD_DIR) \
+		-Awarnings \
 		--test \
-		--crate-name test_page_tables \
-		src/page_tables.rs
-	$(BUILD_DIR)/test_page_tables
+		--crate-name "$@" \
+		$<
+
+tests: rusttest_page_tables
+	$(BUILD_DIR)/rusttest_page_tables
