@@ -724,7 +724,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
     let kernel_lvl1_pt_paddr = {
         // First, the Level 2 Upr table.
         let lvl2_pt_paddr = {
-            let mut lvl2_pt_kernel = pt_temporaries[0];
+            let mut lvl2_pt_kernel = &mut pt_temporaries[0];
 
             let mut vaddr = m;
             let mut paddr = p;
@@ -739,7 +739,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         };
 
         // Then, the Level 1 Upr table.
-        let mut lvl1_pt_kernel = pt_temporaries[0];
+        let mut lvl1_pt_kernel = &mut pt_temporaries[0];
         lvl1_pt_kernel[lvl1_index(l)] = table_descriptor(lvl2_pt_paddr);
 
         serialise_page_table_to_paddr(&mut lvl1_pt_kernel)
@@ -770,9 +770,18 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         // When the current vaddr (/paddr, as identity mapped) exceeds the
         // top value we rotate to a new PT.
 
-        let mut lvl1_pt = pt_temporaries[1];
-        let mut lvl2_pt = pt_temporaries[2];
-        let mut lvl3_pt = pt_temporaries[3];
+        // let mut lvl1_pt = &mut pt_temporaries[1];
+        // let mut lvl2_pt = &mut pt_temporaries[2];
+        // let mut lvl3_pt = &mut pt_temporaries[3];
+
+        let (_, rest) = pt_temporaries.split_at_mut(1);
+        let (lvl1_pt, rest) = rest.split_at_mut(1);
+        let (lvl2_pt, rest) = rest.split_at_mut(1);
+        let (lvl3_pt, rest) = rest.split_at_mut(1);
+        let mut lvl1_pt = &mut lvl1_pt[0];
+        let mut lvl2_pt = &mut lvl2_pt[0];
+        let mut lvl3_pt = &mut lvl3_pt[0];
+
         // TODO: These should be defines. Note that the top is the size of 1 level of the next level up.
         // TODO: LVL1_ENTRY_RANGE? idk
         #[allow(unused_mut)]
@@ -819,7 +828,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
 
             {
                 if region.start >= lvl3_vaddr_top {
-                    if lvl3_pt != [0; _] {
+                    if lvl3_pt != &[0; _] {
                         let lvl3_pt_paddr = serialise_page_table_to_paddr(&mut lvl3_pt);
                         println!(
                             "[iter] Serialise lvl3 table: {:#x} for to {:#x}..{lvl3_vaddr_top:#x}",
@@ -837,7 +846,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
                 }
 
                 if region.start >= lvl2_vaddr_top {
-                    if lvl2_pt != [0; _] {
+                    if lvl2_pt != &[0; _] {
                         let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut lvl2_pt);
                         println!(
                             "[iter] Serialise lvl2 table: {:#x} for to {:#x}..{lvl2_vaddr_top:#x}, base: {:#x} lvl1_index(base): {:#x}",
@@ -947,8 +956,8 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
                         }
 
                         // Invariant: Lower levels are empty.
-                        assert!(lvl2_pt == [0; _]);
-                        assert!(lvl3_pt == [0; _]);
+                        assert!(lvl2_pt == &[0; _]);
+                        assert!(lvl3_pt == &[0; _]);
                         // Invariant maintenance: vaddr_top is right range for current PT.
                         // it's empty so we need to increment the top to be current top (1G aligned) + 2MIB (512 lvl3 entries)
                         lvl3_vaddr_top = top + (1 << BLOCK_BITS_2MB);
@@ -982,7 +991,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
                         }
 
                         // Invariant: Lower levels are empty.
-                        assert!(lvl3_pt == [0; _]);
+                        assert!(lvl3_pt == &[0; _]);
                         // Invariant maintenance: vaddr_top is right range for current PT.
                         // it's empty so we need to increment the top to be current top (2MIB aligned) + 2MIB (512 lvl3 entries)
                         lvl3_vaddr_top = top + (1 << BLOCK_BITS_2MB);
@@ -1045,14 +1054,14 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         // page tables that have been partially filled out, and we need to
         // serialise these.
 
-        if lvl3_pt != [0; _] {
+        if lvl3_pt != &[0; _] {
             let lvl3_pt_paddr = serialise_page_table_to_paddr(&mut lvl3_pt);
             println!("[end] Serialise lvl3 table: {:#x}", lvl3_pt_paddr as usize);
             assert!(lvl2_pt[lvl2_index(base)] == 0);
             lvl2_pt[lvl2_index(base)] = table_descriptor(lvl3_pt_paddr);
         }
 
-        if lvl2_pt != [0; _] {
+        if lvl2_pt != &[0; _] {
             let lvl2_pt_paddr = serialise_page_table_to_paddr(&mut lvl2_pt);
             println!(
                 "[end] Serialise lvl2 table: {:#x} for to {:#x}..{lvl2_vaddr_top:#x}, base: {:#x} lvl1_index(base): {:#x}",
@@ -1066,7 +1075,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         }
 
         // the level1 pt should not be empty. lol.
-        assert!(lvl1_pt != [0; _]);
+        assert!(lvl1_pt != &[0; _]);
 
         // println!("New lvl1 table");
         serialise_page_table_to_paddr(&mut lvl1_pt)
@@ -1085,7 +1094,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         // Manufacture the Level 0 table, containing the kernel table
         // and the RAM tables.
 
-        let mut ttbr0_el2_pt = pt_temporaries[0];
+        let mut ttbr0_el2_pt = &mut pt_temporaries[0];
 
         assert!(lvl0_index(k) != lvl0_index(0));
         ttbr0_el2_pt[lvl0_index(k)] = table_descriptor(kernel_lvl1_pt_paddr);
@@ -1099,16 +1108,18 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
             ttbr1_el1: AArch64ReturnValue::INVALID,
         }
     } else {
-        let mut ttbr0_el1_pt = pt_temporaries[0];
-        let mut ttbr1_el1_pt = pt_temporaries[1];
+        // let mut ttbr0_el1_pt = &mut pt_temporaries[0];
+        let mut ttbr1_el1_pt = &mut pt_temporaries[1];
 
         // Kernel in TTBR1 (Upper)
         ttbr1_el1_pt[lvl0_index(k)] = table_descriptor(kernel_lvl1_pt_paddr);
+        let ttbr1_el1 = serialise_page_table_to_paddr(&mut ttbr1_el1_pt);
+        let mut ttbr0_el1_pt = &mut pt_temporaries[0];
         // Identity-mapped RAM in TTBR0 (Lower)
         ttbr0_el1_pt[lvl0_index(0)] = table_descriptor(ram_lvl1_pt_paddr);
 
         let ttbr0_el1 = serialise_page_table_to_paddr(&mut ttbr0_el1_pt);
-        let ttbr1_el1 = serialise_page_table_to_paddr(&mut ttbr1_el1_pt);
+        // let ttbr1_el1 = serialise_page_table_to_paddr(&mut ttbr1_el1_pt);
 
         AArch64ReturnValue {
             ttbr0_el2: AArch64ReturnValue::INVALID,

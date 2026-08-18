@@ -7,7 +7,7 @@
 
 #pragma once
 
-#define STACK_SIZE 40960
+#define STACK_SIZE 4096
 
 #define REGION_TYPE_DATA 1
 #define REGION_TYPE_ZERO 2
