@@ -19,9 +19,7 @@ mod real_hardware {
     impl fmt::Write for Writer {
         fn write_str(&mut self, s: &str) -> Result<(), fmt::Error> {
             for c in s.bytes() {
-                unsafe {
-                    puts(CStr::from_bytes_with_nul_unchecked(&[c.into(), 0]).as_ptr())
-                };
+                unsafe { puts(CStr::from_bytes_with_nul_unchecked(&[c, 0]).as_ptr()) };
             }
             Ok(())
         }

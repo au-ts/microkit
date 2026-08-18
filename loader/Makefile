@@ -36,6 +36,7 @@ else
 endif
 
 RUSTC := rustc
+CLIPPY := clippy-driver
 
 ifeq ($(ARCH),aarch64)
 	CFLAGS_AARCH64 := -mcpu=$(GCC_CPU) -mgeneral-regs-only -mstrict-align -mno-outline-atomics
@@ -121,5 +122,15 @@ rusttest_%: src/%.rs
 		--crate-name "$@" \
 		$<
 
-tests: rusttest_page_tables
+rustclippy_%: src/%.rs
+	$(CLIPPY) $(RUSTFLAGS) \
+		--emit dep-info,metadata,link \
+		--out-dir $(BUILD_DIR) -L dependency=$(BUILD_DIR) \
+		-Dwarnings \
+		-Cpanic=abort \
+		--crate-type staticlib \
+		--crate-name "$@" \
+		$<
+
+tests: rusttest_page_tables rustclippy_page_tables
 	$(BUILD_DIR)/rusttest_page_tables

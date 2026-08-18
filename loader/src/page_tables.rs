@@ -610,8 +610,12 @@ pub const MAX_NUM_PAGE_TABLES: usize = 64;
 ///      u = align_down(uart_base, 1GiB),
 /// ```
 ///
+/// # Safety
+/// - regions_ptr must be valid for as long as this function runs,
+///   and regions_len must repsent its length
+///
 #[unsafe(no_mangle)]
-pub extern "C" fn aarch64_setup_pagetables(
+pub unsafe extern "C" fn aarch64_setup_pagetables(
     kernel_first_vaddr: u64,
     kernel_first_paddr: u64,
     // In-out param; storage and input
@@ -631,10 +635,7 @@ pub extern "C" fn aarch64_setup_pagetables(
     let mut serialise_page_table_to_paddr = {
         let page_tables_paddr_start: *const u8 = page_table_bytes.as_ptr().cast();
 
-        assert!(
-            (page_tables_paddr_start as usize)
-                == (page_tables_paddr_start as usize).next_multiple_of(PAGE_TABLE_SIZE)
-        );
+        assert!((page_tables_paddr_start as usize).is_multiple_of(PAGE_TABLE_SIZE));
 
         // This maintains the current end of the PT array.
         let mut next_pt_paddr = page_tables_paddr_start;
@@ -988,7 +989,7 @@ pub extern "C" fn aarch64_setup_pagetables(
                     _ => unreachable!("level is 1..=3"),
                 }
 
-                base = base + pt_region_size;
+                base += pt_region_size;
             }
         }
 
@@ -1119,12 +1120,14 @@ mod tests {
 
         let mut page_table_bytes = PtBytes([[MaybeUninit::uninit(); _]; _]);
 
-        let pt_bases = aarch64_setup_pagetables(
-            /* kernel_first_vaddr */ 0x8060000000,
-            /* kernel_first_paddr */ 0x60000000,
-            regions.as_mut_ptr(),
-            regions.len(),
-            &mut page_table_bytes.0,
-        );
+        let pt_bases = unsafe {
+            aarch64_setup_pagetables(
+                /* kernel_first_vaddr */ 0x8060000000,
+                /* kernel_first_paddr */ 0x60000000,
+                regions.as_mut_ptr(),
+                regions.len(),
+                &mut page_table_bytes.0,
+            )
+        };
     }
 }
