@@ -693,6 +693,14 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
             next_pt_paddr = next_pt_paddr.wrapping_add(PAGE_TABLE_SIZE);
             i += 1;
             page_table.fill(0);
+
+            if cfg!(test) {
+                // HACK! For tests, we want stable page tables, but due to ASLR
+                // we get random things every time. Instead, let's make the
+                // paddr we return a relative-to-start-of-page-tables value.
+                return unsafe { pt_paddr.offset_from(page_tables_paddr_start) } as *const _;
+            }
+
             pt_paddr
         }
     };
@@ -1124,9 +1132,101 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
 mod tests {
     use super::*;
 
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    extern crate std;
+    use std::unreachable;
+    use std::vec;
+    use std::vec::Vec;
+
+    // Exclusive [start, end)
+    #[derive(Debug, PartialEq)]
+    struct WalkRegion {
+        v_start: u64,
+        v_end: u64,
+        p_start: u64,
+        p_end: u64,
+        // This includes *all* page table attributes
+        arch_value: u64,
+    }
+
+    fn aarch64_walk_pt_level_order(
+        level: usize,
+        pte: u64,
+        vaddr: &mut u64,
+        pts: &[[u64; 512]],
+        regions: &mut Vec<WalkRegion>,
+    ) {
+        use aarch64::descriptor_type;
+
+        // Level is [0, 4)
+        assert!(level < 4);
+
+        let v_start = *vaddr;
+        let size = 1
+            << match level {
+                0 => aarch64::BLOCK_BITS_512GB,
+                1 => aarch64::BLOCK_BITS_1GB,
+                2 => aarch64::BLOCK_BITS_2MB,
+                3 => aarch64::PAGE_BITS_4KB,
+                _ => unreachable!(),
+            };
+        *vaddr += size;
+        let v_end = *vaddr;
+
+        if pte == 0 {
+            return;
+        }
+
+        let pte_type = pte & 0b11;
+        // bits [47: 12]
+        let pte_oa = pte & 0xfffffffff000;
+        let pte_attrs = pte & !0xfffffffff000;
+
+        if level == 3 {
+            assert!(pte_type == descriptor_type::PAGE);
+        }
+
+        if level != 3 && pte_type == descriptor_type::TABLE {
+            let next_level_pt_idx = (pte_oa as usize) / PAGE_TABLE_SIZE;
+            // println!("oa: {pte_oa:x}, next_idx: {next_level_pt_idx}");
+
+            let mut vaddr = v_start;
+            for &child_pte in pts[next_level_pt_idx].iter() {
+                aarch64_walk_pt_level_order(level + 1, child_pte, &mut vaddr, pts, regions);
+            }
+        } else {
+            regions.push(WalkRegion {
+                v_start,
+                v_end,
+                p_start: pte_oa,
+                p_end: pte_oa + size,
+                arch_value: pte_attrs,
+            });
+        }
+    }
+
+    fn aarch64_walk_pt_gather_regions(pts: &[[u64; 512]], root_idx: usize) -> Vec<WalkRegion> {
+        let mut regions = vec![];
+        let mut vaddr = 0;
+        for &pte in pts[root_idx].iter() {
+            aarch64_walk_pt_level_order(0, pte, &mut vaddr, pts, &mut regions);
+        }
+
+        let mut i = regions.len() - 1;
+        while i > 1 {
+            if regions[i].p_start == regions[i - 1].p_end
+                && regions[i].v_start == regions[i - 1].v_end
+                && regions[i].arch_value == regions[i - 1].arch_value
+            {
+                regions[i - 1].p_end = regions[i].p_end;
+                regions[i - 1].v_end = regions[i].v_end;
+                regions.remove(i);
+            }
+
+            i -= 1;
+        }
+
+        println!("{regions:#x?}");
+        regions
     }
 
     #[test]
@@ -1173,7 +1273,7 @@ mod tests {
         //         ));
         //     }
 
-        let mut page_table_bytes = PtBytes([[MaybeUninit::uninit(); _]; _]);
+        let mut page_table_bytes = PtBytes([[MaybeUninit::zeroed(); _]; _]);
 
         let pt_bases = unsafe {
             aarch64_setup_pagetables(
@@ -1184,5 +1284,49 @@ mod tests {
                 &mut page_table_bytes.0,
             )
         };
+
+        let page_tables = unsafe {
+            mem::transmute::<
+                [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; MAX_NUM_PAGE_TABLES],
+                [[u64; 512]; MAX_NUM_PAGE_TABLES],
+            >(page_table_bytes.0)
+        };
+
+        assert_eq!(pt_bases.ttbr0_el1, AArch64ReturnValue::INVALID);
+        assert_eq!(pt_bases.ttbr1_el1, AArch64ReturnValue::INVALID);
+        assert_ne!(pt_bases.ttbr0_el2, AArch64ReturnValue::INVALID);
+
+        let root_addr = pt_bases.ttbr0_el2 as usize;
+
+        let walk_regions =
+            aarch64_walk_pt_gather_regions(&page_tables, root_addr / PAGE_TABLE_SIZE);
+
+        assert_eq!(
+            walk_regions,
+            vec![
+                // UART
+                WalkRegion {
+                    v_start: 0x9000000,
+                    v_end: 0x9001000,
+                    p_start: 0x9000000,
+                    p_end: 0x9001000,
+                    arch_value: 0x603,
+                },
+                WalkRegion {
+                    v_start: 0x60000000,
+                    v_end: 0xc0000000,
+                    p_start: 0x60000000,
+                    p_end: 0xc0000000,
+                    arch_value: 0x601,
+                },
+                WalkRegion {
+                    v_start: 0x8060000000,
+                    v_end: 0x8080000000,
+                    p_start: 0x60000000,
+                    p_end: 0x80000000,
+                    arch_value: 0x711,
+                },
+            ]
+        );
     }
 }
