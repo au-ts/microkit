@@ -9,6 +9,7 @@
 mod c_interop;
 
 use core::cmp::min;
+use core::fmt;
 use core::mem;
 use core::mem::MaybeUninit;
 use core::slice;
@@ -522,14 +523,31 @@ impl AArch64ReturnValue {
     const INVALID: *const u8 = usize::MAX as *const _;
 }
 
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub union RegionArchAttrs {
+    pub is_ram: bool,
+    pub raw: u64,
+}
+
+impl fmt::Debug for RegionArchAttrs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.debug_struct("RegionArchAttrs")
+            // SAFETY: raw contains all valid bitpatterns
+            .field("raw", unsafe { &self.raw })
+            .finish()
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
+#[repr(C)]
 pub struct Region {
     pub start: u64,
     pub end: u64,
+    pub arch_attrs: RegionArchAttrs,
 }
 
 pub const MAX_NUM_PAGE_TABLES: usize = 64;
-pub const MAX_NUM_REGIONS: usize = 16;
 
 /// AArch64 loader page tables have two variations:
 ///  - Loader in EL2, then Stage 1 translations in use, so we have the
@@ -596,25 +614,17 @@ pub const MAX_NUM_REGIONS: usize = 16;
 pub extern "C" fn aarch64_setup_pagetables(
     kernel_first_vaddr: u64,
     kernel_first_paddr: u64,
-    ram_regions_ptr: *const Region,
-    ram_regions_len: usize,
-    device_regions_ptr: *const Region,
-    device_regions_len: usize,
-    // Both of these are out-params / storage used.
+    // In-out param; storage and input
+    regions_ptr: *mut Region,
+    regions_len: usize,
+    // Storage used for page tables
     page_table_bytes: &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; MAX_NUM_PAGE_TABLES],
-    regions: &mut [MaybeUninit<(Region, u64)>; MAX_NUM_REGIONS],
 ) -> AArch64ReturnValue {
     use aarch64::{
         block_descriptor, lvl0_index, lvl1_index, lvl2_index, lvl3_index, page_descriptor,
         s1_mair_attr_index::{MT_DEVICE_nGnRnE, MT_NORMAL},
         table_descriptor, BLOCK_BITS_1GB, BLOCK_BITS_2MB, BLOCK_BITS_512GB, PAGE_BITS_4KB,
     };
-
-    let ram_regions = unsafe { slice::from_raw_parts(ram_regions_ptr, ram_regions_len) };
-    let device_regions = unsafe { slice::from_raw_parts(device_regions_ptr, device_regions_len) };
-
-    println!("{:#x?}", ram_regions);
-    println!("{:#x?}", device_regions);
 
     const PAGE_TABLE_ENTRIES: usize = PAGE_TABLE_SIZE / mem::size_of::<u64>();
 
@@ -647,30 +657,23 @@ pub extern "C" fn aarch64_setup_pagetables(
         }
     };
 
-    let identity_mapped_regions: &mut [(Region, _)] = {
-        // Conceptually want we want is an 'arrayvec', but to not pull in more
-        // code we implement this less-efficiently MaybeUninit.
-        // We implement something very similar to the currently-unstable
-        // write_iter implementation:
-        // https://github.com/rust-lang/rust/blob/1.97.1/library/core/src/mem/maybe_uninit.rs#L1384-L1406
-        let mut regions_len = 0;
+    let identity_mapped_regions: &mut [Region] = {
+        let regions = unsafe { slice::from_raw_parts_mut(regions_ptr, regions_len) };
 
-        assert!(ram_regions.len() <= regions.len());
+        println!("{:#x?}", regions);
 
-        let ram_regions_it = ram_regions.into_iter().map(|r| (r, MT_DEVICE_nGnRnE));
-        let device_regions_it = device_regions.into_iter().map(|r| (r, MT_DEVICE_nGnRnE));
-
-        let all_regions_it = ram_regions_it.chain(device_regions_it);
-
-        for (entry, region) in regions.iter_mut().zip(all_regions_it) {
-            entry.write((*region.0, region.1));
-            regions_len += 1;
+        for region in regions.iter_mut() {
+            // SAFETY: We expect users to set is_ram appropriately.
+            region.arch_attrs.raw = if unsafe { region.arch_attrs.is_ram } {
+                // FIXME: For now, RAM is also mapped as DEVICE memory.
+                MT_DEVICE_nGnRnE
+            } else {
+                MT_DEVICE_nGnRnE
+            };
         }
 
-        let regions = unsafe { (&mut regions[0..regions_len]).assume_init_mut() };
-
         // Need to use 'sort_unstable_by_key' as sort_by_key is not in-place.
-        regions.sort_unstable_by_key(|(region, _)| region.start);
+        regions.sort_unstable_by_key(|region| region.start);
 
         regions
     };
@@ -712,7 +715,7 @@ pub extern "C" fn aarch64_setup_pagetables(
     let ram_lvl1_pt_paddr = {
         // Validation of assumptions about the identity mapped regions.
         let mut previous_end = None;
-        for (region, _) in identity_mapped_regions.iter() {
+        for region in identity_mapped_regions.iter() {
             assert!(lvl0_index(region.start) == 0);
             assert!(lvl0_index(region.end - 1) == 0);
             // This is probably an unnecessary assumption.
@@ -748,8 +751,14 @@ pub extern "C" fn aarch64_setup_pagetables(
 
         // Allowed externally for the final iteration
         let mut base = 0u64;
-        for &(ref region, attr_index) in identity_mapped_regions.iter() {
-            println!("Identity-Mapped Region: {:#x}..{:#x}", region.start, region.end);
+        for region in identity_mapped_regions.iter() {
+            // SAFETY: We went through and initialised raw before.
+            let attr_index = unsafe { region.arch_attrs.raw };
+
+            println!(
+                "Identity-Mapped Region: {:#x}..{:#x}",
+                region.start, region.end
+            );
             println!(
                 "  - Current Lvl1: {:#x}..{:#x}, entries: {}",
                 (lvl1_vaddr_top - (1 << BLOCK_BITS_512GB)),
@@ -1069,16 +1078,17 @@ mod tests {
         #[repr(align(4096))]
         struct PtBytes([[MaybeUninit<u8>; 4096]; MAX_NUM_PAGE_TABLES]);
 
-        let ram_regions = [Region {
-            start: 0x60000000,
-            end: 0xc0000000,
-        }];
-
-        let device_regions = [
+        let mut regions = [
+            Region {
+                start: 0x60000000,
+                end: 0xc0000000,
+                arch_attrs: RegionArchAttrs { is_ram: true },
+            },
             // UART
             Region {
                 start: 0x9000000,
                 end: 0x9001000,
+                arch_attrs: RegionArchAttrs { is_ram: false },
             },
         ];
 
@@ -1108,17 +1118,13 @@ mod tests {
         //     }
 
         let mut page_table_bytes = PtBytes([[MaybeUninit::uninit(); _]; _]);
-        let mut regions_storage = [MaybeUninit::uninit(); MAX_NUM_REGIONS];
 
         let pt_bases = aarch64_setup_pagetables(
             /* kernel_first_vaddr */ 0x8060000000,
             /* kernel_first_paddr */ 0x60000000,
-            ram_regions.as_ptr(),
-            ram_regions.len(),
-            device_regions.as_ptr(),
-            device_regions.len(),
+            regions.as_mut_ptr(),
+            regions.len(),
             &mut page_table_bytes.0,
-            &mut regions_storage,
         );
     }
 }

@@ -6,6 +6,7 @@
  */
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "el.h"
 #include "../arch.h"
@@ -21,36 +22,38 @@ struct AArch64ReturnValue {
     uintptr_t ttbr1_el1;
 };
 
+union RegionArchAttrs {
+    bool is_ram;
+    uint64_t raw;
+};
+
 struct Region {
     uint64_t start;
     uint64_t end;
+    union RegionArchAttrs arch_attrs;
 };
 
-const struct Region ram_regions[] = {
-    { .start = 0x60000000, .end = 0xc0000000 },
+struct Region regions[] = {
+    { .start = 0x60000000, .end = 0xc0000000, .arch_attrs.is_ram = true },
+    { .start = 0x9000000, .end = 0x9000000 + 4096, .arch_attrs.is_ram = false },
 };
 
-const struct Region device_regions[] = {
-    { .start = 0x9000000, .end = 0x9000000 + 4096 },
-};
+#define PAGE_TABLE_SIZE 4096
+#define MAX_NUM_PAGE_TABLES 64
 
-uint8_t page_table_bytes[4096][64] ALIGN(4096);
-uint8_t regions[16 * 4] ALIGN(16);
+uint8_t page_table_bytes[PAGE_TABLE_SIZE][MAX_NUM_PAGE_TABLES] ALIGN(4096);
 
 extern struct AArch64ReturnValue aarch64_setup_pagetables(
     uint64_t kernel_first_vaddr, uint64_t kernel_first_paddr,
-    const void *ram_regions_ptr, uintptr_t ram_regions_len,
-    const void *device_regions_ptr, uintptr_t device_regions_len,
-    uint8_t page_table_bytes[4096][64],
-    uint8_t regions[16 * 4]);
+    void *regions_ptr, uintptr_t regions_len,
+    uint8_t page_table_bytes[4096][64]);
 
 int arch_mmu_enable(int logical_cpu)
 {
     struct AArch64ReturnValue pt = aarch64_setup_pagetables(
         0x8060000000, 0x60000000,
-        &ram_regions, ARRAY_SIZE(ram_regions),
-        &device_regions, ARRAY_SIZE(device_regions),
-        page_table_bytes, regions
+        &regions, ARRAY_SIZE(regions),
+        page_table_bytes
     );
 
     int r;
