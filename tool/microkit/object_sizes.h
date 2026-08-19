@@ -43,3 +43,7 @@ huge_page: seL4_HugePageBits
 #ifdef seL4_IOPageTableBits
 io_page_table: seL4_IOPageTableBits
 #endif
+
+#ifdef seL4_VPMUBits
+vpmu: seL4_VPMUBits
+#endif

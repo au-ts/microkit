@@ -24,6 +24,7 @@ const DEFAULT_OBJECT_SIZES: sel4::ObjectSizes = sel4::ObjectSizes {
     io_page_table: None,
     asid_pool: 0,
     vcpu: None,
+    vpmu: None,
 };
 
 const DEFAULT_AARCH64_KERNEL_CONFIG: sel4::Config = sel4::Config {

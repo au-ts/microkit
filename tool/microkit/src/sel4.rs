@@ -348,6 +348,7 @@ pub struct ObjectSizes {
     pub asid_pool: u64,
     // Optional as vCPU is not supported on RISC-V.
     pub vcpu: Option<u64>,
+    pub vpmu: Option<u64>,
 }
 
 pub struct Config {
@@ -696,6 +697,7 @@ pub enum ObjectType {
     LargePage,
     PageTable,
     Vcpu,
+    Vpmu,
     AsidPool,
     IOPageTable,
 }
@@ -723,6 +725,7 @@ impl ObjectType {
                 Arch::Aarch64 | Arch::X86_64 => Some(object_sizes.vcpu.unwrap()),
                 _ => panic!("Unexpected architecture asking for vCPU size bits"),
             },
+            ObjectType::Vpmu => Some(object_sizes.vpmu.unwrap()),
             ObjectType::AsidPool => Some(object_sizes.asid_pool),
             _ => None,
         }

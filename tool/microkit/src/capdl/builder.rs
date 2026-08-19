@@ -19,7 +19,7 @@ use crate::{
     capdl::{
         irq::create_irq_handler_cap,
         memory::{create_iospace, create_vspace, create_vspace_ept, AddressSpace},
-        spec::{capdl_obj_physical_size_bits, BytesContent, ElfContent, FillContent},
+        spec::{capdl_obj_physical_size_bits, capdl_obj_human_name, BytesContent, ElfContent, FillContent},
         util::*,
     },
     elf::ElfFile,
@@ -1357,6 +1357,12 @@ pub fn build_capdl_spec(
     // Step 8-3
     let mut obj_old_id_to_new_id: HashMap<ObjectId, ObjectId> = HashMap::new();
     for (new_id, obj) in spec_container.spec.objects.iter().enumerate() {
+        println!(
+            "\t{} - {}: '{}'\n",
+            new_id,
+            capdl_obj_human_name(&obj.object, kernel_config),
+            obj.name.as_ref().unwrap(),
+        );
         obj_old_id_to_new_id.insert(
             obj_name_to_old_id[obj.name.as_ref().unwrap()],
             new_id.into(),
@@ -1398,6 +1404,9 @@ pub fn build_capdl_spec(
                 .unwrap()
                 .sort_by_key(|cte| cte.slot.0)
         });
+    for cnode_named_obj in spec_container.spec.objects.iter() {
+        println!("final objects: {:?}", cnode_named_obj.name);
+    }
 
     Ok(spec_container)
 }

@@ -42,6 +42,7 @@ pub fn capdl_obj_physical_size_bits(obj: &Object<FrameFill>, sel4_config: &Confi
         Object::CNode(cnode) => cnode.size_bits as u64 + SLOT_BITS,
         Object::Tcb(_) => ObjectType::Tcb.fixed_size_bits(sel4_config).unwrap(),
         Object::VCpu => ObjectType::Vcpu.fixed_size_bits(sel4_config).unwrap(),
+        Object::Vpmu => ObjectType::Vpmu.fixed_size_bits(sel4_config).unwrap(),
         Object::Frame(frame) => frame.size_bits as u64,
         Object::PageTable(pt) => {
             if pt.is_root {
