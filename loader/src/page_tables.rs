@@ -17,7 +17,6 @@ use core::mem::MaybeUninit;
 use core::slice;
 
 use aligned_regions::AlignedRegionsIter;
-use c_interop::println;
 
 const PAGE_TABLE_SIZE: usize = 4096;
 
@@ -640,9 +639,9 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
     page_table_bytes: &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; MAX_NUM_PAGE_TABLES],
 ) -> AArch64ReturnValue {
     use aarch64::{
-        block_descriptor, lvl0_index, lvl1_index, lvl2_index, lvl3_index, page_descriptor,
+        block_descriptor, lvl0_index, lvl1_index, lvl2_index, page_descriptor,
         s1_mair_attr_index::{MT_DEVICE_nGnRnE, MT_NORMAL},
-        table_descriptor, BLOCK_BITS_1GB, BLOCK_BITS_2MB, BLOCK_BITS_512GB, PAGE_BITS_4KB,
+        table_descriptor, BLOCK_BITS_1GB, BLOCK_BITS_2MB, BLOCK_BITS_512GB,
     };
 
     const PAGE_TABLE_ENTRIES: usize = PAGE_TABLE_SIZE / mem::size_of::<u64>();
@@ -720,8 +719,6 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
     let identity_mapped_regions: &mut [Region] = {
         let regions = unsafe { slice::from_raw_parts_mut(regions_ptr, regions_len) };
 
-        println!("{:#x?}", regions);
-
         for region in regions.iter_mut() {
             // SAFETY: We expect users to set is_ram appropriately.
             region.arch_attrs.raw = if unsafe { region.arch_attrs.is_ram } {
@@ -793,7 +790,6 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         const MIN_LEVEL: usize = 1;
 
         while let Some((level, level_indices, current_addr, attr_index)) = iter.next() {
-            // println!("{level:x} {level_indices:x?}");
 
             assert!(level >= MIN_LEVEL);
 
@@ -959,7 +955,6 @@ mod tests {
 
         if level != 3 && pte_type == descriptor_type::TABLE {
             let next_level_pt_idx = (pte_oa as usize) / PAGE_TABLE_SIZE;
-            // println!("oa: {pte_oa:x}, next_idx: {next_level_pt_idx}");
 
             let mut vaddr = v_start;
             for &child_pte in pts[next_level_pt_idx].iter() {
@@ -997,7 +992,6 @@ mod tests {
             i -= 1;
         }
 
-        println!("{regions:#x?}");
         regions
     }
 
