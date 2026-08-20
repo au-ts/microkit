@@ -55,9 +55,9 @@ ifeq ($(ARCH),aarch64)
 	ARCH_DIR := aarch64
 	RUST_TARGET_TRIPLE := aarch64-unknown-none
 else ifeq ($(ARCH),riscv64)
-	CFLAGS_RISCV64 := -mcmodel=medany -march=rv64imac_zicsr_zifencei -mabi=lp64
+	CFLAGS_RISCV64 := -mcmodel=medany -march=rv64gc -mabi=lp64d
 	CFLAGS_ARCH := $(CFLAGS_RISCV64) -DARCH_riscv64
-	ASM_FLAGS_ARCH := -march=rv64imac_zicsr_zifencei -mabi=lp64
+	ASM_FLAGS_ARCH := -march=rv64gc -mabi=lp64d
 	RUST_TARGET_TRIPLE := riscv64gc-unknown-none-elf
 	ARCH_DIR := riscv
 endif
@@ -122,7 +122,7 @@ all: $(OBJPROG)
 $(LINKSCRIPT): $(LINKSCRIPT_INPUT)
 	$(CPP) -DLINK_ADDRESS=$(LINK_ADDRESS) $< | grep -v "^#" > $@
 
-LDFLAGS := -T$(LINKSCRIPT) --gc-sections
+LDFLAGS := -T$(LINKSCRIPT)
 
 $(OBJPROG): $(addprefix $(BUILD_DIR)/, $(OBJECTS)) $(LINKSCRIPT)
 	$(LD) $(LDFLAGS) --start-group $(addprefix $(BUILD_DIR)/, $(OBJECTS)) --end-group -o $@

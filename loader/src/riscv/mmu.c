@@ -6,8 +6,10 @@
  */
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "../arch.h"
+#include "../cutil.h"
 
 /* Pointers to the top-level paging structures */
 uintptr_t riscv64_boot_lvl1_pt;
@@ -20,8 +22,25 @@ uintptr_t riscv64_boot_lvl1_pt;
 
 #define RISCV_PGSHIFT 12
 
+struct Region regions[] = {
+    { .start = 0x80200000, .top = 0x100000000 - 1, .arch_attrs.is_ram = true },
+};
+
+uint8_t page_table_bytes[PAGE_TABLE_SIZE][MAX_NUM_PAGE_TABLES] ALIGN(PAGE_TABLE_SIZE);
+
+extern uintptr_t riscv64_setup_pagetables(
+    uint64_t kernel_first_vaddr, uint64_t kernel_first_paddr,
+    void *regions_ptr, uintptr_t regions_len,
+    uint8_t page_table_bytes[PAGE_TABLE_SIZE][MAX_NUM_PAGE_TABLES]);
+
 int arch_mmu_enable(int logical_cpu)
 {
+    uintptr_t riscv64_boot_lvl1_pt = riscv64_setup_pagetables(
+        0xffffffff80200000, 0x80200000,
+        &regions, ARRAY_SIZE(regions),
+        page_table_bytes
+    );
+
     // The RISC-V privileged spec (20211203), section 4.1.11 says that the
     // SFENCE.VMA instruction may need to be executed before or after writing
     // to satp. I don't understand why we do it before compared to after.

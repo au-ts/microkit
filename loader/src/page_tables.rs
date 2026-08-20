@@ -41,10 +41,6 @@ const fn align_down(n: u64, bits: u64) -> u64 {
     round_down(n, 1 << bits)
 }
 
-unsafe extern "C" {
-    static mut _text: u8;
-}
-
 pub mod aarch64 {
     //! For AArch64, our page tables use the Stage 1 descriptor formats
     //! for both EL2 (TTBR0_EL2) and EL1 (TTBR0_EL1/TTBR1_EL1).
@@ -316,8 +312,8 @@ mod riscv64 {
         (addr >> PAGE_SHIFT) << PTE_PPN0_SHIFT
     }
 
-    pub fn pte_next(addr: u64) -> u64 {
-        pte_ppn(addr) | PTE_TYPE_TABLE | PTE_TYPE_VALID
+    pub fn pte_next(addr: *const u8) -> u64 {
+        pte_ppn(addr as u64) | PTE_TYPE_TABLE | PTE_TYPE_VALID
     }
 
     pub fn pte_leaf(addr: u64) -> u64 {
@@ -369,26 +365,9 @@ mod riscv64 {
 ///       |                |
 ///       |                |
 ///       |                |
-///   s+1 +----------------+                  (1 GiB)
-///       | Level 2 Loader | ---------->  +-- Level 2 --+             +-------------+
-///     s +----------------+              |             | ----------> | 2 MiB block |
-///       |                |          511 +-------------+             +-------------+
-///       |                |              |             | ----------> | 2 MiB block |
-///       |    (empty)     |          510 +-------------+             +-------------+
-///       |                |              |             | ----------> | 2 MiB block |
-///       |                |              |-------------|             +-------------+
-///     0 +----------------+              |             | ----------> | 2 MiB block |
-///                                       |-------------|             +-------------+
-///                                            (...)         (...)         (...)          Loader Regions
-///                                       |-------------|             +-------------+
-///                                       |             | ----------> | 2 MiB block |
-///                                       |-------------|             +-------------+
-///                                       |             | ----------> | 2 MiB block |
-///                                     t +-------------+             +-------------+
-///                                       |             |
-///                                       |   (empty)   |
-///                                       |             |
-///                                       +-------------+
+///     1 +----------------+
+///       | Level 2 Loader | ---------->  +-- RAM
+///     0 +----------------+
 ///
 ///
 /// Where:
@@ -396,43 +375,30 @@ mod riscv64 {
 ///      l = align_down(kernel_first_vaddr, 2MiB),
 ///      m = align_down(kernel_first_vaddr, 4KiB),
 ///      p = align_down(kernel_first_paddr, 4KiB),
-///
-///      s = align_down(text_addr, 1GiB),
-///      t = align_down(text_addr, 2MiB),
 /// ```
 ///
+/// # Safety
+/// - regions_ptr must be valid for as long as this function runs,
+///   and regions_len must represent its length
+/// - page_table_bytes must be aligned to PAGE_TABLE_SIZE
+///
+///
 #[unsafe(no_mangle)]
-pub extern "C" fn riscv64_setup_pagetables(
+pub unsafe extern "C" fn riscv64_setup_pagetables(
     kernel_first_vaddr: u64,
     kernel_first_paddr: u64,
-    page_tables_paddr_start: u64,
-) -> u64 {
+    // In-out param; storage and input
+    regions_ptr: *mut Region,
+    regions_len: usize,
+    // Storage used for page tables
+    page_table_bytes: &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; MAX_NUM_PAGE_TABLES],
+) -> *const u8 {
     use riscv64::{pt_index, pte_leaf, pte_next, BLOCK_BITS_1GB, BLOCK_BITS_2MB, PAGE_BITS_4K};
-
-    let text_addr = &raw const _text as u64;
-
-    // We map the loader using 2MB pages, so make sure the base is actually aligned.
-    assert!(text_addr.is_multiple_of(1 << BLOCK_BITS_2MB));
 
     const PAGE_TABLE_ENTRIES: usize = PAGE_TABLE_SIZE / mem::size_of::<u64>();
 
-    let mut serialise_page_table_to_paddr = {
-        assert!(
-            page_tables_paddr_start
-                == page_tables_paddr_start.next_multiple_of(PAGE_TABLE_SIZE as u64)
-        );
-
-        // This maintains the current end of the PT array.
-        let mut next_pt_paddr = page_tables_paddr_start;
-
-        move |page_table: &mut [u64; PAGE_TABLE_ENTRIES]| -> u64 {
-            let pt_paddr = next_pt_paddr;
-            // page_table_bytes.extend(page_table.iter().flat_map(|pte| pte.to_le_bytes()));
-            next_pt_paddr += PAGE_TABLE_SIZE as u64;
-            page_table.fill(0);
-            pt_paddr
-        }
-    };
+    let (pt_temporaries, mut serialise_page_table_to_paddr) =
+        make_helper_pt_serialisers::<PAGE_TABLE_ENTRIES>(page_table_bytes);
 
     struct Config {
         riscv_pt_levels: usize,
@@ -447,9 +413,6 @@ pub extern "C" fn riscv64_setup_pagetables(
     let l = align_down(kernel_first_vaddr, BLOCK_BITS_2MB);
     let m = align_down(kernel_first_vaddr, PAGE_BITS_4K);
     let p = align_down(kernel_first_paddr, PAGE_BITS_4K);
-
-    let s = align_down(text_addr, BLOCK_BITS_1GB);
-    let t = align_down(text_addr, BLOCK_BITS_2MB);
 
     // Manufacture the kernel page tables
     let kernel_lvl2_pt_paddr = {
@@ -485,28 +448,35 @@ pub extern "C" fn riscv64_setup_pagetables(
         serialise_page_table_to_paddr(&mut lvl2_pt_kernel)
     };
 
-    // Manufacture the loader page tables, which is relatively straightforward
-    let loader_lvl2_pt_paddr = {
-        let mut lvl2_pt_loader = [0u64; PAGE_TABLE_ENTRIES];
+    let ram_lvl2_pt_paddr = {
+        let identity_mapped_regions: &mut [Region] = {
+            let regions = unsafe { slice::from_raw_parts_mut(regions_ptr, regions_len) };
 
-        // Identity mapped, so vaddr == paddr.
-        let mut paddr = t;
+            for region in regions.iter_mut() {
+                // RISC-V ignores attributes
+                region.arch_attrs.raw = 0;
+            }
 
-        for index in pt_index(num_pt_levels, t, 2)..512 {
-            lvl2_pt_loader[index] = pte_leaf(paddr);
-            paddr += 1 << BLOCK_BITS_2MB;
-        }
+            // Need to use 'sort_unstable_by_key' as sort_by_key is not in-place.
+            regions.sort_unstable_by_key(|region| region.start);
 
-        serialise_page_table_to_paddr(&mut lvl2_pt_loader)
+            regions
+        };
+
+        setup_identity_page_tables::<3, _, Riscv64PtLayout, _>(
+            identity_mapped_regions,
+            pt_temporaries,
+            &mut serialise_page_table_to_paddr,
+        )
     };
 
     // Manufacture the Level 1 table
     let mut boot_lvl1_pt = [0u64; PAGE_TABLE_ENTRIES];
 
-    let index_s = pt_index(num_pt_levels, s, 1);
     let index_k = pt_index(num_pt_levels, k, 1);
     boot_lvl1_pt[index_k] = pte_next(kernel_lvl2_pt_paddr);
-    boot_lvl1_pt[index_s] = pte_next(loader_lvl2_pt_paddr);
+    assert!(index_k != 0);
+    boot_lvl1_pt[0] = pte_next(ram_lvl2_pt_paddr);
 
     serialise_page_table_to_paddr(&mut boot_lvl1_pt)
 }
@@ -593,6 +563,26 @@ impl ArchPtLayout<4> for AArch64PtLayout {
 
     fn table_entry(_level: usize, address: *const u8) -> u64 {
         aarch64::table_descriptor(address)
+    }
+}
+
+struct Riscv64PtLayout;
+
+impl ArchPtLayout<3> for Riscv64PtLayout {
+    const MIN_LEVEL: usize = 1;
+    const LEVEL_BITS: [(u32, u32); 3] = [(30, 9), (21, 9), (12, 9)];
+
+    fn leaf_entry(level: usize, address: usize, attributes: u64) -> u64 {
+        assert!(level < Self::LEVELS);
+        assert_eq!(attributes, 0);
+
+        let address = address.try_into().unwrap();
+
+        riscv64::pte_leaf(address)
+    }
+
+    fn table_entry(_level: usize, address: *const u8) -> u64 {
+        riscv64::pte_next(address)
     }
 }
 

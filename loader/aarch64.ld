@@ -56,7 +56,5 @@ SECTIONS
         _bss_end = .;
     } :all
 
-
-
     _loader_end = .;
 }
