@@ -92,7 +92,7 @@ impl<I, const LEVELS: usize> Iterator for AlignedRegionsIter<I, LEVELS>
 where
     I: Iterator<Item = Region>,
 {
-    type Item = (usize, [usize; LEVELS]);
+    type Item = (usize, [usize; LEVELS], usize);
 
     fn next(&mut self) -> Option<Self::Item> {
         let region = match self.current_input_region {
@@ -151,7 +151,7 @@ where
 
         self.current_addr = next_addr;
 
-        Some((level, level_indices))
+        Some((level, level_indices, current_addr))
     }
 }
 
@@ -224,10 +224,10 @@ mod tests {
         assert_eq!(
             indices,
             vec![
-                (3, [0, 0, 0, 0]),
-                (3, [0, 0, 0, 1]),
-                (3, [0, 0, 0, 2]),
-                (3, [0, 0, 0, 3]),
+                (3, [0, 0, 0, 0], 0x0000),
+                (3, [0, 0, 0, 1], 0x1000),
+                (3, [0, 0, 0, 2], 0x2000),
+                (3, [0, 0, 0, 3], 0x3000),
             ]
         );
     }
@@ -257,16 +257,16 @@ mod tests {
         assert_eq!(
             indices,
             vec![
-                (3, [0, 0, 0, 0]),
-                (3, [0, 0, 0, 1]),
-                (3, [0, 0, 0, 2]),
-                (3, [0, 0, 0, 3]),
-                (2, [0, 0, 1, 0]),
-                (2, [0, 0, 2, 0]),
-                (3, [0, 0, 3, 0]),
-                (3, [0, 0, 3, 1]),
-                (3, [0, 0, 3, 2]),
-                (3, [0, 0, 3, 3]),
+                (3, [0, 0, 0, 0], 0x0000),
+                (3, [0, 0, 0, 1], 0x1000),
+                (3, [0, 0, 0, 2], 0x2000),
+                (3, [0, 0, 0, 3], 0x3000),
+                (2, [0, 0, 1, 0], 0x200000),
+                (2, [0, 0, 2, 0], 0x400000),
+                (3, [0, 0, 3, 0], 0x600000),
+                (3, [0, 0, 3, 1], 0x601000),
+                (3, [0, 0, 3, 2], 0x602000),
+                (3, [0, 0, 3, 3], 0x603000),
             ]
         );
     }

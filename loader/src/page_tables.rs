@@ -782,8 +782,6 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         // once we have exceeded the bounds of the current reservation we
         // can simply push to the page_table_bytes storage and insert into
         // the parent PT the descriptor.
-        // When the current vaddr (/paddr, as identity mapped) exceeds the
-        // top value we rotate to a new PT.
 
         // We never actually use level 0 here, but it is nice to have because
         // then the indices are the same as the level.
@@ -803,7 +801,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         // RAM should never cross Level 0 boundaries, for the moment at least.
         const MIN_LEVEL: usize = 1;
 
-        while let Some((level, level_indices)) = iter.next() {
+        while let Some((level, level_indices, current_addr)) = iter.next() {
             // SAFETY: We went through and initialised raw before.
             let attr_index = MT_DEVICE_nGnRnE;
             // let attr_index = unsafe { region.arch_attrs.raw };
@@ -811,14 +809,14 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
 
             assert!(level >= MIN_LEVEL);
 
-            let base = 0;
+            let current_addr: u64 = current_addr.try_into().unwrap();
 
             assert!(pts_by_level[level][level_indices[level]] == 0);
 
             pts_by_level[level][level_indices[level]] = if level == 3 {
-                page_descriptor(base, attr_index)
+                page_descriptor(current_addr, attr_index)
             } else {
-                block_descriptor(level, base, attr_index)
+                block_descriptor(level, current_addr, attr_index)
             };
 
             // Invariant: the page tables in pts_by_level are either:
@@ -849,7 +847,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
                 // or if the next one has different page tables to us.
                 let changed = match iter.peek() {
                     None => true,
-                    Some((_, next_level_indices)) => {
+                    Some((_, next_level_indices, _)) => {
                         level_indices[0..=parent_level] != next_level_indices[0..=parent_level]
                     }
                 };
