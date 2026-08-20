@@ -560,7 +560,207 @@ impl Region {
     };
 }
 
-pub const MAX_NUM_PAGE_TABLES: usize = 64;
+const MAX_NUM_PAGE_TABLES: usize = 64;
+const NUM_TEMPORARIES: usize = 4;
+
+pub trait ArchPtLayout<const LEVELS: usize> {
+    const LEVELS: usize = LEVELS;
+
+    const MIN_LEVEL: usize;
+    const LEVEL_BITS: [(u32, u32); LEVELS];
+
+    fn leaf_entry(level: usize, address: usize, attributes: u64) -> u64;
+    fn table_entry(level: usize, address: *const u8) -> u64;
+}
+
+struct AArch64PtLayout;
+
+impl ArchPtLayout<4> for AArch64PtLayout {
+    const MIN_LEVEL: usize = 1;
+    const LEVEL_BITS: [(u32, u32); 4] = [(39, 9), (30, 9), (21, 9), (12, 9)];
+
+    fn leaf_entry(level: usize, address: usize, attributes: u64) -> u64 {
+        assert!(level < Self::LEVELS);
+
+        let address = address.try_into().unwrap();
+
+        if level == 3 {
+            aarch64::page_descriptor(address, attributes)
+        } else {
+            aarch64::block_descriptor(level, address, attributes)
+        }
+    }
+
+    fn table_entry(_level: usize, address: *const u8) -> u64 {
+        aarch64::table_descriptor(address)
+    }
+}
+
+fn setup_identity_page_tables<
+    const LEVELS: usize,
+    const PAGE_TABLE_ENTRIES: usize,
+    LAYOUT,
+    SerialiseFn,
+>(
+    identity_mapped_regions: &mut [Region],
+    pt_temporaries: &mut [[u64; PAGE_TABLE_ENTRIES]; NUM_TEMPORARIES],
+    mut serialise_page_table_to_paddr: SerialiseFn,
+) -> *const u8
+where
+    SerialiseFn: FnMut(&mut [u64; PAGE_TABLE_ENTRIES]) -> *const u8,
+    LAYOUT: ArchPtLayout<LEVELS>,
+{
+    // Manufacture the RAM page tables, which is a little bit more complicated.
+
+    // We maintain three active page tables, which contain our previous
+    // known page table data. As we process regions in ascending order,
+    // once we have exceeded the bounds of the current reservation we
+    // can simply push to the page_table_bytes storage and insert into
+    // the parent PT the descriptor.
+
+    // We never actually use level 0 here, but it is nice to have because
+    // then the indices are the same as the level.
+    let pts_by_level = pt_temporaries.get_disjoint_mut([0, 1, 2, 3]).unwrap();
+
+    let mut iter =
+        AlignedRegionsIter::new(identity_mapped_regions.iter(), LAYOUT::LEVEL_BITS).peekable();
+
+    // RAM should never cross Level 0 boundaries, for the moment at least.
+    const MIN_LEVEL: usize = 1;
+
+    while let Some((level, level_indices, current_addr, attributes)) = iter.next() {
+        assert!(level >= MIN_LEVEL);
+
+        assert!(pts_by_level[level][level_indices[level]] == 0);
+
+        pts_by_level[level][level_indices[level]] =
+            LAYOUT::leaf_entry(level, current_addr, attributes);
+
+        // Invariant: the page tables in pts_by_level are either:
+        // (1) for the current level_indices, or
+        // (2) are empty/invalid and for a lower level.
+        // Similar, the level indices in our array are only meaningful
+        // from [0..=level].
+        //
+        // Hence, when moving around, we only need to care about page tables
+        // in the range [0, level) inclusive, and can ignore those on
+        // lower levels.
+        // We start from the lowest level (parent) checking if the indices
+        // prefix (i.e. it, or any above it) have changed. Note that
+        // checking just the index would be invalid, in the case of say a
+        // [0, 0, 1, 0] -> [0, 0, 2, 0] change where level=3, as the
+        // level=2 row has changed, so our level=3 page table must be
+        // written out.
+        // We start from the parent and not the current level, because
+        // the change from [0, 0, 1, 0] -> [0, 0, 1, 1] should not write
+        // out the page table. (similarly, [0, 0, 1, X] -> [0, 0, 1, X]
+        // for level=2).
+        // We don't need to care if next_level is higher than the current
+        // level, as this still means the current page table is valid.
+
+        for level in (MIN_LEVEL..level).rev() {
+            // Two cases where we need to write out the page tables:
+            // either we are reaching the end (iter.peek() = None)
+            // or if the next one has different page tables to us.
+            let changed = match iter.peek() {
+                None => true,
+                Some((_, next_level_indices, _, _)) => {
+                    level_indices[0..=level] != next_level_indices[0..=level]
+                }
+            };
+
+            // Flush the 'level + 1' (the entry in the current level's PT)
+            // into the 'level' PT (next level up)
+            // We could have written instead this for loop as
+            // `for level in (MIN_LEVEL+1..=level)`
+            // and then used `let parent_level = level - 1`.
+            if changed {
+                let pt_paddr = serialise_page_table_to_paddr(pts_by_level[level + 1]);
+                pts_by_level[level][level_indices[level]] = LAYOUT::table_entry(level, pt_paddr);
+            }
+        }
+    }
+
+    serialise_page_table_to_paddr(&mut pt_temporaries[MIN_LEVEL])
+}
+
+fn make_helper_pt_serialisers<const PAGE_TABLE_ENTRIES: usize>(
+    page_table_bytes: &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; MAX_NUM_PAGE_TABLES],
+) -> (
+    &mut [[u64; PAGE_TABLE_ENTRIES]; NUM_TEMPORARIES],
+    impl FnMut(&mut [u64; PAGE_TABLE_ENTRIES]) -> *const u8,
+) {
+    // FIXME: Replace once https://github.com/rust-lang/rust/issues/90091 is merged
+    let (page_table_bytes, pt_temporaries) = page_table_bytes
+        .split_first_chunk_mut::<{ MAX_NUM_PAGE_TABLES - NUM_TEMPORARIES }>()
+        .unwrap();
+
+    let pt_temporaries = {
+        let pt_temporaries: &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; NUM_TEMPORARIES] =
+            pt_temporaries.try_into().unwrap();
+
+        for pt in pt_temporaries.iter_mut() {
+            for elem in pt {
+                elem.write(0);
+            }
+        }
+
+        // SAFETY: we just initialised it.
+        let pt_temporaries = unsafe {
+            mem::transmute::<
+                &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; NUM_TEMPORARIES],
+                &mut [[u8; PAGE_TABLE_SIZE]; NUM_TEMPORARIES],
+            >(pt_temporaries)
+        };
+
+        // SAFETY:
+        // - all bitpatterns of u8 can be represented in u8.
+        // - alignment requirements are met by input requirements
+        unsafe {
+            assert!((pt_temporaries.as_ptr() as usize).is_multiple_of(PAGE_TABLE_SIZE));
+            mem::transmute::<
+                &mut [[u8; PAGE_TABLE_SIZE]; NUM_TEMPORARIES],
+                &mut [[u64; PAGE_TABLE_ENTRIES]; NUM_TEMPORARIES],
+            >(pt_temporaries)
+        }
+    };
+
+    let serialise_page_table_to_paddr = {
+        let page_tables_paddr_start: *const u8 = page_table_bytes.as_ptr().cast();
+
+        assert!((page_tables_paddr_start as usize).is_multiple_of(PAGE_TABLE_SIZE));
+
+        // This maintains the current end of the PT array.
+        let mut next_pt_paddr = page_tables_paddr_start;
+        let mut i = 0;
+
+        move |page_table: &mut [u64; PAGE_TABLE_ENTRIES]| -> *const _ {
+            let pt_paddr = next_pt_paddr;
+            for (j, byte) in page_table
+                .iter()
+                .flat_map(|pte| pte.to_le_bytes())
+                .enumerate()
+            {
+                page_table_bytes[i][j].write(byte);
+            }
+
+            next_pt_paddr = next_pt_paddr.wrapping_add(PAGE_TABLE_SIZE);
+            i += 1;
+            page_table.fill(0);
+
+            if cfg!(test) {
+                // HACK! For tests, we want stable page tables, but due to ASLR
+                // we get random things every time. Instead, let's make the
+                // paddr we return a relative-to-start-of-page-tables value.
+                return unsafe { pt_paddr.offset_from(page_tables_paddr_start) } as *const _;
+            }
+
+            pt_paddr
+        }
+    };
+
+    (pt_temporaries, serialise_page_table_to_paddr)
+}
 
 /// AArch64 loader page tables have two variations:
 ///  - Loader in EL2, then Stage 1 translations in use, so we have the
@@ -639,101 +839,15 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
     page_table_bytes: &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; MAX_NUM_PAGE_TABLES],
 ) -> AArch64ReturnValue {
     use aarch64::{
-        block_descriptor, lvl0_index, lvl1_index, lvl2_index, page_descriptor,
+        block_descriptor, lvl0_index, lvl1_index, lvl2_index,
         s1_mair_attr_index::{MT_DEVICE_nGnRnE, MT_NORMAL},
         table_descriptor, BLOCK_BITS_1GB, BLOCK_BITS_2MB, BLOCK_BITS_512GB,
     };
 
     const PAGE_TABLE_ENTRIES: usize = PAGE_TABLE_SIZE / mem::size_of::<u64>();
 
-    const NUM_TEMPORARIES: usize = 4;
-    // FIXME: Replace once https://github.com/rust-lang/rust/issues/90091 is merged
-    let (page_table_bytes, pt_temporaries) = page_table_bytes
-        .split_first_chunk_mut::<{ MAX_NUM_PAGE_TABLES - NUM_TEMPORARIES }>()
-        .unwrap();
-
-    let pt_temporaries = {
-        let pt_temporaries: &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; NUM_TEMPORARIES] =
-            pt_temporaries.try_into().unwrap();
-
-        for pt in pt_temporaries.iter_mut() {
-            for elem in pt {
-                elem.write(0);
-            }
-        }
-
-        // SAFETY: we just initialised it.
-        let pt_temporaries = unsafe {
-            mem::transmute::<
-                &mut [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; NUM_TEMPORARIES],
-                &mut [[u8; PAGE_TABLE_SIZE]; NUM_TEMPORARIES],
-            >(pt_temporaries)
-        };
-
-        // SAFETY:
-        // - all bitpatterns of u8 can be represented in u8.
-        // - alignment requirements are met by input requirements
-        unsafe {
-            assert!((pt_temporaries.as_ptr() as usize).is_multiple_of(PAGE_TABLE_SIZE));
-            mem::transmute::<
-                &mut [[u8; PAGE_TABLE_SIZE]; NUM_TEMPORARIES],
-                &mut [[u64; PAGE_TABLE_ENTRIES]; NUM_TEMPORARIES],
-            >(pt_temporaries)
-        }
-    };
-
-    let mut serialise_page_table_to_paddr = {
-        let page_tables_paddr_start: *const u8 = page_table_bytes.as_ptr().cast();
-
-        assert!((page_tables_paddr_start as usize).is_multiple_of(PAGE_TABLE_SIZE));
-
-        // This maintains the current end of the PT array.
-        let mut next_pt_paddr = page_tables_paddr_start;
-        let mut i = 0;
-
-        move |page_table: &mut [u64; PAGE_TABLE_ENTRIES]| -> *const _ {
-            let pt_paddr = next_pt_paddr;
-            for (j, byte) in page_table
-                .iter()
-                .flat_map(|pte| pte.to_le_bytes())
-                .enumerate()
-            {
-                page_table_bytes[i][j].write(byte);
-            }
-
-            next_pt_paddr = next_pt_paddr.wrapping_add(PAGE_TABLE_SIZE);
-            i += 1;
-            page_table.fill(0);
-
-            if cfg!(test) {
-                // HACK! For tests, we want stable page tables, but due to ASLR
-                // we get random things every time. Instead, let's make the
-                // paddr we return a relative-to-start-of-page-tables value.
-                return unsafe { pt_paddr.offset_from(page_tables_paddr_start) } as *const _;
-            }
-
-            pt_paddr
-        }
-    };
-
-    let identity_mapped_regions: &mut [Region] = {
-        let regions = unsafe { slice::from_raw_parts_mut(regions_ptr, regions_len) };
-
-        for region in regions.iter_mut() {
-            // SAFETY: We expect users to set is_ram appropriately.
-            region.arch_attrs.raw = if unsafe { region.arch_attrs.is_ram } {
-                // FIXME: For now, RAM is also mapped as DEVICE memory.
-                MT_DEVICE_nGnRnE
-            } else {
-                MT_DEVICE_nGnRnE
-            };
-        }
-
-        // Need to use 'sort_unstable_by_key' as sort_by_key is not in-place.
-        regions.sort_unstable_by_key(|region| region.start);
-
-        regions
-    };
+    let (pt_temporaries, mut serialise_page_table_to_paddr) =
+        make_helper_pt_serialisers::<PAGE_TABLE_ENTRIES>(page_table_bytes);
 
     // Manufacture the constants as per the diagram.
     let k = align_down(kernel_first_vaddr, BLOCK_BITS_512GB);
@@ -766,89 +880,31 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         serialise_page_table_to_paddr(lvl1_pt_kernel)
     };
 
-    // Manufacture the RAM page tables, which is a little bit more complicated.
-    // We assume that normal RAM lies between 0 <= paddr < 512GiB, i.e.
-    // that lvl0_index(any ram region addr) = 0.
     let ram_lvl1_pt_paddr = {
-        // We maintain three active page tables, which contain our previous
-        // known page table data. As we process regions in ascending order,
-        // once we have exceeded the bounds of the current reservation we
-        // can simply push to the page_table_bytes storage and insert into
-        // the parent PT the descriptor.
+        let identity_mapped_regions: &mut [Region] = {
+            let regions = unsafe { slice::from_raw_parts_mut(regions_ptr, regions_len) };
 
-        // We never actually use level 0 here, but it is nice to have because
-        // then the indices are the same as the level.
-        let pts_by_level = pt_temporaries.get_disjoint_mut([0, 1, 2, 3]).unwrap();
-
-        let mut iter = AlignedRegionsIter::new(
-            identity_mapped_regions.iter(),
-            [(39, 9), (30, 9), (21, 9), (12, 9)],
-        )
-        .peekable();
-
-        // RAM should never cross Level 0 boundaries, for the moment at least.
-        const MIN_LEVEL: usize = 1;
-
-        while let Some((level, level_indices, current_addr, attr_index)) = iter.next() {
-
-            assert!(level >= MIN_LEVEL);
-
-            let current_addr: u64 = current_addr.try_into().unwrap();
-
-            assert!(pts_by_level[level][level_indices[level]] == 0);
-
-            pts_by_level[level][level_indices[level]] = if level == 3 {
-                page_descriptor(current_addr, attr_index)
-            } else {
-                block_descriptor(level, current_addr, attr_index)
-            };
-
-            // Invariant: the page tables in pts_by_level are either:
-            // (1) for the current level_indices, or
-            // (2) are empty/invalid and for a lower level.
-            // Similar, the level indices in our array are only meaningful
-            // from [0..=level].
-            //
-            // Hence, when moving around, we only need to care about page tables
-            // in the range [0, level) inclusive, and can ignore those on
-            // lower levels.
-            // We start from the lowest level (parent) checking if the indices
-            // prefix (i.e. it, or any above it) have changed. Note that
-            // checking just the index would be invalid, in the case of say a
-            // [0, 0, 1, 0] -> [0, 0, 2, 0] change where level=3, as the
-            // level=2 row has changed, so our level=3 page table must be
-            // written out.
-            // We start from the parent and not the current level, because
-            // the change from [0, 0, 1, 0] -> [0, 0, 1, 1] should not write
-            // out the page table. (similarly, [0, 0, 1, X] -> [0, 0, 1, X]
-            // for level=2).
-            // We don't need to care if next_level is higher than the current
-            // level, as this still means the current page table is valid.
-
-            for level in (MIN_LEVEL..level).rev() {
-                // Two cases where we need to write out the page tables:
-                // either we are reaching the end (iter.peek() = None)
-                // or if the next one has different page tables to us.
-                let changed = match iter.peek() {
-                    None => true,
-                    Some((_, next_level_indices, _, _)) => {
-                        level_indices[0..=level] != next_level_indices[0..=level]
-                    }
+            for region in regions.iter_mut() {
+                // SAFETY: We expect users to set is_ram appropriately.
+                region.arch_attrs.raw = if unsafe { region.arch_attrs.is_ram } {
+                    // FIXME: For now, RAM is also mapped as DEVICE memory.
+                    MT_DEVICE_nGnRnE
+                } else {
+                    MT_DEVICE_nGnRnE
                 };
-
-                // Flush the 'level + 1' (the entry in the current level's PT)
-                // into the 'level' PT (next level up)
-                // We could have written instead this for loop as
-                // `for level in (MIN_LEVEL+1..=level)`
-                // and then used `let parent_level = level - 1`.
-                if changed {
-                    let pt_paddr = serialise_page_table_to_paddr(pts_by_level[level + 1]);
-                    pts_by_level[level][level_indices[level]] = table_descriptor(pt_paddr);
-                }
             }
-        }
 
-        serialise_page_table_to_paddr(&mut pt_temporaries[MIN_LEVEL])
+            // Need to use 'sort_unstable_by_key' as sort_by_key is not in-place.
+            regions.sort_unstable_by_key(|region| region.start);
+
+            regions
+        };
+
+        setup_identity_page_tables::<4, _, AArch64PtLayout, _>(
+            identity_mapped_regions,
+            pt_temporaries,
+            &mut serialise_page_table_to_paddr,
+        )
     };
 
     struct Config {
