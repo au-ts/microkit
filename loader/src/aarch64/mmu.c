@@ -28,14 +28,14 @@ union RegionArchAttrs {
 };
 
 struct Region {
-    uint64_t start;
-    uint64_t end;
+    uintptr_t start;
+    uintptr_t top;
     union RegionArchAttrs arch_attrs;
 };
 
 struct Region regions[] = {
-    { .start = 0x60000000, .end = 0xc0000000, .arch_attrs.is_ram = true },
-    { .start = 0x9000000, .end = 0x9000000 + 4096, .arch_attrs.is_ram = false },
+    { .start = 0x60000000, .top = 0xc0000000 - 1, .arch_attrs.is_ram = true },
+    { .start = 0x9000000, .top = 0x9000000 + 0xfff, .arch_attrs.is_ram = false },
 };
 
 #define PAGE_TABLE_SIZE 4096

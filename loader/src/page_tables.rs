@@ -11,7 +11,6 @@
 mod aligned_regions;
 mod c_interop;
 
-use core::cmp::min;
 use core::fmt;
 use core::mem;
 use core::mem::MaybeUninit;
@@ -527,6 +526,7 @@ impl AArch64ReturnValue {
     const INVALID: *const u8 = usize::MAX as *const _;
 }
 
+/// IMPORTANT: Keep in sync with C's `union RegionArchAttrs`
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub union RegionArchAttrs {
@@ -544,12 +544,21 @@ impl fmt::Debug for RegionArchAttrs {
 }
 
 /// Region is [start, end] *inclusive* as this avoids overflows.
+/// IMPORTANT: Keep in sync with C's `struct Region`
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 pub struct Region {
-    pub start: u64,
-    pub end: u64,
+    pub start: usize,
+    pub top: usize,
     pub arch_attrs: RegionArchAttrs,
+}
+
+impl Region {
+    pub const EMPTY: Self = Self {
+        start: 0,
+        top: 0,
+        arch_attrs: RegionArchAttrs { raw: 0 },
+    };
 }
 
 pub const MAX_NUM_PAGE_TABLES: usize = 64;
@@ -764,19 +773,6 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
     // We assume that normal RAM lies between 0 <= paddr < 512GiB, i.e.
     // that lvl0_index(any ram region addr) = 0.
     let ram_lvl1_pt_paddr = {
-        // Validation of assumptions about the identity mapped regions.
-        let mut previous_end = None;
-        for region in identity_mapped_regions.iter() {
-            assert!(lvl0_index(region.start) == 0);
-            assert!(lvl0_index(region.end) == 0);
-            // This is probably an unnecessary assumption.
-            assert!(region.start.is_multiple_of(4096));
-            assert!(region.end.is_multiple_of(4096));
-            // This is definitely necessary.
-            assert!(region.start >= previous_end.unwrap_or(0));
-            previous_end = Some(region.end);
-        }
-
         // We maintain three active page tables, which contain our previous
         // known page table data. As we process regions in ascending order,
         // once we have exceeded the bounds of the current reservation we
@@ -785,15 +781,10 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
 
         // We never actually use level 0 here, but it is nice to have because
         // then the indices are the same as the level.
-        let mut pts_by_level = pt_temporaries.get_disjoint_mut([0, 1, 2, 3]).unwrap();
+        let pts_by_level = pt_temporaries.get_disjoint_mut([0, 1, 2, 3]).unwrap();
 
         let mut iter = AlignedRegionsIter::new(
-            identity_mapped_regions
-                .iter()
-                .map(|r| aligned_regions::Region {
-                    start: r.start as usize,
-                    top: (r.end - 1) as usize,
-                }),
+            identity_mapped_regions.iter(),
             [(39, 9), (30, 9), (21, 9), (12, 9)],
         )
         .peekable();
@@ -801,11 +792,8 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
         // RAM should never cross Level 0 boundaries, for the moment at least.
         const MIN_LEVEL: usize = 1;
 
-        while let Some((level, level_indices, current_addr)) = iter.next() {
-            // SAFETY: We went through and initialised raw before.
-            let attr_index = MT_DEVICE_nGnRnE;
-            // let attr_index = unsafe { region.arch_attrs.raw };
-            println!("{level:x} {level_indices:x?}");
+        while let Some((level, level_indices, current_addr, attr_index)) = iter.next() {
+            // println!("{level:x} {level_indices:x?}");
 
             assert!(level >= MIN_LEVEL);
 
@@ -841,21 +829,25 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
             // We don't need to care if next_level is higher than the current
             // level, as this still means the current page table is valid.
 
-            for parent_level in (MIN_LEVEL..level).rev() {
+            for level in (MIN_LEVEL..level).rev() {
                 // Two cases where we need to write out the page tables:
                 // either we are reaching the end (iter.peek() = None)
                 // or if the next one has different page tables to us.
                 let changed = match iter.peek() {
                     None => true,
-                    Some((_, next_level_indices, _)) => {
-                        level_indices[0..=parent_level] != next_level_indices[0..=parent_level]
+                    Some((_, next_level_indices, _, _)) => {
+                        level_indices[0..=level] != next_level_indices[0..=level]
                     }
                 };
 
+                // Flush the 'level + 1' (the entry in the current level's PT)
+                // into the 'level' PT (next level up)
+                // We could have written instead this for loop as
+                // `for level in (MIN_LEVEL+1..=level)`
+                // and then used `let parent_level = level - 1`.
                 if changed {
-                    println!("changed at {parent_level}, flushing {} into {parent_level}", parent_level + 1);
-                    let pt_paddr = serialise_page_table_to_paddr(&mut pts_by_level[parent_level + 1]);
-                    pts_by_level[parent_level][level_indices[parent_level]] = table_descriptor(pt_paddr);
+                    let pt_paddr = serialise_page_table_to_paddr(pts_by_level[level + 1]);
+                    pts_by_level[level][level_indices[level]] = table_descriptor(pt_paddr);
                 }
             }
         }
@@ -1017,13 +1009,13 @@ mod tests {
         let mut regions = [
             Region {
                 start: 0x60000000,
-                end: 0xc0000000,
+                top: 0xc0000000 - 1,
                 arch_attrs: RegionArchAttrs { is_ram: true },
             },
             // UART
             Region {
                 start: 0x9000000,
-                end: 0x9001000,
+                top: 0x9000fff,
                 arch_attrs: RegionArchAttrs { is_ram: false },
             },
         ];

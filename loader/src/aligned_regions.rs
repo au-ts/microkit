@@ -14,16 +14,7 @@
 use core::array;
 use core::cmp::min;
 
-// Inclusive [start, top]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd)]
-pub struct Region {
-    pub start: usize,
-    pub top: usize,
-}
-
-impl Region {
-    const EMPTY: Self = Self { start: 0, top: 0 };
-}
+use crate::Region;
 
 /// Bits from [start, end)
 /// Note: Bit indices are 'u32' as this is what rust tends to use for usize::BITS,
@@ -56,20 +47,20 @@ fn indices_of_level<const LEVELS: usize>(
 }
 
 #[must_use = "iterators are lazy and do nothing unless consumed"]
-pub struct AlignedRegionsIter<I, const LEVELS: usize>
+pub struct AlignedRegionsIter<'a, I, const LEVELS: usize>
 where
-    I: Iterator<Item = Region>,
+    I: Iterator<Item = &'a Region>,
 {
-    /// Array of [size_bits, count_bits), descending, for each level
+    /// Array of (size_bits, count_bits), descending, for each level
     level_bits: [(u32, u32); LEVELS],
     input_regions_iter: I,
-    current_input_region: Option<Region>,
+    current_input_region: Option<&'a Region>,
     current_addr: usize,
 }
 
-impl<I, const LEVELS: usize> AlignedRegionsIter<I, LEVELS>
+impl<'a, I, const LEVELS: usize> AlignedRegionsIter<'a, I, LEVELS>
 where
-    I: Iterator<Item = Region>,
+    I: Iterator<Item = &'a Region>,
 {
     // TODO: method on iter?
     pub fn new(iter: I, level_bits: [(u32, u32); LEVELS]) -> Self {
@@ -88,11 +79,11 @@ where
     }
 }
 
-impl<I, const LEVELS: usize> Iterator for AlignedRegionsIter<I, LEVELS>
+impl<'a, I, const LEVELS: usize> Iterator for AlignedRegionsIter<'a, I, LEVELS>
 where
-    I: Iterator<Item = Region>,
+    I: Iterator<Item = &'a Region>,
 {
-    type Item = (usize, [usize; LEVELS], usize);
+    type Item = (usize, [usize; LEVELS], usize, u64);
 
     fn next(&mut self) -> Option<Self::Item> {
         let region = match self.current_input_region {
@@ -103,7 +94,6 @@ where
                     return None;
                 };
 
-                assert!(region != Region::EMPTY);
                 assert!(region.start < region.top);
 
                 self.current_input_region = Some(region);
@@ -135,7 +125,7 @@ where
 
         let level = self
             .level_bits
-            .map(|(size, count)| size)
+            .map(|(size, _)| size)
             .iter()
             .position(|&level_size_bits| align_bits >= level_size_bits)
             .expect("bad input; regions should be aligned to at least the lowest level");
@@ -151,7 +141,10 @@ where
 
         self.current_addr = next_addr;
 
-        Some((level, level_indices, current_addr))
+        // SAFETY: raw contains all valid bitpatterns
+        let raw_arch_attrs = unsafe { region.arch_attrs.raw };
+
+        Some((level, level_indices, current_addr, raw_arch_attrs))
     }
 }
 
@@ -162,6 +155,8 @@ mod tests {
     extern crate std;
     use std::vec;
     use std::vec::Vec;
+
+    use crate::RegionArchAttrs;
 
     #[test]
     fn test_bits_range() {
@@ -195,14 +190,14 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_invalid_range_aligned_regions() {
-        let iter = [Region::EMPTY; 5].into_iter();
+        let iter = [Region::EMPTY; 5].iter();
         // Should be reverse
         AlignedRegionsIter::new(iter, [(8, 4), (12, 12), (24, 8), (32, 16)]);
     }
 
     #[test]
     fn test_ok_range_aligned_regions() {
-        let iter = [Region::EMPTY; 5].into_iter();
+        let iter = [Region::EMPTY; 5].iter();
         AlignedRegionsIter::new(iter, [(32, 16), (24, 8), (12, 12), (8, 4)]);
     }
 
@@ -214,8 +209,9 @@ mod tests {
             [Region {
                 start: 0,
                 top: 0x3fff,
+                arch_attrs: RegionArchAttrs { is_ram: false },
             }]
-            .into_iter(),
+            .iter(),
             aarch64_levels,
         );
 
@@ -224,10 +220,10 @@ mod tests {
         assert_eq!(
             indices,
             vec![
-                (3, [0, 0, 0, 0], 0x0000),
-                (3, [0, 0, 0, 1], 0x1000),
-                (3, [0, 0, 0, 2], 0x2000),
-                (3, [0, 0, 0, 3], 0x3000),
+                (3, [0, 0, 0, 0], 0x0000, 0x0),
+                (3, [0, 0, 0, 1], 0x1000, 0x0),
+                (3, [0, 0, 0, 2], 0x2000, 0x0),
+                (3, [0, 0, 0, 3], 0x3000, 0x0),
             ]
         );
     }
@@ -241,14 +237,16 @@ mod tests {
                 Region {
                     start: 0,
                     top: 0x3fff,
+                    arch_attrs: RegionArchAttrs { is_ram: false },
                 },
                 // Then this will give us 2 2M region and then 4 4k regions
                 Region {
                     start: 0x200000,
                     top: 0x603fff,
+                    arch_attrs: RegionArchAttrs { is_ram: true },
                 },
             ]
-            .into_iter(),
+            .iter(),
             aarch64_levels,
         );
 
@@ -257,16 +255,16 @@ mod tests {
         assert_eq!(
             indices,
             vec![
-                (3, [0, 0, 0, 0], 0x0000),
-                (3, [0, 0, 0, 1], 0x1000),
-                (3, [0, 0, 0, 2], 0x2000),
-                (3, [0, 0, 0, 3], 0x3000),
-                (2, [0, 0, 1, 0], 0x200000),
-                (2, [0, 0, 2, 0], 0x400000),
-                (3, [0, 0, 3, 0], 0x600000),
-                (3, [0, 0, 3, 1], 0x601000),
-                (3, [0, 0, 3, 2], 0x602000),
-                (3, [0, 0, 3, 3], 0x603000),
+                (3, [0, 0, 0, 0], 0x0000, 0x0),
+                (3, [0, 0, 0, 1], 0x1000, 0x0),
+                (3, [0, 0, 0, 2], 0x2000, 0x0),
+                (3, [0, 0, 0, 3], 0x3000, 0x0),
+                (2, [0, 0, 1, 0], 0x200000, 0x1),
+                (2, [0, 0, 2, 0], 0x400000, 0x1),
+                (3, [0, 0, 3, 0], 0x600000, 0x1),
+                (3, [0, 0, 3, 1], 0x601000, 0x1),
+                (3, [0, 0, 3, 2], 0x602000, 0x1),
+                (3, [0, 0, 3, 3], 0x603000, 0x1),
             ]
         );
     }
