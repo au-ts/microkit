@@ -7,11 +7,15 @@
 #include <microkit.h>
 #include <sel4/sel4.h>
 
+uintptr_t parent_channel_id = 0;
+
 void init(void)
 {
-    microkit_dbg_puts("hello, world\n");
+    microkit_dbg_puts("child init\n");
+    microkit_notify(parent_channel_id);
 }
 
 void notified(microkit_channel ch)
 {
+    microkit_notify(parent_channel_id);
 }

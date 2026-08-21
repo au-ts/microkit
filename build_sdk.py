@@ -496,7 +496,8 @@ SUPPORTED_CONFIGS = (
             "KernelDebugBuild": True,
             "KernelPrinting": True,
             "KernelVerificationBuild": False,
-            "ThreadLocalPMU": True
+            "ThreadLocalPMU": True,
+            "KernelOptimisation": "-O1"
         },
         kernel_options_arch={
             KernelArch.AARCH64: {

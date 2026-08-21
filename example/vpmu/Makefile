@@ -48,9 +48,9 @@ endif
 
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
-HELLO_OBJS := hello.o
+VPMU_OBJS := parent.o child.o
 
-IMAGES := hello.elf
+IMAGES := parent.elf child.elf
 CFLAGS := -nostdlib -ffreestanding -g -O0 -Wall  -Wno-unused-function -Werror -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
 LDFLAGS := -L$(BOARD_DIR)/lib
 LIBS := -lmicrokit -Tmicrokit.ld
@@ -63,8 +63,8 @@ all: $(IMAGE_FILE)
 $(BUILD_DIR)/%.o: %.c Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
 
-$(BUILD_DIR)/hello.elf: $(addprefix $(BUILD_DIR)/, $(HELLO_OBJS))
+$(BUILD_DIR)/%.elf: $(BUILD_DIR)/%.o
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
-$(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) hello.system
-	$(MICROKIT_TOOL) hello.system --search-path $(BUILD_DIR) --viper-output ${BUILD_DIR}/viper --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE)
+$(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) vpmu.system
+	$(MICROKIT_TOOL) vpmu.system --search-path $(BUILD_DIR) --viper-output ${BUILD_DIR}/viper --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE)

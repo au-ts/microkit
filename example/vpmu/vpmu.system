@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright 2021, Breakaway Consulting Pty. Ltd.
+
+ SPDX-License-Identifier: BSD-2-Clause
+-->
+<system>
+    <protection_domain name="parent" priority="254">
+        <program_image path="parent.elf" />
+        <vpmu virq_id="10"/>
+
+        <protection_domain name="child" priority="1" id="0" setvar_id="child_id">
+            <program_image path="child.elf" />
+        </protection_domain>
+    </protection_domain>
+    <channel>
+        <end pd="parent" id="20" setvar_id="child_channel_id"/>
+        <end pd="child" id="20" setvar_id="parent_channel_id"/>
+    </channel>
+</system>

@@ -7,9 +7,5 @@
 <system>
     <protection_domain name="hello">
         <program_image path="hello.elf" />
-        <!--
-            <vpmu virq_id="10"/>
-        -->
-            <vpmu virq_id="10"/>
     </protection_domain>
 </system>
