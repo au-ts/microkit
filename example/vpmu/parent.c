@@ -22,6 +22,18 @@
         } \
     } while (0)
 
+#define EXPECT_ERROR(expected, ...) do { \
+        seL4_Error err = __VA_ARGS__; \
+        if (err != expected) { \
+            microkit_dbg_puts("error - " #__VA_ARGS__ " with value: "); \
+            microkit_dbg_put32(err); \
+            microkit_dbg_puts(", expected: "); \
+            microkit_dbg_put32(expected); \
+            microkit_dbg_puts("\n"); \
+            microkit_internal_crash(err); \
+        } \
+    } while (0)
+
 #define FOR_EACH_CHILD(ID_NAME, ...) do { \
         for (int ID_NAME = 0; ID_NAME < NUM_CHILDREN; ID_NAME++) { \
             __VA_ARGS__ \
@@ -45,19 +57,26 @@ child_state_t children[NUM_CHILDREN] = {0};
 
 typedef enum {
     test_0_BINDING = 0,
-    test_1_RECORD_ON,
-    test_2_WORKLOAD,
-    test_3_CHECK_CYCLE_COUNT,
-    test_4_RECORD_OFF,
-    test_5_WORKLOAD,
-    test_6_CHECK_CYCLE_COUNT,
-    test_7_RECORD_ON,
-    test_8_WORKLOAD,
-    test_9_CHECK_CYCLE_COUNT,
-    test_10_RESET_CYCLE_COUNT,
-    test_11_WORKLOAD,
-    test_12_CHECK_CYCLE_COUNT,
-    test_13_UNBINDING,
+    test_1_WORKLOAD,
+    test_2_CHECK_CYCLE_COUNT,
+    test_3_RECORD_ON,
+    test_4_WORKLOAD,
+    test_5_CHECK_CYCLE_COUNT,
+    test_6_RECORD_OFF,
+    test_7_WORKLOAD,
+    test_8_CHECK_CYCLE_COUNT,
+    test_9_RECORD_ON,
+    test_10_WORKLOAD,
+    test_11_CHECK_CYCLE_COUNT,
+    test_12_RESET_CYCLE_COUNT,
+    test_13_WORKLOAD,
+    test_14_CHECK_CYCLE_COUNT,
+    test_15_UNBINDING,
+    test_16_BIND_DIFFERENT,
+    test_17_WORKLOAD,
+    test_18_CHECK_CYCLE_COUNT,
+    test_19_BINDING_ERROR_CASES,
+    test_DONE,
 } test_state_e;
 
 test_state_e test_state = test_0_BINDING;
@@ -82,22 +101,41 @@ seL4_Error main_loop(void) {
                     HANDLE_ERROR(seL4_TCB_BindVPMU(children[i].tcb_cap, children[i].vpmu_cap));
                 );
             );
-            case test_1_RECORD_ON: TEST_CASE(
+            case test_1_WORKLOAD: TEST_CASE(
+                  FOR_EACH_CHILD(i,  
+                      microkit_notify(children[i].channel);
+                  );
+                  return seL4_NoError;
+              );
+            case test_2_CHECK_CYCLE_COUNT: TEST_CASE(
+                FOR_EACH_CHILD(i,
+                    seL4_ARM_VPMU_VPMUReadCycleCounter_t res = seL4_ARM_VPMU_VPMUReadCycleCounter(children[i].vpmu_cap);
+                    HANDLE_ERROR(res.error);
+                    cycle_counts[i] = res.cycle_counter_value;
+                    microkit_dbg_puts("Num cycles[");
+                    microkit_dbg_put32(i);
+                    microkit_dbg_puts("]: ");
+                    microkit_dbg_put32(cycle_counts[i]);
+                    microkit_dbg_puts("\n");
+                );
+
+                FOR_EACH_CHILD(i,
+                    // assert that they are 0
+                    assert(cycle_counts[i] == 0);
+                );
+            );
+            case test_3_RECORD_ON: TEST_CASE(
                 FOR_EACH_CHILD(i,
                     HANDLE_ERROR(seL4_ARM_VPMU_VPMUCounterControl(children[i].vpmu_cap, 1));
                 );
             );
-            case test_2_WORKLOAD: {
-              test_state++;
-              do {
-                for (int i = 0; i < 2; i++) {
-                  microkit_notify(children[i].channel);
-                }
-              } while (0);
-              return seL4_NoError;
-            } break;
-              ;
-            case test_3_CHECK_CYCLE_COUNT: TEST_CASE(
+            case test_4_WORKLOAD: TEST_CASE(
+                  FOR_EACH_CHILD(i,  
+                      microkit_notify(children[i].channel);
+                  );
+                  return seL4_NoError;
+              );
+            case test_5_CHECK_CYCLE_COUNT: TEST_CASE(
                 FOR_EACH_CHILD(i,
                     seL4_ARM_VPMU_VPMUReadCycleCounter_t res = seL4_ARM_VPMU_VPMUReadCycleCounter(children[i].vpmu_cap);
                     HANDLE_ERROR(res.error);
@@ -119,19 +157,19 @@ seL4_Error main_loop(void) {
                     assert(cycle_counts[i] != 0);
                 );
             );
-            case test_4_RECORD_OFF: TEST_CASE(
+            case test_6_RECORD_OFF: TEST_CASE(
                 FOR_EACH_CHILD(i,
                     HANDLE_ERROR(seL4_ARM_VPMU_VPMUCounterControl(children[i].vpmu_cap, 0));
                 );
             );
-            case test_5_WORKLOAD: TEST_CASE(
+            case test_7_WORKLOAD: TEST_CASE(
                 // notify the children to start working 
                 FOR_EACH_CHILD(i,
                     microkit_notify(children[i].channel);
                 );
                 return seL4_NoError;
             );
-            case test_6_CHECK_CYCLE_COUNT: TEST_CASE(
+            case test_8_CHECK_CYCLE_COUNT: TEST_CASE(
                 // Check that the cycle counts are the same.
                 FOR_EACH_CHILD(i,
                     seL4_ARM_VPMU_VPMUReadCycleCounter_t res = seL4_ARM_VPMU_VPMUReadCycleCounter(children[i].vpmu_cap);
@@ -139,19 +177,19 @@ seL4_Error main_loop(void) {
                     assert(cycle_counts[i] == res.cycle_counter_value);
                 );
             );
-            case test_7_RECORD_ON: TEST_CASE(
+            case test_9_RECORD_ON: TEST_CASE(
                 FOR_EACH_CHILD(i,
                     HANDLE_ERROR(seL4_ARM_VPMU_VPMUCounterControl(children[i].vpmu_cap, 1));
                 );
             );
-            case test_8_WORKLOAD: TEST_CASE(
+            case test_10_WORKLOAD: TEST_CASE(
                 // notify the children to start working 
                 FOR_EACH_CHILD(i,
                     microkit_notify(children[i].channel);
                 );
                 return seL4_NoError;
             );
-            case test_9_CHECK_CYCLE_COUNT: TEST_CASE(
+            case test_11_CHECK_CYCLE_COUNT: TEST_CASE(
                 // assert that they are different.
                 FOR_EACH_CHILD(i,
                     seL4_ARM_VPMU_VPMUReadCycleCounter_t res = seL4_ARM_VPMU_VPMUReadCycleCounter(children[i].vpmu_cap);
@@ -160,7 +198,7 @@ seL4_Error main_loop(void) {
                     // don't store them, as we will use cycle_counts for checking for determinism.
                 );
             );
-            case test_10_RESET_CYCLE_COUNT: TEST_CASE(
+            case test_12_RESET_CYCLE_COUNT: TEST_CASE(
                 FOR_EACH_CHILD(i,
                     // Doing the reset operation should change all the cycle counter values to 0.
                     HANDLE_ERROR(seL4_ARM_VPMU_VPMUCounterControl(children[i].vpmu_cap, 2));
@@ -170,32 +208,77 @@ seL4_Error main_loop(void) {
                     // After resetting all cycle counts should be 0 semantically.
                     assert(cycle_counts[i] != res.cycle_counter_value);
                     assert(0 == res.cycle_counter_value);
-                    cycle_counts[i] = res.cycle_counter_value;
                 );
             );
-            case test_11_WORKLOAD: TEST_CASE(
+            case test_13_WORKLOAD: TEST_CASE(
                 // notify the children to start working 
                 FOR_EACH_CHILD(i,
                     microkit_notify(children[i].channel);
                 );
                 return seL4_NoError;
             );
-            case test_12_CHECK_CYCLE_COUNT: TEST_CASE(
+            case test_14_CHECK_CYCLE_COUNT: TEST_CASE(
                 // assert determinism - these new cycle counts should be the same as the original.
                 FOR_EACH_CHILD(i,
                     seL4_ARM_VPMU_VPMUReadCycleCounter_t res = seL4_ARM_VPMU_VPMUReadCycleCounter(children[i].vpmu_cap);
                     HANDLE_ERROR(res.error);
+                    microkit_dbg_puts("Num cycles: ");
+                    microkit_dbg_put32(res.cycle_counter_value);
+                    microkit_dbg_puts("  Expected cycles: ");
+                    microkit_dbg_put32(cycle_counts[i]);
+                    microkit_dbg_puts("\n");
                     assert(cycle_counts[i] == res.cycle_counter_value);
                 );
             );
-            case test_13_UNBINDING: TEST_CASE(
+            case test_15_UNBINDING: TEST_CASE(
                 // unbinding does not change any of the values.
                 // also test that we can just bind and unbind.
                 FOR_EACH_CHILD(i,
                     HANDLE_ERROR(seL4_TCB_UnbindVPMU(children[i].tcb_cap));
                     HANDLE_ERROR(seL4_TCB_BindVPMU(children[i].tcb_cap, children[i].vpmu_cap));
+                    HANDLE_ERROR(seL4_TCB_UnbindVPMU(children[i].tcb_cap));
                 );
             );
+            case test_16_BIND_DIFFERENT: TEST_CASE(
+                // Test if we can bind a different vpmu and record with different PMUs.
+                FOR_EACH_CHILD(i,
+                    HANDLE_ERROR(seL4_TCB_BindVPMU(children[i].tcb_cap, children[NUM_CHILDREN - 1 - i].vpmu_cap));
+                );
+            );
+            case test_17_WORKLOAD: TEST_CASE(
+                // notify the children to start working 
+                FOR_EACH_CHILD(i,
+                    microkit_notify(children[i].channel);
+                );
+                return seL4_NoError;
+            );
+            case test_18_CHECK_CYCLE_COUNT: TEST_CASE(
+                int total = 0;
+                FOR_EACH_CHILD(i, total += cycle_counts[i];);
+
+                FOR_EACH_CHILD(i,
+                    seL4_ARM_VPMU_VPMUReadCycleCounter_t res = seL4_ARM_VPMU_VPMUReadCycleCounter(children[i].vpmu_cap);
+                    HANDLE_ERROR(res.error);
+                    microkit_dbg_puts("Num cycles: ");
+                    microkit_dbg_put32(res.cycle_counter_value);
+                    microkit_dbg_puts("\n");
+                    assert(res.cycle_counter_value > 0);
+                    assert(res.cycle_counter_value == total);
+                );
+            );
+            case test_19_BINDING_ERROR_CASES: TEST_CASE(
+                // cannot bind already bound.
+                FOR_EACH_CHILD(i,
+                    EXPECT_ERROR(seL4_IllegalOperation, seL4_TCB_BindVPMU(children[i].tcb_cap, children[NUM_CHILDREN - 1 - i].vpmu_cap));
+                );
+                // cannot bind a VPMU to multiple TCBs
+                HANDLE_ERROR(seL4_TCB_UnbindVPMU(children[0].tcb_cap));
+                EXPECT_ERROR(seL4_IllegalOperation, seL4_TCB_BindVPMU(children[0].tcb_cap, children[0].vpmu_cap));
+            );
+            case test_DONE:
+                // TODO: Test the cases where we are trying to read from a VPMU of a child that is running.
+                microkit_dbg_puts("tests success!\n");
+                return seL4_NoError;
         }
     }
     return seL4_NoError;

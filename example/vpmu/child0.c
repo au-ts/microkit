@@ -20,7 +20,7 @@ void notified(microkit_channel ch)
 {
     // spinloop volatile.
     volatile int i = 0;
-    while (i < 100000) {
+    while (i < 1) {
         i+=1;
     }
     microkit_dbg_puts("child0 work finished\n");
