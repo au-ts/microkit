@@ -206,18 +206,39 @@ impl<'a> Loader<'a> {
             loader_data_offset += data.len() as u64;
         }
 
+        // let mmu_regions = vec![
+        //     shared_types::MmuRegion {
+        //         start: 0x60000000,
+        //         top: 0xc0000000 - 1,
+        //         arch_attrs: shared_types::MmuRegionArchAttrs { is_ram: true },
+        //     },
+        //     shared_types::MmuRegion {
+        //         start: 0x9000000,
+        //         top: 0x9000000 + 0xfff,
+        //         arch_attrs: shared_types::MmuRegionArchAttrs { is_ram: false },
+        //     },
+        // ];
+
         let mmu_regions = vec![
             shared_types::MmuRegion {
-                start: 0x60000000,
-                top: 0xc0000000 - 1,
+                start: 0x40000000,
+                top: 0x80000000 - 1,
                 arch_attrs: shared_types::MmuRegionArchAttrs { is_ram: true },
             },
             shared_types::MmuRegion {
-                start: 0x9000000,
-                top: 0x9000000 + 0xfff,
+                start: 0x30860000,
+                top: 0x30860000 + 0xfff,
                 arch_attrs: shared_types::MmuRegionArchAttrs { is_ram: false },
             },
         ];
+
+        // let mmu_regions = vec![
+        //     shared_types::MmuRegion {
+        //         start: 0x80200000,
+        //         top: 0x100000000 - 1,
+        //         arch_attrs: shared_types::MmuRegionArchAttrs { is_ram: true },
+        //     }
+        // ];
 
         let mmu_regions_offset = mem::size_of::<LoaderHeader64>() as u64;
         let loader_regions_offset = mmu_regions_offset

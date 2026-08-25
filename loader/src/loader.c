@@ -104,7 +104,7 @@ static void copy_data(void)
     const void *data_base = &regions[loader_data->loader_regions_count];
     for (uint32_t i = 0; i < loader_data->loader_regions_count; i++) {
         const struct loader_region *r = &regions[i];
-        puts("LDR|INFO: copying region ");
+        LDR_PRINT("INFO", 0, "copying region ");
         puthex32(i);
         puts("\n");
         memcpy((void *)(uintptr_t)r->load_addr, data_base + r->offset, r->size);
@@ -117,14 +117,6 @@ static int print_lock = 0;
 
 void start_kernel(int logical_cpu)
 {
-    int r = arch_mmu_enable(logical_cpu);
-    if (r != 0) {
-        LDR_PRINT("ERROR", logical_cpu, "failed to enable MMU: ");
-        puthex32(r);
-        puts("\n");
-        for (;;) {}
-    }
-
     LDR_PRINT("INFO", logical_cpu, "jumping to kernel\n");
 
 #ifdef CONFIG_PRINTING
@@ -181,6 +173,9 @@ int main(void)
     }
 
     print_loader_data();
+
+    /* Enable the MMU after the initial loader messages */
+    arch_mmu_enable(0);
 
     /* past here we have trashed u-boot so any errors should go to the
      * fail label; it's not possible to return to U-boot

@@ -56,6 +56,7 @@ int arch_mmu_enable(int logical_cpu)
     } else {
         LDR_PRINT("ERROR", logical_cpu, "unknown EL for MMU enable\n");
     }
+    LDR_PRINT("INFO", logical_cpu, "... complete\n");
 
     return 0;
 }
