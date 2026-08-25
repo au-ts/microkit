@@ -872,10 +872,10 @@ pub fn build_capdl_spec(
             println!("vpmu: ({}, {:?})", vpmu.vpmu_idx, vpmu.irq_ch);
             // for now ignore irq_ch.
 
-            let vpmu_obj_id = capdl_util_make_vpmu_obj(&mut spec_container, &pd.name);
+            let vpmu_obj_id = capdl_util_make_vpmu_obj(&mut spec_container, &pd.name, vpmu.irq_ch.unwrap_or(0));
             let vpmu_cap = capdl_util_make_vpmu_cap(vpmu_obj_id);
             caps_to_insert_to_pd_cspace.push(
-                capdl_util_make_cte((PD_BASE_VPMU_CAP + vpmu.vpmu_idx as u64) as u32, vpmu_cap)
+                capdl_util_make_cte((PD_BASE_VPMU_CAP + vpmu.irq_ch.unwrap_or(0) as u64) as u32, vpmu_cap)
             );
         }
 

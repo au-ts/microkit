@@ -48,12 +48,13 @@ endif
 
 MICROKIT_TOOL ?= $(MICROKIT_SDK)/bin/microkit
 
-VPMU_OBJS := parent.o child.o
+VPMU_OBJS := parent.o child1.o child0.o
 
-IMAGES := parent.elf child.elf
+IMAGES := parent.elf child1.elf child0.elf
 CFLAGS := -nostdlib -ffreestanding -g -O0 -Wall  -Wno-unused-function -Werror -I$(BOARD_DIR)/include $(CFLAGS_ARCH)
 LDFLAGS := -L$(BOARD_DIR)/lib
 LIBS := -lmicrokit -Tmicrokit.ld
+SPEC = $(BUILD_DIR)/capdl_spec.json
 
 IMAGE_FILE = $(BUILD_DIR)/loader.img
 REPORT_FILE = $(BUILD_DIR)/report.txt
@@ -67,4 +68,4 @@ $(BUILD_DIR)/%.elf: $(BUILD_DIR)/%.o
 	$(LD) $(LDFLAGS) $^ $(LIBS) -o $@
 
 $(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) vpmu.system
-	$(MICROKIT_TOOL) vpmu.system --search-path $(BUILD_DIR) --viper-output ${BUILD_DIR}/viper --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE)
+	$(MICROKIT_TOOL) vpmu.system --search-path $(BUILD_DIR) --viper-output ${BUILD_DIR}/viper --board $(MICROKIT_BOARD) --config $(MICROKIT_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE) --capdl-json $(SPEC)

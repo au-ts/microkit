@@ -11,11 +11,13 @@ uintptr_t parent_channel_id = 0;
 
 void init(void)
 {
-    microkit_dbg_puts("child init\n");
+    microkit_dbg_puts("child1 init\n");
     microkit_notify(parent_channel_id);
 }
 
 void notified(microkit_channel ch)
 {
+    // no work.
+    microkit_dbg_puts("child1 work finished\n");
     microkit_notify(parent_channel_id);
 }

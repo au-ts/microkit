@@ -5,16 +5,26 @@
  SPDX-License-Identifier: BSD-2-Clause
 -->
 <system>
-    <protection_domain name="parent" priority="254">
+    <!-- children have higher priority so they initialise first and then can be "controlled" by the parent. -->
+    <protection_domain name="parent" priority="254" stack_size="0x10000">
         <program_image path="parent.elf" />
         <vpmu virq_id="10"/>
+        <vpmu virq_id="35"/>
 
-        <protection_domain name="child" priority="1" id="0" setvar_id="child_id">
-            <program_image path="child.elf" />
+        <protection_domain name="child0" priority="1" id="0" setvar_id="child0_id" stack_size="0x10000">
+            <program_image path="child0.elf" />
         </protection_domain>
-    </protection_domain>
+
+        <protection_domain name="child1" priority="2" id="1" setvar_id="child1_id" stack_size="0x10000">
+            <program_image path="child1.elf" />
+        </protection_domain>
+</protection_domain>
     <channel>
-        <end pd="parent" id="20" setvar_id="child_channel_id"/>
-        <end pd="child" id="20" setvar_id="parent_channel_id"/>
+        <end pd="parent" id="0" setvar_id="child0_channel_id"/>
+        <end pd="child0" id="20" setvar_id="parent_channel_id"/>
+    </channel>
+    <channel>
+        <end pd="parent" id="1" setvar_id="child1_channel_id"/>
+        <end pd="child1" id="20" setvar_id="parent_channel_id"/>
     </channel>
 </system>

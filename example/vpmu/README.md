@@ -1,13 +1,8 @@
 <!--
-     Copyright 2024, UNSW
+     Copyright 2026, UNSW
      SPDX-License-Identifier: CC-BY-SA-4.0
 -->
-# Example - Hello World
-
-This is a basic hello world example that has a single protection domain
-that simply prints "hello, world!" upon initialisation.
-
-All supported platforms are supported in this example.
+# Example - VPMU
 
 ## Building
 

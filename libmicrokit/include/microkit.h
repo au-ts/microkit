@@ -31,7 +31,8 @@ typedef seL4_MessageInfo_t microkit_msginfo;
 #define BASE_VM_TCB_CAP 266
 #define BASE_VCPU_CAP 330
 #define BASE_IOPORT_CAP 394
-#define BASE_USER_CAPS 458
+#define BASE_VPMU_CAPS 458
+#define BASE_USER_CAPS 522
 
 /* This should be kept in sync with `PD_ROOT_CAP_BITS` in capdl/builder.rs */
 #define PD_ROOT_CAP_BITS 6
