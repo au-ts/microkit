@@ -417,18 +417,16 @@ pub unsafe extern "C" fn riscv64_setup_pagetables(
 
     // Manufacture the kernel page tables
     let kernel_lvl2_pt_paddr = {
-        let mut lvl2_pt_kernel = [0u64; PAGE_TABLE_ENTRIES];
-
         let mut paddr = p;
         let index_l = pt_index(num_pt_levels, l, 2);
 
-        lvl2_pt_kernel[index_l] = if kernel_first_vaddr.is_multiple_of(1 << BLOCK_BITS_2MB) {
+        let lvl2_pte_entry = if kernel_first_vaddr.is_multiple_of(1 << BLOCK_BITS_2MB) {
             assert!(paddr.is_multiple_of(1 << BLOCK_BITS_2MB));
             let pte = pte_leaf(paddr);
             paddr += 1 << BLOCK_BITS_2MB;
             pte
         } else {
-            let mut lvl3_pt_kernel = [0u64; PAGE_TABLE_ENTRIES];
+            let lvl3_pt_kernel = &mut pt_temporaries[0];
 
             let index_m = pt_index(num_pt_levels, m, 3);
 
@@ -437,19 +435,22 @@ pub unsafe extern "C" fn riscv64_setup_pagetables(
                 paddr += 1 << PAGE_BITS_4K;
             }
 
-            let kernel_lvl3_pt_paddr = serialise_page_table_to_paddr(&mut lvl3_pt_kernel);
+            let kernel_lvl3_pt_paddr = serialise_page_table_to_paddr(lvl3_pt_kernel);
             pte_next(kernel_lvl3_pt_paddr)
         };
+
+        let lvl2_pt_kernel = &mut pt_temporaries[0];
+        lvl2_pt_kernel[index_l] = lvl2_pte_entry;
 
         for index in (index_l + 1)..512 {
             lvl2_pt_kernel[index] = pte_leaf(paddr);
             paddr += 1 << BLOCK_BITS_2MB;
         }
 
-        serialise_page_table_to_paddr(&mut lvl2_pt_kernel)
+        serialise_page_table_to_paddr(lvl2_pt_kernel)
     };
 
-    let ram_lvl2_pt_paddr = {
+    let boot_lvl1_pt = {
         let identity_mapped_regions: &mut [Region] = {
             let regions = unsafe { slice::from_raw_parts_mut(regions_ptr, regions_len) };
 
@@ -471,15 +472,11 @@ pub unsafe extern "C" fn riscv64_setup_pagetables(
         )
     };
 
-    // Manufacture the Level 1 table
-    let mut boot_lvl1_pt = [0u64; PAGE_TABLE_ENTRIES];
-
     let index_k = pt_index(num_pt_levels, k, 1);
+    assert_eq!(boot_lvl1_pt[index_k], 0);
     boot_lvl1_pt[index_k] = pte_next(kernel_lvl2_pt_paddr);
-    assert!(index_k != 0);
-    boot_lvl1_pt[0] = pte_next(ram_lvl2_pt_paddr);
 
-    serialise_page_table_to_paddr(&mut boot_lvl1_pt)
+    serialise_page_table_to_paddr(boot_lvl1_pt)
 }
 
 const MAX_NUM_PAGE_TABLES: usize = 64;
@@ -521,7 +518,7 @@ impl ArchPtLayout<4> for AArch64PtLayout {
 struct Riscv64PtLayout;
 
 impl ArchPtLayout<3> for Riscv64PtLayout {
-    const MIN_LEVEL: usize = 1;
+    const MIN_LEVEL: usize = 0;
     const LEVEL_BITS: [(u32, u32); 3] = [(30, 9), (21, 9), (12, 9)];
 
     fn leaf_entry(level: usize, address: usize, attributes: u64) -> u64 {
@@ -539,15 +536,16 @@ impl ArchPtLayout<3> for Riscv64PtLayout {
 }
 
 fn setup_identity_page_tables<
+    'a,
     const LEVELS: usize,
     const PAGE_TABLE_ENTRIES: usize,
     LAYOUT,
     SerialiseFn,
 >(
     identity_mapped_regions: &mut [Region],
-    pt_temporaries: &mut [[u64; PAGE_TABLE_ENTRIES]; NUM_TEMPORARIES],
+    pt_temporaries: &'a mut [[u64; PAGE_TABLE_ENTRIES]; NUM_TEMPORARIES],
     mut serialise_page_table_to_paddr: SerialiseFn,
-) -> *const u8
+) -> &'a mut [u64; PAGE_TABLE_ENTRIES]
 where
     SerialiseFn: FnMut(&mut [u64; PAGE_TABLE_ENTRIES]) -> *const u8,
     LAYOUT: ArchPtLayout<LEVELS>,
@@ -567,11 +565,8 @@ where
     let mut iter =
         AlignedRegionsIter::new(identity_mapped_regions.iter(), LAYOUT::LEVEL_BITS).peekable();
 
-    // RAM should never cross Level 0 boundaries, for the moment at least.
-    const MIN_LEVEL: usize = 1;
-
     while let Some((level, level_indices, current_addr, attributes)) = iter.next() {
-        assert!(level >= MIN_LEVEL);
+        assert!(level >= LAYOUT::MIN_LEVEL);
 
         assert!(pts_by_level[level][level_indices[level]] == 0);
 
@@ -600,7 +595,7 @@ where
         // We don't need to care if next_level is higher than the current
         // level, as this still means the current page table is valid.
 
-        for level in (MIN_LEVEL..level).rev() {
+        for level in (LAYOUT::MIN_LEVEL..level).rev() {
             // Two cases where we need to write out the page tables:
             // either we are reaching the end (iter.peek() = None)
             // or if the next one has different page tables to us.
@@ -623,7 +618,7 @@ where
         }
     }
 
-    serialise_page_table_to_paddr(&mut pt_temporaries[MIN_LEVEL])
+    &mut pt_temporaries[LAYOUT::MIN_LEVEL]
 }
 
 fn make_helper_pt_serialisers<const PAGE_TABLE_ENTRIES: usize>(
@@ -842,11 +837,13 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
             regions
         };
 
-        setup_identity_page_tables::<4, _, AArch64PtLayout, _>(
+        let top_pt = setup_identity_page_tables::<4, _, AArch64PtLayout, _>(
             identity_mapped_regions,
             pt_temporaries,
             &mut serialise_page_table_to_paddr,
-        )
+        );
+
+        serialise_page_table_to_paddr(top_pt)
     };
 
     struct Config {
@@ -995,6 +992,86 @@ mod tests {
         regions
     }
 
+    fn riscv64_walk_pt_level_order(
+        level: usize,
+        pte: u64,
+        vaddr: &mut u64,
+        pts: &[[u64; 512]],
+        regions: &mut Vec<WalkRegion>,
+    ) {
+
+        // Level is [0, 3)
+        assert!(level < 3);
+
+        let v_start = *vaddr;
+        let size = 1
+            << match level {
+                0 => riscv64::BLOCK_BITS_1GB,
+                1 => riscv64::BLOCK_BITS_2MB,
+                2 => riscv64::PAGE_BITS_4K,
+                _ => unreachable!(),
+            };
+        *vaddr += size;
+        let v_end = *vaddr;
+
+        if pte == 0 {
+            return;
+        }
+
+        assert_eq!(pte & riscv64::PTE_TYPE_VALID, riscv64::PTE_TYPE_VALID);
+
+        // if all RWX are zero, then table
+        let pte_is_leaf = pte & 0b1110 != 0;
+        // bits [53:10], shifted left so it is the actual address
+        let pte_oa = (pte & 0x1ffffffffffc00) << (12 - 10);
+        let pte_attrs = pte & !0x1ffffffffffc00;
+
+        if level == 2 {
+            assert!(pte_is_leaf);
+        }
+
+        if level != 2 && !pte_is_leaf {
+            let next_level_pt_idx = (pte_oa as usize) / PAGE_TABLE_SIZE;
+
+            let mut vaddr = v_start;
+            for &child_pte in pts[next_level_pt_idx].iter() {
+                riscv64_walk_pt_level_order(level + 1, child_pte, &mut vaddr, pts, regions);
+            }
+        } else {
+            regions.push(WalkRegion {
+                v_start,
+                v_end,
+                p_start: pte_oa,
+                p_end: pte_oa + size,
+                arch_value: pte_attrs,
+            });
+        }
+    }
+
+    fn riscv64_walk_pt_gather_regions(pts: &[[u64; 512]], root_idx: usize) -> Vec<WalkRegion> {
+        let mut regions = vec![];
+        let mut vaddr = 0;
+        for &pte in pts[root_idx].iter() {
+            riscv64_walk_pt_level_order(0, pte, &mut vaddr, pts, &mut regions);
+        }
+
+        let mut i = regions.len() - 1;
+        while i > 1 {
+            if regions[i].p_start == regions[i - 1].p_end
+                && regions[i].v_start == regions[i - 1].v_end
+                && regions[i].arch_value == regions[i - 1].arch_value
+            {
+                regions[i - 1].p_end = regions[i].p_end;
+                regions[i - 1].v_end = regions[i].v_end;
+                regions.remove(i);
+            }
+
+            i -= 1;
+        }
+
+        regions
+    }
+
     #[test]
     fn qemu_aarch64() {
         #[repr(align(4096))]
@@ -1093,6 +1170,76 @@ mod tests {
                     p_start: 0x60000000,
                     p_end: 0x80000000,
                     arch_value: 0x711,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn qemu_riscv64() {
+        #[repr(align(4096))]
+        struct PtBytes([[MaybeUninit<u8>; 4096]; MAX_NUM_PAGE_TABLES]);
+
+        let mut regions = [
+            // RAM
+            Region {
+                start: 0x80200000,
+                top: 0x100000000 - 1,
+                arch_attrs: RegionArchAttrs { is_ram: true },
+            },
+        ];
+
+        let mut page_table_bytes = PtBytes([[MaybeUninit::zeroed(); _]; _]);
+
+        let boot_lvl1_pt = unsafe {
+            riscv64_setup_pagetables(
+                /* kernel_first_vaddr */ 0xffffffff80200000,
+                /* kernel_first_paddr */ 0x80200000,
+                regions.as_mut_ptr(),
+                regions.len(),
+                &mut page_table_bytes.0,
+            )
+        };
+
+        let page_tables = unsafe {
+            mem::transmute::<
+                [[MaybeUninit<u8>; PAGE_TABLE_SIZE]; MAX_NUM_PAGE_TABLES],
+                [[u64; 512]; MAX_NUM_PAGE_TABLES],
+            >(page_table_bytes.0)
+        };
+
+        let root_addr = boot_lvl1_pt as usize;
+
+        let walk_regions =
+            riscv64_walk_pt_gather_regions(&page_tables, root_addr / PAGE_TABLE_SIZE);
+
+        // FIXME: why is RAM split in two?
+        assert_eq!(
+            walk_regions,
+            vec![
+                // RAM
+                WalkRegion {
+                    v_start: 0x80200000,
+                    v_end: 0x80400000,
+                    p_start: 0x80200000,
+                    p_end: 0x80400000,
+                    arch_value: 0xcf,
+                },
+                // RAM
+                WalkRegion {
+                    v_start: 0x80400000,
+                    v_end: 0x100000000 ,
+                    p_start: 0x80400000,
+                    p_end: 0x100000000,
+                    arch_value: 0xcf,
+                },
+                // seL4
+                WalkRegion {
+                    v_start: 0x7f80200000,
+                    v_end: 0x7fc0000000,
+                    p_start: 0x80200000,
+                    p_end: 0xc0000000,
+                    arch_value: 0xcf,
                 },
             ]
         );
