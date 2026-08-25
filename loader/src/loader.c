@@ -75,8 +75,8 @@ static void print_loader_data(void)
         puthex64(r->start);
         puts("   top: ");
         puthex64(r->top);
-        puts("   arch_attrs: ");
-        puthex64(r->arch_attrs.raw);
+        puts("   is_ram: ");
+        puts(r->arch_attrs.is_ram ? "yes" : "no");
         puts("\n");
     }
 
