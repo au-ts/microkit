@@ -39,15 +39,15 @@ void arch_set_exception_handler(void);
 int arch_mmu_enable(int logical_cpu);
 void arch_jump_to_kernel(int logical_cpu);
 
-union RegionArchAttrs {
+union MmuRegionArchAttrs {
     bool is_ram;
     uint64_t raw;
 };
 
-struct Region {
+struct MmuRegion {
     uintptr_t start;
     uintptr_t top;
-    union RegionArchAttrs arch_attrs;
+    union MmuRegionArchAttrs arch_attrs;
 };
 
 #define PAGE_TABLE_SIZE 4096

@@ -13,6 +13,10 @@ use std::mem;
 use std::ops::Range;
 use std::path::Path;
 
+// allow(unused) because this includes "shared" types we don't want to construct
+#[allow(unused)]
+mod shared_types;
+
 /// Checks that each region in the given list does not overlap with any other region.
 /// Panics upon finding an overlapping region
 fn check_non_overlapping(regions: &Vec<(u64, u64)>) {
@@ -30,6 +34,7 @@ fn check_non_overlapping(regions: &Vec<(u64, u64)>) {
     }
 }
 
+// Keep in sync with C's 'loader_region'
 #[repr(C)]
 struct LoaderRegion64 {
     load_addr: u64,
@@ -38,6 +43,7 @@ struct LoaderRegion64 {
     r#type: u64,
 }
 
+// Keep in sync with C's 'loader_header'
 #[repr(C)]
 struct LoaderHeader64 {
     magic: u64,
@@ -47,7 +53,14 @@ struct LoaderHeader64 {
     ui_p_reg_end: u64,
     pv_offset: u64,
     v_entry: u64,
-    num_regions: u64,
+    kernel_first_vaddr: u64,
+    kernel_first_paddr: u64,
+
+    loader_regions_offset: u64,
+    loader_regions_count: u64,
+
+    mmu_regions_offset: u64,
+    mmu_regions_count: u64,
 }
 
 pub struct Loader<'a> {
@@ -56,6 +69,7 @@ pub struct Loader<'a> {
     header: LoaderHeader64,
     region_metadata: Vec<LoaderRegion64>,
     regions: Vec<(u64, &'a [u8])>,
+    mmu_regions: Vec<shared_types::MmuRegion>,
     word_size: usize,
     elf_machine: u16,
     entry: u64,
@@ -159,12 +173,14 @@ impl<'a> Loader<'a> {
         // the return object.
         let loader_image = image_segment.data().clone();
 
-        println!("kernel_first_vaddr: {kernel_first_vaddr:?}");
-        println!("kernel_first_paddr: {kernel_first_paddr:?}");
+        let kernel_first_vaddr = kernel_first_vaddr.expect("could find kernel vaddr");
+        let kernel_first_paddr = kernel_first_paddr.expect("could find kernel paddr");
 
         if image_vaddr != loader_elf.entry {
             panic!("The loader entry point must be the first byte in the image");
         }
+
+        assert_eq!(image_segment.mem_size(), image_segment.file_size());
 
         let kernel_entry = kernel_elf.entry;
 
@@ -178,21 +194,39 @@ impl<'a> Loader<'a> {
         assert!(ui_p_reg_end > ui_p_reg_start);
 
         let mut region_metadata = Vec::new();
-        let mut offset: u64 = 0;
+        // This offset is relative to the start of the loader *data* regions.
+        let mut loader_data_offset: u64 = 0;
         for (addr, data) in &regions {
             region_metadata.push(LoaderRegion64 {
                 load_addr: *addr,
                 size: data.len() as u64,
-                offset,
+                offset: loader_data_offset,
                 r#type: 1,
             });
-            offset += data.len() as u64;
+            loader_data_offset += data.len() as u64;
         }
 
-        let size = loader_image.len() as u64
-            + mem::size_of::<LoaderHeader64>() as u64
+        let mmu_regions = vec![
+            shared_types::MmuRegion {
+                start: 0x60000000,
+                top: 0xc0000000 - 1,
+                arch_attrs: shared_types::MmuRegionArchAttrs { is_ram: true },
+            },
+            shared_types::MmuRegion {
+                start: 0x9000000,
+                top: 0x9000000 + 0xfff,
+                arch_attrs: shared_types::MmuRegionArchAttrs { is_ram: false },
+            },
+        ];
+
+        let mmu_regions_offset = mem::size_of::<LoaderHeader64>() as u64;
+        let loader_regions_offset = mmu_regions_offset
+            + (mmu_regions.len() * mem::size_of::<shared_types::MmuRegion>()) as u64;
+        let end_of_loader_offset = loader_regions_offset
             + (region_metadata.len() * mem::size_of::<LoaderRegion64>()) as u64
-            + offset;
+            + loader_data_offset;
+
+        let size = loader_image.len() as u64 + end_of_loader_offset;
 
         let mut all_regions_with_loader: Vec<_> = regions
             .iter()
@@ -211,7 +245,12 @@ impl<'a> Loader<'a> {
             ui_p_reg_end,
             pv_offset,
             v_entry: inittask_v_entry,
-            num_regions: regions.len() as u64,
+            kernel_first_vaddr,
+            kernel_first_paddr,
+            loader_regions_offset,
+            loader_regions_count: region_metadata.len() as u64,
+            mmu_regions_offset,
+            mmu_regions_count: mmu_regions.len() as u64,
         };
 
         Loader {
@@ -220,6 +259,7 @@ impl<'a> Loader<'a> {
             header,
             region_metadata,
             regions,
+            mmu_regions,
             word_size: kernel_elf.word_size,
             elf_machine: kernel_elf.machine,
             entry: loader_elf.entry,
@@ -233,6 +273,19 @@ impl<'a> Loader<'a> {
         bytes.extend_from_slice(&self.loader_image);
         // Then we copy the loader metadata (known as the 'header')
         bytes.extend_from_slice(unsafe { struct_to_bytes(&self.header) });
+
+        // The ordering here must match the offsets.
+        let current_offset = bytes.len() - self.loader_image.len();
+        assert_eq!(current_offset as u64, self.header.mmu_regions_offset);
+
+        for mmu_region in self.mmu_regions.iter() {
+            let mmu_region_bytes = unsafe { struct_to_bytes(mmu_region) };
+            bytes.extend_from_slice(mmu_region_bytes);
+        }
+
+        let current_offset = bytes.len() - self.loader_image.len();
+        assert_eq!(current_offset as u64, self.header.loader_regions_offset);
+
         // For each region, we need to copy the region metadata as well
         for region in &self.region_metadata {
             let region_metadata_bytes = unsafe { struct_to_bytes(region) };
@@ -243,7 +296,7 @@ impl<'a> Loader<'a> {
             bytes.extend_from_slice(data);
         }
 
-        assert!(bytes.len() as u64 == self.header.size);
+        assert_eq!(bytes.len() as u64, self.header.size);
 
         bytes
     }

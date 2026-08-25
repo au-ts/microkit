@@ -156,7 +156,7 @@ mod tests {
     use std::vec;
     use std::vec::Vec;
 
-    use crate::RegionArchAttrs;
+    use crate::shared_types::MmuRegionArchAttrs as RegionArchAttrs;
 
     #[test]
     fn test_bits_range() {

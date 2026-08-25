@@ -10,13 +10,14 @@
 
 mod aligned_regions;
 mod c_interop;
+mod shared_types;
 
-use core::fmt;
 use core::mem;
 use core::mem::MaybeUninit;
 use core::slice;
 
 use aligned_regions::AlignedRegionsIter;
+use shared_types::{AArch64ReturnValue, MmuRegion as Region};
 
 const PAGE_TABLE_SIZE: usize = 4096;
 
@@ -481,55 +482,6 @@ pub unsafe extern "C" fn riscv64_setup_pagetables(
     serialise_page_table_to_paddr(&mut boot_lvl1_pt)
 }
 
-/// Note that "0" is a valid return value; instead the invalid value is
-/// '-1', or usize::MAX.
-#[repr(C)]
-#[derive(Debug)]
-pub struct AArch64ReturnValue {
-    pub ttbr0_el2: *const u8,
-    pub ttbr0_el1: *const u8,
-    pub ttbr1_el1: *const u8,
-}
-
-impl AArch64ReturnValue {
-    const INVALID: *const u8 = usize::MAX as *const _;
-}
-
-/// IMPORTANT: Keep in sync with C's `union RegionArchAttrs`
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub union RegionArchAttrs {
-    pub is_ram: bool,
-    pub raw: u64,
-}
-
-impl fmt::Debug for RegionArchAttrs {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.debug_struct("RegionArchAttrs")
-            // SAFETY: raw contains all valid bitpatterns
-            .field("raw", unsafe { &self.raw })
-            .finish()
-    }
-}
-
-/// Region is [start, end] *inclusive* as this avoids overflows.
-/// IMPORTANT: Keep in sync with C's `struct Region`
-#[derive(Debug, Copy, Clone)]
-#[repr(C)]
-pub struct Region {
-    pub start: usize,
-    pub top: usize,
-    pub arch_attrs: RegionArchAttrs,
-}
-
-impl Region {
-    pub const EMPTY: Self = Self {
-        start: 0,
-        top: 0,
-        arch_attrs: RegionArchAttrs { raw: 0 },
-    };
-}
-
 const MAX_NUM_PAGE_TABLES: usize = 64;
 const NUM_TEMPORARIES: usize = 4;
 
@@ -950,6 +902,8 @@ mod tests {
     use std::unreachable;
     use std::vec;
     use std::vec::Vec;
+
+    use shared_types::MmuRegionArchAttrs as RegionArchAttrs;
 
     // Exclusive [start, end)
     #[derive(Debug, PartialEq)]

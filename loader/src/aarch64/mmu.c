@@ -11,6 +11,7 @@
 #include "el.h"
 #include "../arch.h"
 #include "../cutil.h"
+#include "../loader.h"
 #include "../uart.h"
 
 void el1_mmu_enable(uintptr_t ttbr0_el1, uintptr_t ttbr1_el1);
@@ -22,12 +23,7 @@ struct AArch64ReturnValue {
     uintptr_t ttbr1_el1;
 };
 
-struct Region regions[] = {
-    { .start = 0x60000000, .top = 0xc0000000 - 1, .arch_attrs.is_ram = true },
-    { .start = 0x9000000, .top = 0x9000000 + 0xfff, .arch_attrs.is_ram = false },
-};
-
-uint8_t page_table_bytes[PAGE_TABLE_SIZE][MAX_NUM_PAGE_TABLES] ALIGN(PAGE_TABLE_SIZE);
+static uint8_t page_table_bytes[PAGE_TABLE_SIZE][MAX_NUM_PAGE_TABLES] ALIGN(PAGE_TABLE_SIZE);
 
 extern struct AArch64ReturnValue aarch64_setup_pagetables(
     uint64_t kernel_first_vaddr, uint64_t kernel_first_paddr,
@@ -36,9 +32,11 @@ extern struct AArch64ReturnValue aarch64_setup_pagetables(
 
 int arch_mmu_enable(int logical_cpu)
 {
+    struct MmuRegion *mmu_regions = get_loader_array(mmu_regions);
+
     struct AArch64ReturnValue pt = aarch64_setup_pagetables(
-        0x8060000000, 0x60000000,
-        &regions, ARRAY_SIZE(regions),
+        loader_data->kernel_first_vaddr, loader_data->kernel_first_paddr,
+        mmu_regions, loader_data->mmu_regions_count,
         page_table_bytes
     );
 
