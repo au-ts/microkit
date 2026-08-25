@@ -33,8 +33,8 @@ SECTIONS
         *(.data .data.*)
         *(.data.*)
         __global_pointer$ = . + 0x800;
-        *(.srodata)
-        *(.sdata)
+        *(.srodata .srodata.*)
+        *(.sdata .sdata.*)
 
         KEEP(*(.data.uart_addr))
 
@@ -44,8 +44,8 @@ SECTIONS
     .bss :
     {
         _bss = .;
-        *(.bss)
-        *(.bss.*)
+        *(.sbss .sbss.*)
+        *(.bss .bss.*)
         *(COMMON)
         . = ALIGN(4);
         _bss_end = .;
