@@ -903,7 +903,7 @@ mod tests {
     use shared_types::MmuRegionArchAttrs as RegionArchAttrs;
 
     // Exclusive [start, end)
-    #[derive(Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq)]
     struct WalkRegion {
         v_start: u64,
         v_end: u64,
@@ -911,6 +911,28 @@ mod tests {
         p_end: u64,
         // This includes *all* page table attributes
         arch_value: u64,
+    }
+
+    fn merge_regions(regions: &mut Vec<WalkRegion>) {
+        if regions.len() == 0 {
+            return;
+        }
+
+        let mut top = 0;
+        for i in 1..regions.len() {
+            if regions[top].p_end == regions[i].p_start
+                && regions[top].v_end == regions[i].v_start
+                && regions[top].arch_value == regions[i].arch_value {
+
+                regions[top].p_end = regions[i].p_end;
+                regions[top].v_end = regions[i].v_end;
+            } else {
+                top += 1;
+                regions[top] = regions[i].clone();
+            }
+        }
+
+        regions.truncate(top + 1);
     }
 
     fn aarch64_walk_pt_level_order(
@@ -975,20 +997,7 @@ mod tests {
             aarch64_walk_pt_level_order(0, pte, &mut vaddr, pts, &mut regions);
         }
 
-        let mut i = regions.len() - 1;
-        while i > 1 {
-            if regions[i].p_start == regions[i - 1].p_end
-                && regions[i].v_start == regions[i - 1].v_end
-                && regions[i].arch_value == regions[i - 1].arch_value
-            {
-                regions[i - 1].p_end = regions[i].p_end;
-                regions[i - 1].v_end = regions[i].v_end;
-                regions.remove(i);
-            }
-
-            i -= 1;
-        }
-
+        merge_regions(&mut regions);
         regions
     }
 
@@ -1055,20 +1064,7 @@ mod tests {
             riscv64_walk_pt_level_order(0, pte, &mut vaddr, pts, &mut regions);
         }
 
-        let mut i = regions.len() - 1;
-        while i > 1 {
-            if regions[i].p_start == regions[i - 1].p_end
-                && regions[i].v_start == regions[i - 1].v_end
-                && regions[i].arch_value == regions[i - 1].arch_value
-            {
-                regions[i - 1].p_end = regions[i].p_end;
-                regions[i - 1].v_end = regions[i].v_end;
-                regions.remove(i);
-            }
-
-            i -= 1;
-        }
-
+        merge_regions(&mut regions);
         regions
     }
 
@@ -1220,21 +1216,14 @@ mod tests {
                 // RAM
                 WalkRegion {
                     v_start: 0x80200000,
-                    v_end: 0x80400000,
+                    v_end: 0x100000000,
                     p_start: 0x80200000,
-                    p_end: 0x80400000,
-                    arch_value: 0xcf,
-                },
-                // RAM
-                WalkRegion {
-                    v_start: 0x80400000,
-                    v_end: 0x100000000 ,
-                    p_start: 0x80400000,
                     p_end: 0x100000000,
                     arch_value: 0xcf,
                 },
                 // seL4
                 WalkRegion {
+                    // This is the same as 0xffffffff80200000 but with leading chopped
                     v_start: 0x7f80200000,
                     v_end: 0x7fc0000000,
                     p_start: 0x80200000,
