@@ -825,7 +825,7 @@ pub unsafe extern "C" fn aarch64_setup_pagetables(
                 // SAFETY: We expect users to set is_ram appropriately.
                 region.arch_attrs.raw = if unsafe { region.arch_attrs.is_ram } {
                     // FIXME: For now, RAM is also mapped as DEVICE memory.
-                    MT_DEVICE_nGnRnE
+                    MT_NORMAL
                 } else {
                     MT_DEVICE_nGnRnE
                 };
@@ -1157,7 +1157,7 @@ mod tests {
                     v_end: 0xc0000000,
                     p_start: 0x60000000,
                     p_end: 0xc0000000,
-                    arch_value: 0x601,
+                    arch_value: 0x711,
                 },
                 // seL4
                 WalkRegion {
