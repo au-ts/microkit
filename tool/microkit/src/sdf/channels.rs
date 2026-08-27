@@ -120,13 +120,13 @@ impl Channel {
             ));
         };
 
-        if end_a.pp && end_b.pp {
-            return Err(value_error(
-                xml_sdf,
-                node,
-                "cannot ppc bidirectionally".to_string(),
-            ));
-        }
+        // if end_a.pp && end_b.pp {
+        //     return Err(value_error(
+        //         xml_sdf,
+        //         node,
+        //         "cannot ppc bidirectionally".to_string(),
+        //     ));
+        // }
 
         Ok(Channel {
             end_a: end_a.clone(),

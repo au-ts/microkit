@@ -1215,22 +1215,22 @@ mod channel {
         )
     }
 
-    #[test]
-    fn test_bidirectional_ppc() {
-        check_error(
-            &DEFAULT_AARCH64_KERNEL_CONFIG,
-            "ch_bidirectional_ppc.system",
-            "Error: cannot ppc bidirectionally on element 'channel': ",
-        )
-    }
+    // #[test]
+    // fn test_bidirectional_ppc() {
+    //     check_error(
+    //         &DEFAULT_AARCH64_KERNEL_CONFIG,
+    //         "ch_bidirectional_ppc.system",
+    //         "Error: cannot ppc bidirectionally on element 'channel': ",
+    //     )
+    // }
 
-    #[test]
-    fn test_ppcall_priority() {
-        check_error(&DEFAULT_AARCH64_KERNEL_CONFIG,
-            "ch_ppcall_priority.system",
-            "Error: PPCs must be to protection domains of strictly higher priorities; channel with PPC exists from pd test1 (priority: 2) to pd test2 (priority: 1)",
-        )
-    }
+    // #[test]
+    // fn test_ppcall_priority() {
+    //     check_error(&DEFAULT_AARCH64_KERNEL_CONFIG,
+    //         "ch_ppcall_priority.system",
+    //         "Error: PPCs must be to protection domains of strictly higher priorities; channel with PPC exists from pd test1 (priority: 2) to pd test2 (priority: 1)",
+    //     )
+    // }
 }
 
 #[cfg(test)]

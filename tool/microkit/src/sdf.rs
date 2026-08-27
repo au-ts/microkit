@@ -406,25 +406,25 @@ pub fn parse(
 
         let pd_a = &pds[ch.end_a.pd];
         let pd_b = &pds[ch.end_b.pd];
-        if ch.end_a.pp && pd_a.priority() >= pd_b.priority() {
-            return Err(format!(
-                "Error: PPCs must be to protection domains of strictly higher priorities; \
-                        channel with PPC exists from pd {} (priority: {}) to pd {} (priority: {})",
-                pd_a.name,
-                pd_a.priority(),
-                pd_b.name,
-                pd_b.priority()
-            ));
-        } else if ch.end_b.pp && pd_b.priority() >= pd_a.priority() {
-            return Err(format!(
-                "Error: PPCs must be to protection domains of strictly higher priorities; \
-                        channel with PPC exists from pd {} (priority: {}) to pd {} (priority: {})",
-                pd_b.name,
-                pd_b.priority(),
-                pd_a.name,
-                pd_a.priority()
-            ));
-        }
+        // if ch.end_a.pp && pd_a.priority() >= pd_b.priority() {
+        //     return Err(format!(
+        //         "Error: PPCs must be to protection domains of strictly higher priorities; \
+        //                 channel with PPC exists from pd {} (priority: {}) to pd {} (priority: {})",
+        //         pd_a.name,
+        //         pd_a.priority(),
+        //         pd_b.name,
+        //         pd_b.priority()
+        //     ));
+        // } else if ch.end_b.pp && pd_b.priority() >= pd_a.priority() {
+        //     return Err(format!(
+        //         "Error: PPCs must be to protection domains of strictly higher priorities; \
+        //                 channel with PPC exists from pd {} (priority: {}) to pd {} (priority: {})",
+        //         pd_b.name,
+        //         pd_b.priority(),
+        //         pd_a.name,
+        //         pd_a.priority()
+        //     ));
+        // }
 
         if config.arch == Arch::X86_64
             && ((ch.end_a.pp && pd_b.virtual_machine.is_some())

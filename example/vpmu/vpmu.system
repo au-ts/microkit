@@ -20,7 +20,7 @@
         </protection_domain>
 </protection_domain>
     <channel>
-        <end pd="parent" id="0" setvar_id="child0_channel_id"/>
+        <end pd="parent" id="0" setvar_id="child0_channel_id" pp="true"/>
         <end pd="child0" id="20" setvar_id="parent_channel_id"/>
     </channel>
     <channel>
