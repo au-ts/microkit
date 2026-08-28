@@ -19,6 +19,7 @@ typedef unsigned int microkit_child;
 typedef unsigned int microkit_ioport;
 typedef seL4_MessageInfo_t microkit_msginfo;
 
+#define VSPACE_CAP 3
 #define MONITOR_EP 5
 /* Only valid in the 'benchmark' configuration */
 #define TCB_CAP 6
@@ -32,7 +33,8 @@ typedef seL4_MessageInfo_t microkit_msginfo;
 #define BASE_VCPU_CAP 330
 #define BASE_IOPORT_CAP 394
 #define BASE_VPMU_CAPS 458
-#define BASE_USER_CAPS 522
+#define BASE_VSPACE_CAP 522
+#define BASE_USER_CAPS 586
 
 /* This should be kept in sync with `PD_ROOT_CAP_BITS` in capdl/builder.rs */
 #define PD_ROOT_CAP_BITS 6

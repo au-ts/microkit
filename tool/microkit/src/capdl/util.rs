@@ -299,12 +299,16 @@ pub fn capdl_util_make_arm_smc_cap(arm_smc_obj_id: ObjectId) -> Cap {
     })
 }
 
-pub fn capdl_util_make_vpmu_obj( spec_container: &mut CapDLSpecContainer, pd_name: &str, id: u64) -> ObjectId {
-	let vpmu_inner_obj = CapDLNamedObject {
-    	name: format!("vpmu_{pd_name}_{}", id).into(),
-    	object: Object::Vpmu,
-	};
-	spec_container.add_root_object(vpmu_inner_obj)
+pub fn capdl_util_make_vpmu_obj(
+    spec_container: &mut CapDLSpecContainer,
+    pd_name: &str,
+    id: u64,
+) -> ObjectId {
+    let vpmu_inner_obj = CapDLNamedObject {
+        name: format!("vpmu_{pd_name}_{}", id).into(),
+        object: Object::Vpmu,
+    };
+    spec_container.add_root_object(vpmu_inner_obj)
 }
 
 pub fn capdl_util_make_vpmu_cap(vpmu_obj_id: ObjectId) -> Cap {
