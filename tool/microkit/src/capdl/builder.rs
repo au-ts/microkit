@@ -19,17 +19,23 @@ use crate::{
     capdl::{
         irq::create_irq_handler_cap,
         memory::{create_iospace, create_vspace, create_vspace_ept, AddressSpace},
-        spec::{capdl_obj_physical_size_bits, capdl_obj_human_name, BytesContent, ElfContent, FillContent},
+        spec::{
+            capdl_obj_human_name, capdl_obj_physical_size_bits, BytesContent, ElfContent,
+            FillContent,
+        },
         util::*,
     },
     elf::ElfFile,
     sdf::{
-        CapMapType, CpuCore, Map, SystemDescription, BUDGET_DEFAULT, MONITOR_DOMAIN,
-        MONITOR_PD_NAME, MONITOR_PRIORITY,
+        CapMapType, CpuCore, Map, SysMapPerms, SystemDescription, BUDGET_DEFAULT, MONITOR_DOMAIN,
+        MONITOR_PD_NAME, MONITOR_PRIORITY, TableMetadata, PageTableCopies, PageTablesEntries, TopLevelPageTable,
+        PGD, PUD,
     },
     sel4::{Arch, Config, PageSize},
     util::{ranges_overlap, round_down, round_up},
 };
+
+use zerocopy::{Immutable, IntoBytes};
 
 const FAULT_BADGE: u64 = 1 << 62;
 const PPC_BADGE: u64 = 1 << 63;
@@ -93,6 +99,7 @@ const PD_BASE_VM_TCB_CAP: u64 = PD_BASE_PD_TCB_CAP + 64;
 const PD_BASE_VCPU_CAP: u64 = PD_BASE_VM_TCB_CAP + 64;
 const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
 const PD_BASE_VPMU_CAP: u64 = PD_BASE_IOPORT_CAP + 64;
+const PD_BASE_FRAME_CAP: u64 = PD_BASE_VPMU_CAP + 64;
 
 /* This should be kept in sync with `PD_ROOT_CAP_BITS` in libmicrokit/include/microkit.h */
 const PD_ROOT_CAP_SIZE: u32 = 64;
@@ -146,9 +153,18 @@ impl PDShadowCspace {
     }
 }
 
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct FrameMetadata {
+    pub frame_id: ObjectId,
+    pub vaddr: u64,
+    pub frame_sz: u64,
+    pub perms: u8,
+}
+
 struct ElfSpecResult {
     tcb: ObjectId,
     address_space: AddressSpace,
+    address_space_metadata: Vec<FrameMetadata>,
 }
 
 pub struct CapDLSpecContainer {
@@ -231,6 +247,9 @@ impl CapDLSpecContainer {
         let vspace_obj_id = address_space.root();
         let vspace_cap = capdl_util_make_page_table_cap(vspace_obj_id);
 
+        // store frame metadata that is possibly patched in through the PD "pagetable" attribute.
+        let mut elf_frame_metadata: Vec<FrameMetadata> = Vec::new();
+
         // For each loadable segment in the ELF, map it into the address space of this PD.
         let mut frame_sequence = 0; // For object naming purpose only.
         for (seg_idx, segment) in elf.loadable_segments().iter().enumerate() {
@@ -290,6 +309,20 @@ impl CapDLSpecContainer {
                     None,
                     PageSize::Small.fixed_size_bits(sel4_config) as u8,
                 );
+                let mut perms = SysMapPerms::from_bools(
+                    segment.is_readable(),
+                    segment.is_writable(),
+                    segment.is_executable(),
+                );
+
+                // Record metadata of this frame
+                elf_frame_metadata.push(FrameMetadata {
+                    frame_id: frame_obj_id,
+                    vaddr: cur_vaddr,
+                    frame_sz: page_size_bytes,
+                    perms: perms,
+                });
+
                 let frame_cap = capdl_util_make_frame_cap(
                     frame_obj_id,
                     segment.is_readable(),
@@ -349,6 +382,7 @@ impl CapDLSpecContainer {
         Ok(ElfSpecResult {
             tcb: self.add_root_object(tcb_obj),
             address_space,
+            address_space_metadata: elf_frame_metadata,
         })
     }
 }
@@ -362,11 +396,12 @@ fn map_memory_region<M: Map>(
     page_sz: u64,
     target_address_space: &AddressSpace,
     frames: &[ObjectId],
-) -> Result<(), String> {
+) -> Result<Vec<FrameMetadata>, String> {
     let mut cur_vaddr = map.addr();
     let read = map.read();
     let write = map.write();
     let execute = map.execute();
+    let mut frame_metadata: Vec<FrameMetadata> = Vec::new();
     for frame_obj_id in frames.iter() {
         // Make a cap for this frame.
         let frame_cap =
@@ -384,16 +419,22 @@ fn map_memory_region<M: Map>(
                     cur_vaddr
                 )
             })?;
+        frame_metadata.push(FrameMetadata {
+            frame_id: *frame_obj_id,
+            vaddr: cur_vaddr,
+            frame_sz: page_sz,
+            perms: SysMapPerms::from_bools(read, write, execute),
+        });
         cur_vaddr += page_sz;
     }
-    Ok(())
+    Ok(frame_metadata)
 }
 
 /// Build a CapDL Spec according to the System Description File.
 pub fn build_capdl_spec(
     kernel_config: &Config,
     elfs: &mut [ElfFile],
-    system: &SystemDescription,
+    system: &mut SystemDescription,
 ) -> Result<CapDLSpecContainer, String> {
     let mut spec_container = CapDLSpecContainer::new();
 
@@ -628,16 +669,19 @@ pub fn build_capdl_spec(
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
 
-    for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
+    for (pd_global_idx, pd) in system.protection_domains.iter_mut().enumerate() {
         let elf_obj = &elfs[pd_global_idx];
 
         let mut caps_to_bind_to_tcb: Vec<CapTableEntry> = Vec::new();
         let mut caps_to_insert_to_pd_cspace: Vec<CapTableEntry> = Vec::new();
 
         // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
-        let pd_elf_spec = spec_container
+        let mut pd_elf_spec = spec_container
             .add_elf_to_spec(kernel_config, &pd.name, pd.cpu, pd_global_idx, elf_obj)
             .unwrap();
+        // add the frame metadata of the elf to the pd.
+        pd.frame_metadata
+            .append(&mut pd_elf_spec.address_space_metadata);
 
         let pd_tcb_obj_id = pd_elf_spec.tcb;
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec_container, pd_tcb_obj_id);
@@ -682,14 +726,14 @@ pub fn build_capdl_spec(
                 }
             }
 
-            map_memory_region(
+            pd.frame_metadata.append(&mut map_memory_region(
                 &mut spec_container,
                 kernel_config,
                 map,
                 page_size_bytes,
                 &pd_elf_spec.address_space,
                 frames,
-            )?;
+            )?);
         }
 
         // Step 3-3a: Create and map in the IPC buffer
@@ -712,6 +756,15 @@ pub fn build_capdl_spec(
                 kernel_config.pd_ipc_buffer(),
             )
             .expect("should be able to map the IPC buffer as we checked overlaps in sel4.rs");
+
+        // add the ipc buf frame to metadata.
+        pd.frame_metadata.push(FrameMetadata {
+            frame_id: ipcbuf_frame_obj_id,
+            vaddr: kernel_config.pd_ipc_buffer(),
+            frame_sz: PageSize::Small as u64,
+            perms: SysMapPerms::from_str("rw").unwrap(),
+        });
+
         caps_to_bind_to_tcb.push(capdl_util_make_cte(
             TcbBoundSlot::IpcBuffer as u32,
             ipcbuf_frame_cap,
@@ -743,6 +796,13 @@ pub fn build_capdl_spec(
                     cur_stack_vaddr,
                 )
                 .unwrap();
+            // add stackframes to frame_metadata
+            pd.frame_metadata.push(FrameMetadata {
+                frame_id: stack_frame_obj_id,
+                vaddr: cur_stack_vaddr,
+                frame_sz: PageSize::Small as u64,
+                perms: SysMapPerms::from_str("rw").unwrap(),
+            });
             cur_stack_vaddr += PageSize::Small as u64;
         }
 
@@ -872,11 +932,13 @@ pub fn build_capdl_spec(
             println!("vpmu: ({}, {:?})", vpmu.vpmu_idx, vpmu.irq_ch);
             // for now ignore irq_ch.
 
-            let vpmu_obj_id = capdl_util_make_vpmu_obj(&mut spec_container, &pd.name, vpmu.irq_ch.unwrap_or(0));
+            let vpmu_obj_id =
+                capdl_util_make_vpmu_obj(&mut spec_container, &pd.name, vpmu.irq_ch.unwrap_or(0));
             let vpmu_cap = capdl_util_make_vpmu_cap(vpmu_obj_id);
-            caps_to_insert_to_pd_cspace.push(
-                capdl_util_make_cte((PD_BASE_VPMU_CAP + vpmu.irq_ch.unwrap_or(0) as u64) as u32, vpmu_cap)
-            );
+            caps_to_insert_to_pd_cspace.push(capdl_util_make_cte(
+                (PD_BASE_VPMU_CAP + vpmu.irq_ch.unwrap_or(0) as u64) as u32,
+                vpmu_cap,
+            ));
         }
 
         // Step 3-11 Create VM Spec.
@@ -1149,6 +1211,213 @@ pub fn build_capdl_spec(
                 capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0),
             );
         }
+
+        {
+            let frame_cap_idx = PD_BASE_FRAME_CAP;
+            let mut frame_cap_counter = 0;
+
+            if pd.page_table_copies.is_some() {
+                let mut table_metadata = TableMetadata {
+                    base_addr: 0,
+                    pgd: [0; 64],
+                };
+                let mut table_data = Vec::<u8>::new();
+                let mut offset = 0;
+                let mut page_table_size = 0;
+
+                for pt_copy in pd.page_table_copies.clone().unwrap().entries.iter() {
+                    // This pd is a child of the parent. We are going to create a copy of its page tables
+                    let mut top_level_page_table = match kernel_config.arch {
+                        Arch::Aarch64 => TopLevelPageTable::Aarch64 {
+                            top_level: PGD::new(),
+                        },
+                        Arch::Riscv64 => TopLevelPageTable::Riscv64 {
+                            top_level: PUD::new(),
+                        },
+                        Arch::X86_64 => {
+                            panic!("Child page table mappings are not supported on x86-64")
+                        }
+                    };
+
+                    for frame_metadata in &pd.frame_metadata {
+                        capdl_util_insert_cap_into_cspace(
+                            &mut spec_container,
+                            pd_cnode_obj_id,
+                            (frame_cap_idx + frame_cap_counter) as u32,
+                            capdl_util_make_frame_cap(frame_metadata.frame_id, true, true, false, true),
+                        );
+
+                        match top_level_page_table {
+                            TopLevelPageTable::Aarch64 { ref mut top_level } => {
+                                top_level.add_page_at_vaddr(
+                                    frame_metadata.vaddr,
+                                    frame_cap_idx + frame_cap_counter,
+                                    frame_metadata.frame_sz,
+                                );
+                            }
+                            TopLevelPageTable::Riscv64 { ref mut top_level } => {
+                                top_level.add_page_at_vaddr(
+                                    frame_metadata.vaddr,
+                                    frame_cap_idx + frame_cap_counter,
+                                    frame_metadata.frame_sz,
+                                );
+                            }
+                        };
+                        frame_cap_counter += 1;
+                    }
+                    // Now that we have finished constructing the page tables,
+                    // add to the PD's metadata
+                    offset = match top_level_page_table {
+                        TopLevelPageTable::Aarch64 { ref mut top_level } => {
+                            top_level.recurse(offset, &mut table_data)
+                        }
+                        TopLevelPageTable::Riscv64 { ref mut top_level } => {
+                            top_level.recurse(offset, &mut table_data)
+                        }
+                    };
+                    table_metadata.pgd[pt_copy.table_index] = offset - (512 * 8);
+                    page_table_size += match top_level_page_table {
+                        TopLevelPageTable::Aarch64 { top_level } => top_level.get_size(),
+                        TopLevelPageTable::Riscv64 { top_level } => top_level.get_size(),
+                    };
+                }
+                // Now create a filled frame with this this PD's child's page tables
+
+                let num_frames = page_table_size / PageSize::Small as u64;
+                let mut dest_offset: usize = 0;
+
+                // @kwinter: Figure out a better start vaddr + align it
+                // Leave a pages between the stack and the start of our search
+                let mut cur_vaddr: u64 = round_down(
+                    kernel_config.pd_stack_bottom(pd.stack_size) - PageSize::Small as u64,
+                    PageSize::Small as u64,
+                );
+
+                // Work downwards now, and find a contiguous memory range that does not overlap
+                // with any elf loadable segment or user defined MR
+
+                let mut found_valid_region = false;
+                let elf_obj = &elfs[pd_global_idx];
+
+                while (cur_vaddr - (num_frames * PageSize::Small as u64)) > 0
+                    && !found_valid_region
+                {
+                    // Pick a range and make sure it doesn't overlap with any MR vaddr's
+                    // and make it page aligned
+                    let table_range =
+                        (cur_vaddr - (num_frames * PageSize::Small as u64))..cur_vaddr;
+
+                    // Don't assume that we have any maps
+                    if !pd.maps.is_empty() {
+                        for map in pd.maps.iter() {
+                            let frames = mr_name_to_frames.get(&map.mr).unwrap();
+                            // MRs have frames of equal size so just use the first frame's page size.
+                            let page_size_bytes = 1
+                                << capdl_util_get_frame_size_bits(
+                                    &spec_container,
+                                    *frames.first().unwrap(),
+                                );
+                            let mr_vaddr_range =
+                                map.vaddr..(map.vaddr + (page_size_bytes * frames.len() as u64));
+                            if ranges_overlap(&mr_vaddr_range, &table_range) {
+                                found_valid_region = false;
+                                cur_vaddr = round_down(map.vaddr, PageSize::Small as u64);
+                                break;
+                            } else {
+                                found_valid_region = true
+                            }
+                        }
+
+                        if !found_valid_region {
+                            continue;
+                        }
+                    }
+
+                    // We can assume that our PD will have at least one loadable segment
+                    assert!(!elf_obj.loadable_segments().is_empty());
+                    for elf_seg in elf_obj.loadable_segments().iter() {
+                        let elf_seg_vaddr_range = elf_seg.virt_addr
+                            ..elf_seg.virt_addr + round_up(elf_seg.mem_size(), PageSize::Small as u64);
+
+                        if ranges_overlap(&table_range, &elf_seg_vaddr_range) {
+                            found_valid_region = false;
+                            cur_vaddr = round_down(elf_seg.virt_addr, PageSize::Small as u64);
+                        } else {
+                            found_valid_region = true;
+                        }
+                    }
+                }
+
+                if !found_valid_region {
+                    panic!("Could not find valid memory region for page table data!\n");
+                }
+
+                let mut table_base_addr = cur_vaddr - (num_frames * PageSize::Small as u64);
+
+                table_metadata.base_addr = table_base_addr;
+
+                for i in 0..num_frames {
+                    let mut frame_fill = Fill {
+                        entries: [].to_vec(),
+                    };
+
+                    #[allow(unused)]
+                    let mut len_to_cpy = 0;
+
+                    if (table_data.len() - dest_offset) < (PageSize::Small as usize).try_into().unwrap()
+                    {
+                        len_to_cpy = table_data.len() - dest_offset;
+                    } else {
+                        len_to_cpy = PageSize::Small as usize;
+                    }
+
+                    frame_fill.entries.push(FillEntry {
+                        range: Range {
+                            start: 0,
+                            end: len_to_cpy as u64,
+                        },
+                        content: FillEntryContent::Data(FillContent::BytesContent(BytesContent {
+                            bytes: table_data[dest_offset..(dest_offset + len_to_cpy)].to_vec(),
+                        })),
+                    });
+                    let frame_obj_id = capdl_util_make_frame_obj(
+                        &mut spec_container,
+                        frame_fill,
+                        &format!("elf_{}_child_pts_{}", pd.name, i),
+                        None,
+                        PageSize::Small.fixed_size_bits(kernel_config) as u8,
+                    );
+                    let frame_cap = capdl_util_make_frame_cap(frame_obj_id, true, true, true, true);
+                    match pd_elf_spec.address_space.
+                        map_page(
+                        &mut spec_container,
+                        kernel_config,
+                        frame_cap,
+                        PageSize::Small as u64,
+                        table_base_addr,
+                    ) {
+                        Ok(_) => {
+                            table_base_addr += len_to_cpy as u64;
+                            dest_offset += len_to_cpy;
+                        }
+                        Err(map_err_reason) => {
+                            return Err(format!(
+                                "Failed to map frame for page table data range at vaddr: {:x} because: {:?}",
+                                cur_vaddr, map_err_reason
+                            ))
+                        }
+                    };
+                }
+                // Finally, patch the table_metadata into the elf
+                #[allow(unused_mut)]
+                let mut elf_obj = &mut elfs[pd_global_idx];
+                elf_obj.write_symbol(
+                    pd.page_table_copies.as_ref().unwrap().setvar.as_ref(),
+                    table_metadata.as_bytes(),
+                )?;
+            }
+        }
+
 
         pd_shadow_cspaces.insert(
             pd_global_idx,

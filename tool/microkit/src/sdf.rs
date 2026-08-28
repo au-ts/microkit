@@ -27,6 +27,7 @@ mod memory_region;
 mod pci;
 mod pd_vm;
 mod util;
+mod pagetables;
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -38,6 +39,7 @@ use crate::MAX_PDS;
 
 // Internal imports
 use channels::Channel;
+pub(crate) use pagetables::*;
 use domains::Domains;
 use iommu::IOAddressSpace;
 use memory_region::{check_io_maps, check_maps, SysIOMap};

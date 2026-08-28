@@ -43,7 +43,7 @@ pub fn build_system(
     args: &Args,
     sdk: &Sdk,
     kernel_config: &Config,
-    system: &mut SystemDescription,
+    mut system: &mut SystemDescription,
 ) -> Result<(), String> {
     let current_config = sdk.select(&args.board, &args.config).unwrap();
     let elf_path = current_config.config_dir.join("elf");
@@ -194,7 +194,7 @@ pub fn build_system(
             std::process::exit(1);
         }
 
-        let mut spec_container = build_capdl_spec(kernel_config, &mut system_elfs, system)?;
+        let mut spec_container = build_capdl_spec(kernel_config, &mut system_elfs, &mut system)?;
         pack_spec_into_initial_task(
             kernel_config,
             args.config.as_str(),

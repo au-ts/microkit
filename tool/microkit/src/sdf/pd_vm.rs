@@ -14,12 +14,14 @@ use super::cspace::{CSpace, CapMap};
 use super::domains::Domains;
 use super::irq::{SysIrq, SysIrqKind};
 use super::memory_region::SysMap;
+use super::pagetables::*;
 use super::pci::PciDevice;
 use super::util::{
     check_attributes, checked_add_setvar, checked_lookup, loc_string, sdf_parse_number, value_error,
 };
 use super::{SdfLocation, SdfNode, XmlSystemDescription};
 
+use crate::capdl::FrameMetadata;
 use crate::sel4::{Arch, ArmRiscvIrqTrigger, X86IoapicIrqPolarity, X86IoapicIrqTrigger};
 use crate::util::str_to_bool;
 use crate::Config;
@@ -95,6 +97,8 @@ pub struct ProtectionDomain {
     pub cap_maps: Vec<CapMap>,
     pub virtual_machine: Option<VirtualMachine>,
     pub vpmus: Vec<SysVirtualPmu>,
+    pub frame_metadata: Vec<FrameMetadata>,
+    pub page_table_copies: Option<PageTableCopies>,
     /// Only used when parsing child PDs. All elements will be removed
     /// once we flatten each PD and its children into one list.
     pub child_pds: Vec<ProtectionDomain>,
@@ -317,11 +321,13 @@ impl ProtectionDomain {
         let mut vpmus = Vec::new();
         let mut setvars: Vec<SysSetVar> = Vec::new();
         let mut child_pds = Vec::new();
+        let mut frame_metadata = Vec::new();
 
         let mut program_image = None;
         let mut program_image_for_symbols = None;
         let mut virtual_machine = None;
         let mut cspace = None;
+        let mut page_table_copies = None;
 
         // Default to minimum priority
         let priority = if let Some(xml_priority) = node.attribute("priority") {
@@ -782,6 +788,9 @@ impl ProtectionDomain {
 
                     cspace = Some(CSpace::from_xml(xml_sdf, &*child)?);
                 }
+                "page_tables" => {
+                    page_table_copies = Some(PageTableCopies::from_xml(xml_sdf, &*child)?);
+                },
                 _ => {
                     let pos = child.range().start;
                     return Err(format!(
@@ -827,6 +836,8 @@ impl ProtectionDomain {
             child_pds,
             virtual_machine,
             vpmus,
+            frame_metadata,
+            page_table_copies,
             has_children,
             parent: None,
             setvar_id,

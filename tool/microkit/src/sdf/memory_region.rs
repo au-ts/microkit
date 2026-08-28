@@ -29,7 +29,7 @@ pub enum SysMapPerms {
 }
 
 impl SysMapPerms {
-    fn from_str(s: &str) -> Result<u8, ()> {
+    pub fn from_str(s: &str) -> Result<u8, ()> {
         let mut perms = 0;
         for c in s.chars() {
             match c {
@@ -41,6 +41,19 @@ impl SysMapPerms {
         }
 
         Ok(perms)
+    }
+    pub fn from_bools(read: bool, write: bool, execute: bool) -> u8 {
+        let mut perms = 0;
+        if write {
+            perms |= SysMapPerms::Write as u8;
+        }
+        if read {
+            perms |= SysMapPerms::Read as u8;
+        }
+        if execute {
+            perms |= SysMapPerms::Execute as u8;
+        }
+        perms
     }
 }
 
