@@ -384,26 +384,26 @@ pub fn parse(
     for ch in &channels {
         if ch_ids[ch.end_a.pd].contains(&ch.end_a.id) {
             let pd = &pds[ch.end_a.pd];
-            return Err(format!(
-                "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
+            println!(
+                "Warning: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
                 ch.end_a.id,
                 pd.name,
                 filename.display(),
                 pd.text_pos.unwrap().row,
                 pd.text_pos.unwrap().col
-            ));
+            );
         }
 
         if ch_ids[ch.end_b.pd].contains(&ch.end_b.id) {
             let pd = &pds[ch.end_b.pd];
-            return Err(format!(
-                "Error: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
-                ch.end_b.id,
+            println!(
+                "Warning: duplicate channel id: {} in protection domain: '{}' @ {}:{}:{}",
+                ch.end_a.id,
                 pd.name,
                 filename.display(),
                 pd.text_pos.unwrap().row,
                 pd.text_pos.unwrap().col
-            ));
+            );
         }
 
         let pd_a = &pds[ch.end_a.pd];
