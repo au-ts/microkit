@@ -100,6 +100,7 @@ const PD_BASE_VCPU_CAP: u64 = PD_BASE_VM_TCB_CAP + 64;
 const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
 const PD_BASE_VPMU_CAP: u64 = PD_BASE_IOPORT_CAP + 64;
 const PD_BASE_FRAME_CAP: u64 = PD_BASE_VPMU_CAP + 64;
+const PD_BASE_REPLY_CAP: u64 = PD_BASE_FRAME_CAP + 64;
 
 /* This should be kept in sync with `PD_ROOT_CAP_BITS` in libmicrokit/include/microkit.h */
 const PD_ROOT_CAP_SIZE: u32 = 64;
@@ -462,7 +463,7 @@ pub fn build_capdl_spec(
     let mon_fault_ep_cap = capdl_util_make_endpoint_cap(mon_fault_ep_obj_id, true, true, true, 0);
 
     // Create monitor reply object object + cap
-    let mon_reply_obj_id = capdl_util_make_reply_obj(&mut spec_container, MONITOR_PD_NAME);
+    let mon_reply_obj_id = capdl_util_make_reply_obj(&mut spec_container, MONITOR_PD_NAME, -1);
     let mon_reply_cap = capdl_util_make_reply_cap(mon_reply_obj_id);
 
     // Create monitor scheduling context object + cap
@@ -898,10 +899,18 @@ pub fn build_capdl_spec(
         ));
 
         // Step 3-8 Create Reply obj + cap and insert into CSpace
-        let pd_reply_obj_id = capdl_util_make_reply_obj(&mut spec_container, &pd.name);
+        let pd_reply_obj_id = capdl_util_make_reply_obj(&mut spec_container, &pd.name, -1);
         let pd_reply_cap = capdl_util_make_reply_cap(pd_reply_obj_id);
         caps_to_insert_to_pd_cspace
             .push(capdl_util_make_cte(PD_REPLY_CAP_IDX as u32, pd_reply_cap));
+        // create the rest of the specified reply objects.
+        for reply_id in pd.replys.iter() {
+            println!("reply_id: {}", reply_id);
+            let reply_obj_id = capdl_util_make_reply_obj(&mut spec_container, &pd.name, *reply_id as i64);
+            let reply_cap = capdl_util_make_reply_cap(reply_obj_id);
+            caps_to_insert_to_pd_cspace
+                .push(capdl_util_make_cte((PD_BASE_REPLY_CAP + *reply_id) as u32, reply_cap));
+        }
 
         // Step 3-9 Create spec and caps to IRQs
         for irq in pd.irqs.iter() {

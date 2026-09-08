@@ -97,6 +97,7 @@ pub struct ProtectionDomain {
     pub cap_maps: Vec<CapMap>,
     pub virtual_machine: Option<VirtualMachine>,
     pub vpmus: Vec<SysVirtualPmu>,
+    pub replys: Vec<u64>,
     pub frame_metadata: Vec<FrameMetadata>,
     pub page_table_copies: Option<PageTableCopies>,
     /// Only used when parsing child PDs. All elements will be removed
@@ -319,6 +320,7 @@ impl ProtectionDomain {
         let mut irqs = Vec::new();
         let mut ioports = Vec::new();
         let mut vpmus = Vec::new();
+        let mut replys = Vec::new();
         let mut setvars: Vec<SysSetVar> = Vec::new();
         let mut child_pds = Vec::new();
         let mut frame_metadata = Vec::new();
@@ -362,6 +364,27 @@ impl ProtectionDomain {
 
         for child in node.children() {
             match child.tag_name() {
+                "reply" => {
+                    if replys.len() > 64 {
+                        println!("!!!Suspiciously large amount of replys instantiated, amount: {}", replys.len());
+                        return Err(value_error(xml_sdf, &*child, "Max of 64 replys per PD".to_string()));
+                    }
+                    if let Some(xml_reply_id) = child.attribute("reply_id") {
+                        let reply_id = xml_reply_id.parse::<u64>().unwrap();
+
+                        if reply_id > PD_MAX_ID as u64 {
+                            return Err(value_error(
+                                xml_sdf,
+                                &*child,
+                                format!("id must be < {}", PD_MAX_ID + 1),
+                            ));
+                        }
+                        
+                        replys.push(reply_id);
+                    } else {
+                        replys.push(replys.len() as u64)
+                    }
+                }
                 "vpmu" => {
                     if vpmus.len() >= 64 {
                         println!("!!!Suspiciously large amount of vpmus instantiated, amount: {}", vpmus.len());
@@ -836,6 +859,7 @@ impl ProtectionDomain {
             child_pds,
             virtual_machine,
             vpmus,
+            replys,
             frame_metadata,
             page_table_copies,
             has_children,

@@ -173,9 +173,14 @@ pub fn capdl_util_make_ntfn_cap(ntfn_obj_id: ObjectId, read: bool, write: bool, 
 pub fn capdl_util_make_reply_obj(
     spec_container: &mut CapDLSpecContainer,
     pd_name: &str,
+    id: i64,
 ) -> ObjectId {
     let reply_obj = CapDLNamedObject {
-        name: format!("reply_{pd_name}").into(),
+        name: if id != -1 {
+            format!("reply_{pd_name}_{id}").into()
+        } else {
+            format!("reply_{pd_name}").into()
+        },
         object: Object::Reply,
     };
     spec_container.add_root_object(reply_obj)
