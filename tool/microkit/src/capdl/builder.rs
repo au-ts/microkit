@@ -162,6 +162,8 @@ impl Default for CapDLSpecContainer {
     }
 }
 
+static mut ELF_FRAMES: Option<HashMap<String, Vec<Cap>>> = None;
+
 impl CapDLSpecContainer {
     pub fn new() -> Self {
         Self {
@@ -224,6 +226,7 @@ impl CapDLSpecContainer {
         pd_cpu: CpuCore,
         elf_id: usize,
         elf: &ElfFile,
+        system: &SystemDescription,
     ) -> Result<ElfSpecResult, String> {
         // We assumes that ELFs and PDs have a one-to-one relationship. So for each ELF we create a VSpace.
         let address_space = create_vspace(self, sel4_config, pd_name);
@@ -296,6 +299,18 @@ impl CapDLSpecContainer {
                     segment.is_executable(),
                     true,
                 );
+
+                // this will be slow but I need to insert caps into pager.
+                if let Some(cur_pd) = system.protection_domains.iter().find(|x| x.name.eq(pd_name)) {
+                    if let Some (parent_idx) = cur_pd.parent {
+                        if (system.protection_domains[parent_idx].name == "pager") {
+                            unsafe { // unsafe because of elf_frames
+                                ELF_FRAMES.as_mut().unwrap().entry(pd_name.to_string()).or_insert(Vec::new()).push(frame_cap.clone())
+                            }
+                        }
+                        
+                    }
+                }
 
                 match address_space.map_page(
                     self,
@@ -394,6 +409,9 @@ pub fn build_capdl_spec(
     elfs: &mut [ElfFile],
     system: &SystemDescription,
 ) -> Result<CapDLSpecContainer, String> {
+    unsafe {
+        ELF_FRAMES = Some(HashMap::new()); // reset the global ELF_FRAMES for each build_capdl_spec() call.
+    }
     let mut spec_container = CapDLSpecContainer::new();
 
     // *********************************
@@ -410,6 +428,7 @@ pub fn build_capdl_spec(
             CpuCore(0),
             mon_elf_id,
             &elfs[mon_elf_id],
+            system,
         )
         .unwrap();
     let monitor_tcb_obj_id = monitor_elf_spec.tcb;
@@ -655,6 +674,14 @@ pub fn build_capdl_spec(
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
     let mut pd_id_to_cspace_id: HashMap<usize, ObjectId> = HashMap::new();
+
+    // #define MAX_CHILDREN 10
+    // #define ELF_SIZE 100
+    // uint32_t elf_caps[MAX_CHILDREN][ELF_SIZE];
+    // uint32_t elf_sizes[MAX_CHILDREN];
+    let mut elf_caps: [[u32; 100]; 10] = [[0; 100]; 10];
+    let mut elf_sizes: [u32; 10] = [0; 10];
+
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
         let elf_obj = &elfs[pd_global_idx];
 
@@ -662,8 +689,9 @@ pub fn build_capdl_spec(
         let mut caps_to_insert_to_pd_cspace: Vec<CapTableEntry> = Vec::new();
 
         // Step 4-1: Create TCB and VSpace with all ELF loadable frames mapped in.
+        // TODO: i need the elf loadable frames to be given to the pager so that it can copy and do fork.
         let pd_elf_spec = spec_container
-            .add_elf_to_spec(kernel_config, &pd.name, pd.cpu, pd_global_idx, elf_obj)
+            .add_elf_to_spec(kernel_config, &pd.name, pd.cpu, pd_global_idx, elf_obj, system)
             .unwrap();
 
         let pd_tcb_obj_id = pd_elf_spec.tcb;
@@ -1197,7 +1225,7 @@ pub fn build_capdl_spec(
     }
 
     if let Some((pager_idx, pager)) = system.protection_domains.iter().enumerate().find(|x| x.1.name == "pager") {
-        const PAGER_CSPACE_SLOT: u32 = 5;
+        const PAGER_CSPACE_SLOT: u32 = 6;
         let mut cspace_idx: u32 = 0;
         println!("There are {} children for the pager!", pager.child_pds.len());
         // for (child_idx, child) in pager.child_pds.iter().enumerate() {
@@ -1217,6 +1245,20 @@ pub fn build_capdl_spec(
                     );
                     pc_vspace_idxs[pd_obj.id.unwrap() as usize] = (PAGER_CSPACE_SLOT + cspace_idx) as u32;
                     cspace_idx += 1;
+
+                    unsafe {
+                        elf_sizes[pd_obj.id.unwrap() as usize] = ELF_FRAMES.as_mut().unwrap().get(&pd_obj.name).unwrap().len() as u32;
+                        for (i, frame) in ELF_FRAMES.as_mut().unwrap().get(&pd_obj.name).unwrap().iter().enumerate() {
+                            capdl_util_insert_cap_into_cspace(
+                                &mut spec_container, 
+                                pd_id_to_cspace_id[&pager_idx], 
+                                PAGER_CSPACE_SLOT + cspace_idx as u32, 
+                                frame.clone()
+                            );
+                            elf_caps[pd_obj.id.unwrap() as usize][i] = PAGER_CSPACE_SLOT + cspace_idx as u32;
+                        }
+                    }
+                    
                 }
 
             }
@@ -1225,6 +1267,8 @@ pub fn build_capdl_spec(
             println!("index at {i} is {}", pc_vspace_idxs[i]);
         }
         elfs[pager_idx].write_symbol("vspaces", pc_vspace_idxs.iter().flat_map(|&f| f.to_ne_bytes()).collect::<Vec<_>>().as_slice());
+        elfs[pager_idx].write_symbol("elf_caps", elf_caps.iter().flat_map(|f| f.iter().flat_map(|&g| g.to_ne_bytes())).collect::<Vec<_>>().as_slice());
+        elfs[pager_idx].write_symbol("elf_sizes", elf_sizes.iter().flat_map(|&f| f.to_ne_bytes()).collect::<Vec<_>>().as_slice());
     }
 
     // *********************************
