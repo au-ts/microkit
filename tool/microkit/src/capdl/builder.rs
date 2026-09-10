@@ -679,7 +679,7 @@ pub fn build_capdl_spec(
     // #define ELF_SIZE 100
     // uint32_t elf_caps[MAX_CHILDREN][ELF_SIZE];
     // uint32_t elf_sizes[MAX_CHILDREN];
-    let mut elf_caps: [[u32; 100]; 10] = [[0; 100]; 10];
+    let mut elf_caps: [[u32; 1500]; 10] = [[0; 1500]; 10];
     let mut elf_sizes: [u32; 10] = [0; 10];
 
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
@@ -1248,6 +1248,7 @@ pub fn build_capdl_spec(
 
                     unsafe {
                         elf_sizes[pd_obj.id.unwrap() as usize] = ELF_FRAMES.as_mut().unwrap().get(&pd_obj.name).unwrap().len() as u32;
+                        println!("len of elf is {}\n", ELF_FRAMES.as_mut().unwrap().get(&pd_obj.name).unwrap().len());
                         for (i, frame) in ELF_FRAMES.as_mut().unwrap().get(&pd_obj.name).unwrap().iter().enumerate() {
                             capdl_util_insert_cap_into_cspace(
                                 &mut spec_container, 
@@ -1256,6 +1257,8 @@ pub fn build_capdl_spec(
                                 frame.clone()
                             );
                             elf_caps[pd_obj.id.unwrap() as usize][i] = PAGER_CSPACE_SLOT + cspace_idx as u32;
+                            elf_sizes[pd_obj.id.unwrap() as usize] += 1;
+                            cspace_idx += 1;
                         }
                     }
                     
