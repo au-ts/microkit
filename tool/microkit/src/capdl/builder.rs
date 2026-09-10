@@ -99,8 +99,9 @@ const PD_BASE_VM_TCB_CAP: u64 = PD_BASE_PD_TCB_CAP + 64;
 const PD_BASE_VCPU_CAP: u64 = PD_BASE_VM_TCB_CAP + 64;
 const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
 const PD_BASE_VPMU_CAP: u64 = PD_BASE_IOPORT_CAP + 64;
-const PD_BASE_FRAME_CAP: u64 = PD_BASE_VPMU_CAP + 64;
-const PD_BASE_REPLY_CAP: u64 = PD_BASE_FRAME_CAP + 64;
+const PD_BASE_REPLY_CAP: u64 = PD_BASE_VPMU_CAP + 64;
+// vspace always last because it's easy to have more than 64 vspace caps.
+const PD_BASE_VSPACE_CAP: u64 = PD_BASE_REPLY_CAP + 64;
 
 /* This should be kept in sync with `PD_ROOT_CAP_BITS` in libmicrokit/include/microkit.h */
 const PD_ROOT_CAP_SIZE: u32 = 64;
@@ -678,9 +679,11 @@ pub fn build_capdl_spec(
         let mut caps_to_insert_to_pd_cspace: Vec<CapTableEntry> = Vec::new();
 
         // Step 3-1: Create TCB and VSpace with all ELF loadable frames mapped in.
-        pd_elf_spec_vec.push(spec_container
-            .add_elf_to_spec(kernel_config, &pd.name, pd.cpu, pd_global_idx, elf_obj)
-            .unwrap());
+        pd_elf_spec_vec.push(
+            spec_container
+                .add_elf_to_spec(kernel_config, &pd.name, pd.cpu, pd_global_idx, elf_obj)
+                .unwrap(),
+        );
         let mut pd_elf_spec = pd_elf_spec_vec.last_mut().unwrap();
         // add the frame metadata of the elf to the pd.
         pd.frame_metadata
@@ -906,10 +909,13 @@ pub fn build_capdl_spec(
         // create the rest of the specified reply objects.
         for reply_id in pd.replys.iter() {
             println!("reply_id: {}", reply_id);
-            let reply_obj_id = capdl_util_make_reply_obj(&mut spec_container, &pd.name, *reply_id as i64);
+            let reply_obj_id =
+                capdl_util_make_reply_obj(&mut spec_container, &pd.name, *reply_id as i64);
             let reply_cap = capdl_util_make_reply_cap(reply_obj_id);
-            caps_to_insert_to_pd_cspace
-                .push(capdl_util_make_cte((PD_BASE_REPLY_CAP + *reply_id) as u32, reply_cap));
+            caps_to_insert_to_pd_cspace.push(capdl_util_make_cte(
+                (PD_BASE_REPLY_CAP + *reply_id) as u32,
+                reply_cap,
+            ));
         }
 
         // Step 3-9 Create spec and caps to IRQs
@@ -1238,7 +1244,7 @@ pub fn build_capdl_spec(
     }
 
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
-        let frame_cap_idx = PD_BASE_FRAME_CAP;
+        let frame_cap_idx = PD_BASE_VSPACE_CAP;
         let mut frame_cap_counter = 0;
 
         if pd.page_table_copies.is_some() {
@@ -1249,7 +1255,10 @@ pub fn build_capdl_spec(
             let mut table_data = Vec::<u8>::new();
             let mut offset = 0;
             let mut page_table_size = 0;
-            let pd_cnode_obj_id = pd_shadow_cspaces.get(&pd_global_idx).unwrap().microkit_cnode;
+            let pd_cnode_obj_id = pd_shadow_cspaces
+                .get(&pd_global_idx)
+                .unwrap()
+                .microkit_cnode;
             let mut pd_elf_spec = &pd_elf_spec_vec[pd_global_idx];
 
             for pt_copy in pd.page_table_copies.clone().unwrap().entries.iter() {
@@ -1266,7 +1275,11 @@ pub fn build_capdl_spec(
                     }
                 };
 
-				let child_pd = &system.protection_domains.iter().find(|&pd| pd.name == pt_copy.source_pd).unwrap();
+                let child_pd = &system
+                    .protection_domains
+                    .iter()
+                    .find(|&pd| pd.name == pt_copy.source_pd)
+                    .unwrap();
                 for frame_metadata in &child_pd.frame_metadata {
                     capdl_util_insert_cap_into_cspace(
                         &mut spec_container,
