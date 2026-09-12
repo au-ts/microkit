@@ -267,7 +267,9 @@ pub fn capdl_util_insert_cap_into_cspace(
     idx: u32,
     cap: Cap,
 ) {
-    assert!(idx < PD_CAP_SIZE);
+    // removed assertion for pager.
+    // this requires changes in rust-seL4
+    // assert!(idx < PD_CAP_SIZE);
     let cspace_obj = spec_container.get_root_object_mut(cspace_obj_id).unwrap();
     if let Object::CNode(cspace_inner_obj) = &mut cspace_obj.object {
         cspace_inner_obj.slots.push(capdl_util_make_cte(idx, cap));

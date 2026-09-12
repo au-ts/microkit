@@ -1225,7 +1225,7 @@ pub fn build_capdl_spec(
     }
 
     if let Some((pager_idx, pager)) = system.protection_domains.iter().enumerate().find(|x| x.1.name == "pager") {
-        const PAGER_CSPACE_SLOT: u32 = 6;
+        const PAGER_CSPACE_SLOT: u32 = 7; // TODO: find a sane method to choose PAGER_CSPACE_SLOT
         let mut cspace_idx: u32 = 0;
         println!("There are {} children for the pager!", pager.child_pds.len());
         // for (child_idx, child) in pager.child_pds.iter().enumerate() {
@@ -1233,7 +1233,7 @@ pub fn build_capdl_spec(
         //     println!("inserting for child idx {child_idx} vspace of {}", pd_id_vspace_obj_id[&thing]);
         //     pc_vspace_idxs[child_idx] = pd_id_vspace_obj_id[&thing];
         // }
-        
+        let mut elf_cap_idx = 1;
         for (pd_idx, pd_obj) in system.protection_domains.iter().enumerate() {
             if let Some(parent) = pd_obj.parent {
                 if (parent == pager_idx) {
@@ -1252,13 +1252,13 @@ pub fn build_capdl_spec(
                         for (i, frame) in ELF_FRAMES.as_mut().unwrap().get(&pd_obj.name).unwrap().iter().enumerate() {
                             capdl_util_insert_cap_into_cspace(
                                 &mut spec_container, 
-                                pd_id_to_cspace_id[&pager_idx], 
-                                PAGER_CSPACE_SLOT + cspace_idx as u32, 
+                                user_cnodes["elf_caps"].0, // NEED a cnode called elf_caps.
+                                elf_cap_idx as u32, 
                                 frame.clone()
                             );
-                            elf_caps[pd_obj.id.unwrap() as usize][i] = PAGER_CSPACE_SLOT + cspace_idx as u32;
+                            elf_caps[pd_obj.id.unwrap() as usize][i] = elf_cap_idx as u32;
                             elf_sizes[pd_obj.id.unwrap() as usize] += 1;
-                            cspace_idx += 1;
+                            elf_cap_idx += 1;
                         }
                     }
                     
