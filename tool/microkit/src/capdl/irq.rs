@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
-use sel4_capdl_initializer_types::{cap, object, Cap, IrqEntry, Object, ObjectId, Word};
+use sel4_capdl_initializer_types::{cap, object, Cap, IrqEntry, Object, ObjectId, Rights, Word};
 
 use crate::{
     capdl::{
@@ -36,7 +36,17 @@ pub fn create_irq_handler_cap(
     });
 
     // Bind IRQ into the PD's notification with the correct badge
-    let pd_irq_ntfn_cap = capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 1 << irq_desc.id);
+    let pd_irq_ntfn_cap = capdl_util_make_ntfn_cap(
+        pd_ntfn_obj_id,
+        Rights {
+            // The IrqHandler capability only needs the 'Send' right.
+            read: false,
+            write: true,
+            grant: false,
+            grant_reply: false,
+        },
+        1 << irq_desc.id,
+    );
     bind_irq_to_ntfn(spec_container, irq_obj_id, pd_irq_ntfn_cap);
 
     // Create a IRQ handler cap
