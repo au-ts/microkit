@@ -1533,4 +1533,63 @@ mod system {
             "Error: unknown CNode name 'invalid': pd_cap_mappings_invalid_cnode_ref.system:12:13"
         )
     }
+
+    #[test]
+    fn test_fault_handler() {
+        check_success(&DEFAULT_AARCH64_KERNEL_CONFIG, "pd_fault_handler.system")
+    }
+
+    #[test]
+    fn test_fault_handler_unknown() {
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_fault_handler_unknown.system",
+            "Error: unknown fault_handler PD name 'nonexistent' for protection domain 'client'",
+        )
+    }
+
+    #[test]
+    fn test_fault_handler_self() {
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_fault_handler_self.system",
+            "Error: protection domain 'client' cannot be its own fault_handler",
+        )
+    }
+
+    #[test]
+    fn test_fault_handler_duplicate_id() {
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_fault_handler_duplicate_id.system",
+            "Error: duplicate fault_id 0 for fault_handler 'pager'",
+        )
+    }
+
+    #[test]
+    fn test_fault_handler_on_child() {
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_fault_handler_on_child.system",
+            "Error: fault_handler cannot be given to a child protection domain",
+        )
+    }
+
+    #[test]
+    fn test_fault_handler_no_fault_id() {
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_fault_handler_no_fault_id.system",
+            "Error: fault_handler must be given together with fault_id",
+        )
+    }
+
+    #[test]
+    fn test_fault_handler_invalid_elf_cnode() {
+        check_error(
+            &DEFAULT_AARCH64_KERNEL_CONFIG,
+            "pd_fault_handler_invalid_elf_cnode.system",
+            "Error: unknown elf_caps_cnode name 'invalid' for protection domain 'pager'",
+        )
+    }
 }

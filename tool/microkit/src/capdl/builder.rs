@@ -89,6 +89,9 @@ const PD_BASE_OUTPUT_NOTIFICATION_CAP: u64 = 10;
 const PD_BASE_OUTPUT_ENDPOINT_CAP: u64 = PD_BASE_OUTPUT_NOTIFICATION_CAP + 64;
 const PD_BASE_IRQ_CAP: u64 = PD_BASE_OUTPUT_ENDPOINT_CAP + 64;
 const PD_BASE_PD_TCB_CAP: u64 = PD_BASE_IRQ_CAP + 64;
+const PD_BASE_FAULT_CLIENT_VSPACE_CAP: u64 = PD_BASE_PD_TCB_CAP + 64;
+const MAX_FAULT_CLIENTS: usize = 10;
+const MAX_CLIENT_ELF_FRAMES: usize = 1500;
 const PD_BASE_VM_TCB_CAP: u64 = PD_BASE_PD_TCB_CAP + 64;
 const PD_BASE_VCPU_CAP: u64 = PD_BASE_VM_TCB_CAP + 64;
 const PD_BASE_IOPORT_CAP: u64 = PD_BASE_VCPU_CAP + 64;
@@ -131,7 +134,7 @@ impl PDShadowCspace {
         idx: u32,
         cap: Cap,
     ) {
-        capdl_util_insert_cap_into_cspace(spec_container, self.cspace, idx, cap);
+        capdl_util_insert_cap_into_cspace(spec_container, self.cspace, idx, cap, PD_ROOT_CAP_BITS);
     }
 
     /// Used for Microkit objects under typical CSlots PD_BASE_*.
@@ -141,7 +144,7 @@ impl PDShadowCspace {
         idx: u32,
         cap: Cap,
     ) {
-        capdl_util_insert_cap_into_cspace(spec_container, self.microkit_cnode, idx, cap);
+        capdl_util_insert_cap_into_cspace(spec_container, self.microkit_cnode, idx, cap, PD_CAP_BITS);
     }
 }
 
@@ -300,15 +303,12 @@ impl CapDLSpecContainer {
                     true,
                 );
 
-                // this will be slow but I need to insert caps into pager.
+                // handler be given caps to them in Step 8.
                 if let Some(cur_pd) = system.protection_domains.iter().find(|x| x.name.eq(pd_name)) {
-                    if let Some (parent_idx) = cur_pd.parent {
-                        if (system.protection_domains[parent_idx].name == "pager") {
-                            unsafe { // unsafe because of elf_frames
-                                ELF_FRAMES.as_mut().unwrap().entry(pd_name.to_string()).or_insert(Vec::new()).push(frame_cap.clone())
-                            }
+                    if cur_pd.fault_handler_idx.is_some() {
+                        unsafe { // unsafe because of ELF_FRAMES
+                            ELF_FRAMES.as_mut().unwrap().entry(pd_name.to_string()).or_insert(Vec::new()).push(frame_cap.clone())
                         }
-                        
                     }
                 }
 
@@ -641,6 +641,7 @@ pub fn build_capdl_spec(
             cnode_obj_id,
             0,
             cnode_cap_self_ref,
+            cnode.size_bits,
         );
 
         user_cnodes.insert(cnode.name.clone(), (cnode_obj_id, cnode.size_bits));
@@ -670,17 +671,27 @@ pub fn build_capdl_spec(
     // Keep track of the global count of vCPU objects so we can bind them to the monitor for setting TCB name in debug config.
     // Only used on ARM and RISC-V as on x86-64 VMs share the same TCB as PD's which will have their TCB name set separately.
     let mut monitor_vcpu_idx = 0;
-    let mut pc_vspace_idxs: [u32; 10] = [0; 10];
     // Keep tabs on each PD's stack bottom so we can write it out to the monitor for stack overflow detection.
     let mut pd_stack_bottoms: Vec<u64> = Vec::new();
     let mut pd_id_to_cspace_id: HashMap<usize, ObjectId> = HashMap::new();
 
-    // #define MAX_CHILDREN 10
-    // #define ELF_SIZE 100
-    // uint32_t elf_caps[MAX_CHILDREN][ELF_SIZE];
-    // uint32_t elf_sizes[MAX_CHILDREN];
-    let mut elf_caps: [[u32; 1500]; 10] = [[0; 1500]; 10];
-    let mut elf_sizes: [u32; 10] = [0; 10];
+    // Create every PD's input endpoint. A PD's fault endpoint is a badged cap
+    // to whoever handles its faults, and while a parent is always flattened ahead of its
+    // children, a PD named by `fault_handler` can appear anywhere in the list. Minting
+    // the objects before the main loop means the fault EP can be built in one pass either
+    // way.
+    let mut pd_ep_obj_ids: Vec<Option<ObjectId>> = Vec::with_capacity(system.protection_domains.len());
+    for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
+        if pd.needs_ep(pd_global_idx, &system.channels) {
+            pd_ep_obj_ids.push(Some(capdl_util_make_endpoint_obj(
+                &mut spec_container,
+                &pd.name,
+                false,
+            )));
+        } else {
+            pd_ep_obj_ids.push(None);
+        }
+    }
 
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
         let elf_obj = &elfs[pd_global_idx];
@@ -697,11 +708,6 @@ pub fn build_capdl_spec(
         let pd_tcb_obj_id = pd_elf_spec.tcb;
         let pd_vspace_obj_id = capdl_util_get_vspace_id_from_tcb_id(&spec_container, pd_tcb_obj_id);
 
-        if let Some(pager_idx) = pd.parent {
-            if (system.protection_domains[pager_idx].name == "pager") {
-                pc_vspace_idxs[system.protection_domains[pd_global_idx].id.unwrap() as usize] = pd_vspace_obj_id.0;
-            }   
-        }
 
         // In the benchmark configuration, we allow PDs to access their own TCB.
         // This is necessary for accessing kernel's benchmark API.
@@ -778,10 +784,12 @@ pub fn build_capdl_spec(
             ipcbuf_frame_cap,
         ));
 
+        // The monitor reads this per-PD, so must get entry whether or not the
+        // stack is backed -- an unbacked PD faults its stack pages in via its fault handler.
+        let mut cur_stack_vaddr = kernel_config.pd_stack_bottom(pd.stack_size);
+        pd_stack_bottoms.push(cur_stack_vaddr);
         if (pd.backed) {
             // Step 4-3b: Create and map in the stack (bottom up)
-            let mut cur_stack_vaddr = kernel_config.pd_stack_bottom(pd.stack_size);
-            pd_stack_bottoms.push(cur_stack_vaddr);
             let num_stack_frames = pd.stack_size / PageSize::Small as u64;
             for stack_frame_seq in 0..num_stack_frames {
                 let stack_frame_obj_id = capdl_util_make_frame_obj(
@@ -825,8 +833,15 @@ pub fn build_capdl_spec(
             pd_sc_cap,
         ));
 
-        // Step 4-5 Create fault Endpoint cap to parent/monitor
-        let pd_fault_ep_cap = if let Some(pd_parent_id) = pd.parent {
+        // Step 4-5 Create fault Endpoint cap to fault handler/parent/monitor
+        let pd_fault_ep_cap = if let Some(handler_idx) = pd.fault_handler_idx {
+            // The handler's copy of this PD's TCB cap is inserted in Step 8, once every
+            // PD's CSpace exists -- the handler is not necessarily before us in the list.
+            let badge: u64 = FAULT_BADGE | pd.fault_id.unwrap();
+            let handler_ep_obj_id =
+                pd_ep_obj_ids[handler_idx].expect("fault handler should have EP due to needs_ep()");
+            capdl_util_make_endpoint_cap(handler_ep_obj_id, true, true, true, badge)
+        } else if let Some(pd_parent_id) = pd.parent {
             assert!(pd_global_idx > pd_parent_id);
             let badge: u64 = FAULT_BADGE | pd.id.unwrap();
             let parent_shadow_cspace = &pd_shadow_cspaces[&pd_parent_id];
@@ -876,15 +891,9 @@ pub fn build_capdl_spec(
         // Step 4-7 Create endpoint object for the PD if it has children or can receive PPCs, else it will be a notification
         let pd_ntfn_obj_id = capdl_util_make_ntfn_obj(&mut spec_container, &pd.name);
         let pd_ntfn_cap = capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0);
-        let mut pd_ep_obj_id: Option<ObjectId> = None;
-        if pd.needs_ep(pd_global_idx, &system.channels) {
-            pd_ep_obj_id = Some(capdl_util_make_endpoint_obj(
-                &mut spec_container,
-                &pd.name,
-                false,
-            ));
-            let pd_ep_cap =
-                capdl_util_make_endpoint_cap(pd_ep_obj_id.unwrap(), true, true, true, 0);
+        let pd_ep_obj_id: Option<ObjectId> = pd_ep_obj_ids[pd_global_idx];
+        if let Some(pd_ep_obj_id) = pd_ep_obj_id {
+            let pd_ep_cap = capdl_util_make_endpoint_cap(pd_ep_obj_id, true, true, true, 0);
             caps_to_insert_to_pd_cspace
                 .push(capdl_util_make_cte(PD_INPUT_CAP_IDX as u32, pd_ep_cap));
         } else {
@@ -1110,6 +1119,7 @@ pub fn build_capdl_spec(
                         mon_cnode_obj_id,
                         (MON_BASE_VM_TCB_CAP as usize + monitor_vcpu_idx) as u32,
                         capdl_util_make_tcb_cap(vm_vcpu_tcb_obj_id),
+                        PD_CAP_BITS,
                     );
                     monitor_vcpu_idx += 1;
                 }
@@ -1154,6 +1164,7 @@ pub fn build_capdl_spec(
             pd_root_cnode_obj_id,
             0,
             pd_cnode_cap,
+            PD_ROOT_CAP_BITS,
         );
 
         caps_to_bind_to_tcb.push(capdl_util_make_cte(
@@ -1191,6 +1202,7 @@ pub fn build_capdl_spec(
             mon_cnode_obj_id,
             (MON_BASE_PD_TCB_CAP as usize + pd_global_idx) as u32,
             capdl_util_make_tcb_cap(pd_tcb_obj_id),
+            PD_CAP_BITS,
         );
         if pd.passive {
             // When a PD is passive, it will signal the Monitor once init() returns. The monitor will
@@ -1200,12 +1212,14 @@ pub fn build_capdl_spec(
                 mon_cnode_obj_id,
                 (MON_BASE_SCHED_CONTEXT_CAP as usize + pd_global_idx) as u32,
                 capdl_util_make_sc_cap(pd_sc_obj_id),
+                PD_CAP_BITS,
             );
             capdl_util_insert_cap_into_cspace(
                 &mut spec_container,
                 mon_cnode_obj_id,
                 (MON_BASE_NOTIFICATION_CAP as usize + pd_global_idx) as u32,
                 capdl_util_make_ntfn_cap(pd_ntfn_obj_id, true, true, 0),
+                PD_CAP_BITS,
             );
         }
 
@@ -1224,54 +1238,115 @@ pub fn build_capdl_spec(
         );
     }
 
-    if let Some((pager_idx, pager)) = system.protection_domains.iter().enumerate().find(|x| x.1.name == "pager") {
-        const PAGER_CSPACE_SLOT: u32 = 8; // TODO: find a sane method to choose PAGER_CSPACE_SLOT
-        let mut cspace_idx: u32 = 0;
-        println!("There are {} children for the pager!", pager.child_pds.len());
-        // for (child_idx, child) in pager.child_pds.iter().enumerate() {
-        //     let thing = pd_name_idx[&child.name];
-        //     println!("inserting for child idx {child_idx} vspace of {}", pd_id_vspace_obj_id[&thing]);
-        //     pc_vspace_idxs[child_idx] = pd_id_vspace_obj_id[&thing];
-        // }
-        let mut elf_cap_idx = 1;
-        for (pd_idx, pd_obj) in system.protection_domains.iter().enumerate() {
-            if let Some(parent) = pd_obj.parent {
-                if (parent == pager_idx) {
-                    capdl_util_insert_cap_into_cspace(
-                        &mut spec_container, 
-                        pd_id_to_cspace_id[&pager_idx], 
-                        PAGER_CSPACE_SLOT + cspace_idx as u32, 
-                        capdl_util_make_page_table_cap(ObjectId(pc_vspace_idxs[pd_obj.id.unwrap() as usize]))
-                    );
-                    pc_vspace_idxs[pd_obj.id.unwrap() as usize] = (PAGER_CSPACE_SLOT + cspace_idx) as u32;
-                    cspace_idx += 1;
+    // Step 8. Hand each fault handler what it needs to page its clients.
+    // VSpace, ELF frames handed to pager.
+    for (handler_idx, handler) in system.protection_domains.iter().enumerate() {
+        if !handler.is_fault_handler {
+            continue;
+        }
 
-                    unsafe {
-                        elf_sizes[pd_obj.id.unwrap() as usize] = ELF_FRAMES.as_mut().unwrap().get(&pd_obj.name).unwrap().len() as u32;
-                        println!("len of elf is {}\n", ELF_FRAMES.as_mut().unwrap().get(&pd_obj.name).unwrap().len());
-                        for (i, frame) in ELF_FRAMES.as_mut().unwrap().get(&pd_obj.name).unwrap().iter().enumerate() {
-                            capdl_util_insert_cap_into_cspace(
-                                &mut spec_container, 
-                                user_cnodes["elf_caps"].0, // NEED a cnode called elf_caps.
-                                elf_cap_idx as u32, 
-                                frame.clone()
-                            );
-                            elf_caps[pd_obj.id.unwrap() as usize][i] = elf_cap_idx as u32;
-                            elf_sizes[pd_obj.id.unwrap() as usize] += 1;
-                            elf_cap_idx += 1;
-                        }
-                    }
-                    
-                }
+        let mut vspace_cptrs: [u32; MAX_FAULT_CLIENTS] = [0; MAX_FAULT_CLIENTS];
+        let mut elf_caps: [[u32; MAX_CLIENT_ELF_FRAMES]; MAX_FAULT_CLIENTS] =
+            [[0; MAX_CLIENT_ELF_FRAMES]; MAX_FAULT_CLIENTS];
+        let mut elf_sizes: [u32; MAX_FAULT_CLIENTS] = [0; MAX_FAULT_CLIENTS];
+        let mut vspace_slot_idx: u64 = 0;
+        let mut elf_cap_idx: u64 = 1;
 
+        for (client_idx, client) in system.protection_domains.iter().enumerate() {
+            if client.fault_handler_idx != Some(handler_idx) {
+                continue;
             }
+            let fault_id = client.fault_id.unwrap() as usize;
+            if fault_id >= MAX_FAULT_CLIENTS {
+                return Err(format!(
+                    "fault_id {} of protection domain '{}' exceeds the maximum of {} clients a fault handler can page",
+                    fault_id,
+                    client.name,
+                    MAX_FAULT_CLIENTS - 1
+                ));
+            }
+
+            let vspace_slot = PD_BASE_FAULT_CLIENT_VSPACE_CAP + vspace_slot_idx;
+            capdl_util_insert_cap_into_cspace(
+                &mut spec_container,
+                pd_id_to_cspace_id[&handler_idx],
+                vspace_slot as u32,
+                capdl_util_make_page_table_cap(pd_shadow_cspaces[&client_idx].vspace),
+                PD_CAP_BITS,
+            );
+            vspace_cptrs[fault_id] = vspace_slot as u32;
+            vspace_slot_idx += 1;
+
+            // Allow the fault handler to access the client's TCB, the same way a parent
+            // PD can access its children's.
+            pd_shadow_cspaces[&handler_idx].insert_cap_into_microkit_cnode(
+                &mut spec_container,
+                (PD_BASE_PD_TCB_CAP + client.fault_id.unwrap()) as u32,
+                capdl_util_make_tcb_cap(pd_shadow_cspaces[&client_idx].tcb),
+            );
+
+            let Some(elf_caps_cnode_name) = &handler.elf_caps_cnode else {
+                continue;
+            };
+            let Some((elf_cnode_obj_id, elf_cnode_size_bits)) = user_cnodes.get(elf_caps_cnode_name)
+            else {
+                return Err(format!(
+                    "internal bug: couldn't find CNode with given name '{elf_caps_cnode_name}'."
+                ));
+            };
+            let client_elf_frames = unsafe {
+                ELF_FRAMES
+                    .as_ref()
+                    .unwrap()
+                    .get(&client.name)
+                    .expect("client ELF frames are collected by add_elf_to_spec()")
+            };
+            if client_elf_frames.len() > MAX_CLIENT_ELF_FRAMES {
+                return Err(format!(
+                    "protection domain '{}' has {} ELF frames, more than the {} its fault handler can be given",
+                    client.name,
+                    client_elf_frames.len(),
+                    MAX_CLIENT_ELF_FRAMES
+                ));
+            }
+            if elf_cap_idx + client_elf_frames.len() as u64 > 1 << elf_cnode_size_bits {
+                return Err(format!(
+                    "CNode '{elf_caps_cnode_name}' is too small to hold the ELF frame caps of '{}'; increase its size_bits",
+                    client.name
+                ));
+            }
+            for (i, frame) in client_elf_frames.iter().enumerate() {
+                capdl_util_insert_cap_into_cspace(
+                    &mut spec_container,
+                    *elf_cnode_obj_id,
+                    elf_cap_idx as u32,
+                    frame.clone(),
+                    *elf_cnode_size_bits,
+                );
+                elf_caps[fault_id][i] = elf_cap_idx as u32;
+                elf_cap_idx += 1;
+            }
+            elf_sizes[fault_id] = client_elf_frames.len() as u32;
         }
-        for i in  0..10 {
-            println!("index at {i} is {}", pc_vspace_idxs[i]);
+
+        elfs[handler_idx].write_symbol(
+            "vspaces",
+            vspace_cptrs.iter().flat_map(|&f| f.to_ne_bytes()).collect::<Vec<_>>().as_slice(),
+        )?;
+        if handler.elf_caps_cnode.is_some() {
+            elfs[handler_idx].write_symbol(
+                "elf_caps",
+                elf_caps
+                    .iter()
+                    .flat_map(|f| f.iter().flat_map(|&g| g.to_ne_bytes()))
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            )?;
+            elfs[handler_idx].write_symbol(
+                "elf_sizes",
+                elf_sizes.iter().flat_map(|&f| f.to_ne_bytes()).collect::<Vec<_>>().as_slice(),
+            )?;
         }
-        elfs[pager_idx].write_symbol("vspaces", pc_vspace_idxs.iter().flat_map(|&f| f.to_ne_bytes()).collect::<Vec<_>>().as_slice());
-        elfs[pager_idx].write_symbol("elf_caps", elf_caps.iter().flat_map(|f| f.iter().flat_map(|&g| g.to_ne_bytes())).collect::<Vec<_>>().as_slice());
-        elfs[pager_idx].write_symbol("elf_sizes", elf_sizes.iter().flat_map(|&f| f.to_ne_bytes()).collect::<Vec<_>>().as_slice());
     }
 
     // *********************************

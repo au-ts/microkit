@@ -19,7 +19,7 @@
             <cap_sc  slot="3" pd="primary" />
             <cap_tcb slot="4" pd="primary" />
 
-            <cap_cspace slot="5" cnode_name="sharing_cnode" />
+            <cap_cnode slot="5" cnode_name="sharing_cnode" />
         </cspace>
     </protection_domain>
 

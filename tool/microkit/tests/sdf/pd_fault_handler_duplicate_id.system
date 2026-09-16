@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Copyright 2026, UNSW
+
+ SPDX-License-Identifier: BSD-2-Clause
+-->
+<system>
+    <protection_domain name="pager">
+        <program_image path="test" />
+    </protection_domain>
+
+    <protection_domain name="client_a" fault_handler="pager" fault_id="0">
+        <program_image path="test" />
+    </protection_domain>
+
+    <protection_domain name="client_b" fault_handler="pager" fault_id="0">
+        <program_image path="test" />
+    </protection_domain>
+</system>

@@ -290,6 +290,55 @@ pub fn parse(
         }
     }
 
+    for pd in pds.iter() {
+        if let Some(cnode_name) = &pd.elf_caps_cnode {
+            if !cnode_names.contains(cnode_name) {
+                return Err(format!(
+                    "Error: unknown elf_caps_cnode name '{}' for protection domain '{}'",
+                    cnode_name, pd.name
+                ));
+            }
+        }
+    }
+
+    // Resolve each fault_handler name into an index now that the PDs have been
+    // flattened, and mark the PDs that are handling somebody else's faults so that
+    // needs_ep() gives them an endpoint to receive on.
+    let mut fault_handler_idxs: Vec<Option<usize>> = vec![None; pds.len()];
+    let mut taken_fault_ids: Vec<(usize, u64)> = Vec::new();
+    for (pd_idx, pd) in pds.iter().enumerate() {
+        let Some(handler_name) = &pd.fault_handler else {
+            continue;
+        };
+        let Some(handler_idx) = pd_names.iter().position(|name| name == handler_name) else {
+            return Err(format!(
+                "Error: unknown fault_handler PD name '{}' for protection domain '{}'",
+                handler_name, pd.name
+            ));
+        };
+        if handler_idx == pd_idx {
+            return Err(format!(
+                "Error: protection domain '{}' cannot be its own fault_handler",
+                pd.name
+            ));
+        }
+        let fault_id = pd.fault_id.unwrap();
+        if taken_fault_ids.contains(&(handler_idx, fault_id)) {
+            return Err(format!(
+                "Error: duplicate fault_id {} for fault_handler '{}'",
+                fault_id, handler_name
+            ));
+        }
+        taken_fault_ids.push((handler_idx, fault_id));
+        fault_handler_idxs[pd_idx] = Some(handler_idx);
+    }
+    for (pd_idx, handler_idx) in fault_handler_idxs.iter().enumerate() {
+        if let Some(handler_idx) = handler_idx {
+            pds[pd_idx].fault_handler_idx = Some(*handler_idx);
+            pds[*handler_idx].is_fault_handler = true;
+        }
+    }
+
     // Now that we have parsed everything in the system description we can validate any
     // global properties (e.g no duplicate PD names etc).
 

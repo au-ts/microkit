@@ -100,16 +100,37 @@ pub struct ProtectionDomain {
     /// Location in the parsed SDF file
     pub text_pos: Option<SdfLocation>,
     pub backed: bool,
+    /// Name of the protection domain this PD's faults are delivered to, if it is
+    /// not the parent. Resolved into `fault_handler_idx` once the PDs are flattened.
+    pub fault_handler: Option<String>,
+    /// Value this PD is identified by in its fault handler's `fault()` entry point.
+    pub fault_id: Option<u64>,
+    /// Index into the total list of protection domains of `fault_handler`
+    pub fault_handler_idx: Option<usize>,
+    /// Whether any other PD names this one as its fault handler
+    pub is_fault_handler: bool,
+    /// Name of the CNode the fault clients' ELF frame caps are placed in
+    pub elf_caps_cnode: Option<String>,
 }
 
 impl ProtectionDomain {
     pub fn needs_ep(&self, self_id: usize, channels: &[Channel]) -> bool {
         self.has_children
+            || self.is_fault_handler
             || self.virtual_machine.is_some()
             || channels.iter().any(|channel| {
                 (channel.end_a.pp && channel.end_b.pd == self_id)
                     || (channel.end_b.pp && channel.end_a.pd == self_id)
             })
+    }
+
+    // microkit child
+    pub fn fault_index(&self) -> Option<u64> {
+        if self.fault_handler_idx.is_some() {
+            self.fault_id
+        } else {
+            self.id
+        }
     }
 
     pub fn irq_bits(&self) -> u64 {
@@ -155,6 +176,9 @@ impl ProtectionDomain {
             "domain",
             "fpu",
             "backed",
+            "fault_handler",
+            "fault_id",
+            "elf_caps_cnode",
         ];
         if is_child {
             attrs.push("id");
@@ -220,6 +244,49 @@ impl ProtectionDomain {
         } else {
             true
         };
+
+        let fault_handler = node.attribute("fault_handler").map(ToOwned::to_owned);
+        let fault_id = node
+            .attribute("fault_id")
+            .map(|xml_fault_id| sdf_parse_number(xml_fault_id, node))
+            .transpose()?;
+        let elf_caps_cnode = node.attribute("elf_caps_cnode").map(ToOwned::to_owned);
+
+        if fault_handler.is_some() && is_child {
+            return Err(value_error(
+                xml_sdf,
+                node,
+                "fault_handler cannot be given to a child protection domain, whose faults \
+                 are already delivered to its parent"
+                    .to_string(),
+            ));
+        }
+        match (&fault_handler, fault_id) {
+            (Some(_), None) => {
+                return Err(value_error(
+                    xml_sdf,
+                    node,
+                    "fault_handler must be given together with fault_id".to_string(),
+                ))
+            }
+            (None, Some(_)) => {
+                return Err(value_error(
+                    xml_sdf,
+                    node,
+                    "fault_id must be given together with fault_handler".to_string(),
+                ))
+            }
+            _ => {}
+        }
+        if let Some(id) = fault_id {
+            if id > PD_MAX_ID {
+                return Err(value_error(
+                    xml_sdf,
+                    node,
+                    format!("fault_id must be between 0 and {PD_MAX_ID}"),
+                ));
+            }
+        }
 
         let stack_size = if let Some(xml_stack_size) = node.attribute("stack_size") {
             sdf_parse_number(xml_stack_size, node)?
@@ -818,6 +885,11 @@ impl ProtectionDomain {
             setvar_id,
             text_pos: Some(node.range().start),
             backed,
+            fault_handler,
+            fault_id,
+            fault_handler_idx: None,
+            is_fault_handler: false,
+            elf_caps_cnode,
         })
     }
 }

@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 //
 
-use crate::capdl::{builder::PD_CAP_SIZE, CapDLNamedObject, CapDLSpecContainer, FrameFill};
+use crate::capdl::{CapDLNamedObject, CapDLSpecContainer, FrameFill};
 use sel4_capdl_initializer_types::{
     cap, object, Cap, CapSlot, CapTableEntry, Object, ObjectId, Rights, Word,
 };
@@ -266,10 +266,9 @@ pub fn capdl_util_insert_cap_into_cspace(
     cspace_obj_id: ObjectId,
     idx: u32,
     cap: Cap,
+    cspace_size_bits: u8,
 ) {
-    // removed assertion for pager.
-    // this requires changes in rust-seL4
-    // assert!(idx < PD_CAP_SIZE);
+    assert!((idx as u64) < 1 << cspace_size_bits);
     let cspace_obj = spec_container.get_root_object_mut(cspace_obj_id).unwrap();
     if let Object::CNode(cspace_inner_obj) = &mut cspace_obj.object {
         cspace_inner_obj.slots.push(capdl_util_make_cte(idx, cap));
