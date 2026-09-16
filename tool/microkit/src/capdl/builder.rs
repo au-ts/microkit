@@ -1225,7 +1225,7 @@ pub fn build_capdl_spec(
     }
 
     if let Some((pager_idx, pager)) = system.protection_domains.iter().enumerate().find(|x| x.1.name == "pager") {
-        const PAGER_CSPACE_SLOT: u32 = 7; // TODO: find a sane method to choose PAGER_CSPACE_SLOT
+        const PAGER_CSPACE_SLOT: u32 = 8; // TODO: find a sane method to choose PAGER_CSPACE_SLOT
         let mut cspace_idx: u32 = 0;
         println!("There are {} children for the pager!", pager.child_pds.len());
         // for (child_idx, child) in pager.child_pds.iter().enumerate() {
