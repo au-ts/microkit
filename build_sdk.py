@@ -342,6 +342,7 @@ SUPPORTED_BOARDS = (
         smp_cores=4,
         kernel_options={
             "KernelPlatform": "bcm2711",
+            "KernelArmHypervisorSupport": False,
             "RPI4_MEMORY": 1024,
         },
     ),
