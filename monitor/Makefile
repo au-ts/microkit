@@ -33,19 +33,19 @@ endif
 
 ifeq ($(ARCH),aarch64)
 	CFLAGS_ARCH := -mcpu=$(GCC_CPU)
-	ASM_CPP_FLAGS := -x assembler-with-cpp -c -g -mcpu=$(GCC_CPU)
+	ASM_CPP_FLAGS := -x assembler-with-cpp -MP -MD -c -g -mcpu=$(GCC_CPU)
 	ASM_FLAGS := -mcpu=$(GCC_CPU)
 
 	ARCH_DIR := aarch64
 else ifeq ($(ARCH),riscv64)
-	ASM_CPP_FLAGS := -x assembler-with-cpp -c -g -march=rv64imac_zicsr_zifencei -mabi=lp64
+	ASM_CPP_FLAGS := -x assembler-with-cpp -MP -MD -c -g -march=rv64imac_zicsr_zifencei -mabi=lp64
 	ASM_FLAGS := -march=rv64imac_zicsr_zifencei -mabi=lp64
 	CFLAGS_ARCH := -mcmodel=medany -march=rv64imac_zicsr_zifencei -mabi=lp64
 
 	ARCH_DIR := riscv
 else ifeq ($(ARCH),x86_64)
 	CFLAGS_ARCH := -march=x86-64 -mtune=$(GCC_CPU)
-	ASM_CPP_FLAGS := -x assembler-with-cpp -c -g
+	ASM_CPP_FLAGS := -x assembler-with-cpp -MP -MD -c -g
 	ASM_FLAGS := -g -march=generic64
 
 	ARCH_DIR := x86_64
@@ -53,7 +53,7 @@ else
 	$(error ARCH is unsupported)
 endif
 
-CFLAGS := -std=gnu11 -g -O3 -nostdlib -ffreestanding -Wall $(CFLAGS_TOOLCHAIN) -Werror -I$(SEL4_SDK)/include $(CFLAGS_ARCH) -DARCH_$(ARCH)
+CFLAGS := -std=gnu11 -MP -MD -g -O3 -nostdlib -ffreestanding -Wall $(CFLAGS_TOOLCHAIN) -Werror -I$(SEL4_SDK)/include $(CFLAGS_ARCH) -DARCH_$(ARCH)
 
 PROGS := monitor.elf
 OBJECTS := main.o crt0.o util.o
@@ -74,3 +74,5 @@ all: $(OBJPROG)
 
 $(OBJPROG): $(addprefix $(BUILD_DIR)/, $(OBJECTS)) $(LINKSCRIPT)
 	$(LD) -z noexecstack -T$(LINKSCRIPT) $(addprefix $(BUILD_DIR)/, $(OBJECTS)) -o $@
+
+-include $(BUILD_DIR)/*.d
