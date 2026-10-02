@@ -496,7 +496,8 @@ SUPPORTED_CONFIGS = (
         kernel_options={
             "KernelDebugBuild": True,
             "KernelPrinting": True,
-            "KernelVerificationBuild": False
+            "KernelVerificationBuild": False,
+            "KernelExceptionFastpath": True,
         },
         kernel_options_arch={
             KernelArch.AARCH64: {
@@ -513,8 +514,9 @@ SUPPORTED_CONFIGS = (
         kernel_options={
             "KernelDebugBuild": False,
             "KernelVerificationBuild": False,
-            "KernelBenchmarks": "track_utilisation",
+            # "KernelBenchmarks": "track_utilisation",
             "KernelSignalFastpath": True,
+            "KernelExceptionFastpath": True,
         },
         kernel_options_arch={
             KernelArch.AARCH64: {
