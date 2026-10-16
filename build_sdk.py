@@ -514,7 +514,9 @@ SUPPORTED_CONFIGS = (
         kernel_options={
             "KernelDebugBuild": False,
             "KernelVerificationBuild": False,
-            # "KernelBenchmarks": "track_utilisation",
+            # Verification only: logging every kernel entry perturbs latency.
+            # Set back to "none" before taking measurements.
+            "KernelBenchmarks": "track_kernel_entries",
             "KernelSignalFastpath": True,
             "KernelExceptionFastpath": True,
         },

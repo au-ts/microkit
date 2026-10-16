@@ -564,7 +564,16 @@ pub fn build_capdl_spec(
 
             let starting_byte_idx = frame_sequence * mr.page_size_bytes();
 
-            let frame_fill = if let Some(prefill_bytes) = &mr.prefill_bytes {
+            let prefill_remaining = mr
+                .prefill_bytes
+                .as_ref()
+                .map(|bytes| (bytes.len() as u64).saturating_sub(starting_byte_idx));
+
+            let frame_fill = if prefill_remaining == Some(0) {
+                FrameFill {
+                    entries: [].to_vec(),
+                }
+            } else if let Some(prefill_bytes) = &mr.prefill_bytes {
                 let remaining_bytes_to_fill = prefill_bytes.len() as u64 - starting_byte_idx;
                 let num_bytes_to_fill = min(mr.page_size_bytes(), remaining_bytes_to_fill);
 
