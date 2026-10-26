@@ -299,6 +299,14 @@ pub fn parse(
                 ));
             }
         }
+        if let Some(cnode_name) = &pd.self_ep_cnode {
+            if !cnode_names.contains(cnode_name) {
+                return Err(format!(
+                    "Error: unknown self_ep_cnode name '{}' for protection domain '{}'",
+                    cnode_name, pd.name
+                ));
+            }
+        }
     }
 
     // Resolve each fault_handler name into an index now that the PDs have been
