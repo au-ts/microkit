@@ -286,6 +286,16 @@ pub fn parse(
                         ));
                     }
                 }
+                CapMapSource::Core(core) => {
+                    if core.0 >= config.num_cores {
+                        return Err(format!(
+                            "Error: core must be less than {}, got {}: {}",
+                            config.num_cores,
+                            core.0,
+                            loc_string(&xml_sdf, cap_map.text_pos)
+                        ));
+                    }
+                }
             }
         }
     }
@@ -615,6 +625,14 @@ pub fn parse(
                                 "\n  type {:?} from CNode '{}' at '{}'",
                                 mapping.cap_type,
                                 source_name,
+                                loc_string(&xml_sdf, mapping.text_pos)
+                            ));
+                        }
+                        CapMapSource::Core(core) => {
+                            lines.push_str(&format!(
+                                "\n  type {:?} from core {} at '{}'",
+                                mapping.cap_type,
+                                core.0,
                                 loc_string(&xml_sdf, mapping.text_pos)
                             ));
                         }

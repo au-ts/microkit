@@ -86,6 +86,7 @@ pub fn capdl_obj_human_name(obj: &Object<FrameFill>, sel4_config: &Config) -> &'
         Object::RiscvIrq(_) => "RISC-V IRQ",
         Object::IOPorts(_) => "x86 I/O Ports",
         Object::SchedContext(_) => "SchedContext",
+        Object::SchedControl(_) => "SchedControl",
         Object::Reply => "Reply",
         Object::ArmSmc => "ARM SMC",
         Object::Untyped(_) => "Untyped",

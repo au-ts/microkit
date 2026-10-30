@@ -1506,6 +1506,10 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 7. Handle extra cap mappings
     // *********************************
+    // A SchedControl cap is not an object, so the spec carries one placeholder object
+    // per core for the initialiser to copy its own SchedControl cap into. Every PD
+    // asking for the same core shares that object.
+    let mut sched_control_objs: HashMap<u8, ObjectId> = HashMap::new();
     for (pd_dest_idx, pd) in system.protection_domains.iter().enumerate() {
         for cap_map in pd.cap_maps.iter() {
 
@@ -1526,6 +1530,22 @@ pub fn build_capdl_spec(
                         }
                         _ => return Err("internal bug: invalid cap source type".to_string())
                     }
+                }
+                CapMapSource::Core(core) => {
+                    let sched_control_obj_id = match sched_control_objs.get(&core.0) {
+                        Some(obj_id) => *obj_id,
+                        None => {
+                            let obj_id = capdl_util_make_sched_control_obj(
+                                &mut spec_container,
+                                &core.to_string(),
+                                core.0,
+                            );
+                            sched_control_objs.insert(core.0, obj_id);
+                            obj_id
+                        }
+                    };
+
+                    capdl_util_make_sched_control_cap(sched_control_obj_id)
                 }
                 CapMapSource::CNode(source_name) => {
                     if let Some((cnode_obj_id, size_bits)) = user_cnodes.get(source_name) {

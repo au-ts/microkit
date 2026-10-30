@@ -74,6 +74,26 @@ pub fn capdl_util_make_page_table_cap(pt_obj_id: ObjectId) -> Cap {
     Cap::PageTable(cap::PageTable { object: pt_obj_id })
 }
 
+pub fn capdl_util_make_sched_control_obj(
+    spec_container: &mut CapDLSpecContainer,
+    name: &str,
+    core: u8,
+) -> ObjectId {
+    let sched_control_obj = CapDLNamedObject {
+        name: format!("sched_control_{name}").into(),
+        object: Object::SchedControl(object::SchedControl {
+            core: Word(core.into()),
+        }),
+    };
+    spec_container.add_root_object(sched_control_obj)
+}
+
+pub fn capdl_util_make_sched_control_cap(sched_control_id: ObjectId) -> Cap {
+    Cap::SchedControl(cap::SchedControl {
+        object: sched_control_id,
+    })
+}
+
 // Given a TCB object ID, return that TCB's VSpace object ID.
 pub fn capdl_util_get_vspace_id_from_tcb_id(
     spec_container: &CapDLSpecContainer,
