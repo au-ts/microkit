@@ -111,6 +111,9 @@ pub struct ProtectionDomain {
     pub is_fault_handler: bool,
     /// Name of the CNode the fault clients' ELF frame caps are placed in
     pub elf_caps_cnode: Option<String>,
+    /// Name of the CNode a copy of this PD's own endpoint cap is placed in, so that a
+    /// fault handler can mint badged copies of it for processes it creates at runtime
+    pub self_ep_cnode: Option<String>,
 }
 
 impl ProtectionDomain {
@@ -179,6 +182,7 @@ impl ProtectionDomain {
             "fault_handler",
             "fault_id",
             "elf_caps_cnode",
+            "self_ep_cnode",
         ];
         if is_child {
             attrs.push("id");
@@ -251,6 +255,7 @@ impl ProtectionDomain {
             .map(|xml_fault_id| sdf_parse_number(xml_fault_id, node))
             .transpose()?;
         let elf_caps_cnode = node.attribute("elf_caps_cnode").map(ToOwned::to_owned);
+        let self_ep_cnode = node.attribute("self_ep_cnode").map(ToOwned::to_owned);
 
         if fault_handler.is_some() && is_child {
             return Err(value_error(
@@ -890,6 +895,7 @@ impl ProtectionDomain {
             fault_handler_idx: None,
             is_fault_handler: false,
             elf_caps_cnode,
+            self_ep_cnode,
         })
     }
 }

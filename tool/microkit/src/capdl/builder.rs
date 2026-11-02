@@ -91,6 +91,11 @@ const PD_BASE_IRQ_CAP: u64 = PD_BASE_OUTPUT_ENDPOINT_CAP + 64;
 const PD_BASE_PD_TCB_CAP: u64 = PD_BASE_IRQ_CAP + 64;
 const PD_BASE_FAULT_CLIENT_VSPACE_CAP: u64 = PD_BASE_PD_TCB_CAP + 64;
 const MAX_FAULT_CLIENTS: usize = 10;
+/* Where a fault handler's copy of its own endpoint cap goes inside the CNode named by its
+ * `self_ep_cnode` attribute. Slot 0 of every user CNode is its self-reference.
+ * This should be kept in sync with `PAGER_SELF_EP_SLOT` in LionsOS'
+ * include/lions/pager/config.h */
+const SELF_EP_CAP_IDX: u64 = 1;
 const MAX_CLIENT_ELF_FRAMES: usize = 1500;
 const PD_BASE_VM_TCB_CAP: u64 = PD_BASE_PD_TCB_CAP + 64;
 const PD_BASE_VCPU_CAP: u64 = PD_BASE_VM_TCB_CAP + 64;
@@ -564,7 +569,16 @@ pub fn build_capdl_spec(
 
             let starting_byte_idx = frame_sequence * mr.page_size_bytes();
 
-            let frame_fill = if let Some(prefill_bytes) = &mr.prefill_bytes {
+            let prefill_remaining = mr
+                .prefill_bytes
+                .as_ref()
+                .map(|bytes| (bytes.len() as u64).saturating_sub(starting_byte_idx));
+
+            let frame_fill = if prefill_remaining == Some(0) {
+                FrameFill {
+                    entries: [].to_vec(),
+                }
+            } else if let Some(prefill_bytes) = &mr.prefill_bytes {
                 let remaining_bytes_to_fill = prefill_bytes.len() as u64 - starting_byte_idx;
                 let num_bytes_to_fill = min(mr.page_size_bytes(), remaining_bytes_to_fill);
 
@@ -692,7 +706,7 @@ pub fn build_capdl_spec(
             pd_ep_obj_ids.push(None);
         }
     }
-
+    
     for (pd_global_idx, pd) in system.protection_domains.iter().enumerate() {
         let elf_obj = &elfs[pd_global_idx];
 
@@ -1329,6 +1343,46 @@ pub fn build_capdl_spec(
             elf_sizes[fault_id] = client_elf_frames.len() as u32;
         }
 
+        for vspace_cptr in vspace_cptrs.iter_mut() {
+            if *vspace_cptr != 0 {
+                continue;
+            }
+            let spare_vspace = create_vspace(
+                &mut spec_container,
+                kernel_config,
+                &format!("{}_spare_{}", handler.name, vspace_slot_idx),
+            );
+            let vspace_slot = PD_BASE_FAULT_CLIENT_VSPACE_CAP + vspace_slot_idx;
+            capdl_util_insert_cap_into_cspace(
+                &mut spec_container,
+                pd_id_to_cspace_id[&handler_idx],
+                vspace_slot as u32,
+                capdl_util_make_page_table_cap(spare_vspace.root()),
+                PD_CAP_BITS,
+            );
+            *vspace_cptr = vspace_slot as u32;
+            vspace_slot_idx += 1;
+        }
+
+        if let Some(cnode_name) = &handler.self_ep_cnode {
+            let Some((self_ep_cnode_obj_id, self_ep_cnode_size_bits)) =
+                user_cnodes.get(cnode_name)
+            else {
+                return Err(format!(
+                    "internal bug: couldn't find CNode with given name '{cnode_name}'."
+                ));
+            };
+            let handler_ep_obj_id =
+                pd_ep_obj_ids[handler_idx].expect("fault handler should have EP due to needs_ep()");
+            capdl_util_insert_cap_into_cspace(
+                &mut spec_container,
+                *self_ep_cnode_obj_id,
+                SELF_EP_CAP_IDX as u32,
+                capdl_util_make_endpoint_cap(handler_ep_obj_id, true, true, true, 0),
+                *self_ep_cnode_size_bits,
+            );
+        }
+
         elfs[handler_idx].write_symbol(
             "vspaces",
             vspace_cptrs.iter().flat_map(|&f| f.to_ne_bytes()).collect::<Vec<_>>().as_slice(),
@@ -1452,6 +1506,10 @@ pub fn build_capdl_spec(
     // *********************************
     // Step 7. Handle extra cap mappings
     // *********************************
+    // A SchedControl cap is not an object, so the spec carries one placeholder object
+    // per core for the initialiser to copy its own SchedControl cap into. Every PD
+    // asking for the same core shares that object.
+    let mut sched_control_objs: HashMap<u8, ObjectId> = HashMap::new();
     for (pd_dest_idx, pd) in system.protection_domains.iter().enumerate() {
         for cap_map in pd.cap_maps.iter() {
 
@@ -1472,6 +1530,22 @@ pub fn build_capdl_spec(
                         }
                         _ => return Err("internal bug: invalid cap source type".to_string())
                     }
+                }
+                CapMapSource::Core(core) => {
+                    let sched_control_obj_id = match sched_control_objs.get(&core.0) {
+                        Some(obj_id) => *obj_id,
+                        None => {
+                            let obj_id = capdl_util_make_sched_control_obj(
+                                &mut spec_container,
+                                &core.to_string(),
+                                core.0,
+                            );
+                            sched_control_objs.insert(core.0, obj_id);
+                            obj_id
+                        }
+                    };
+
+                    capdl_util_make_sched_control_cap(sched_control_obj_id)
                 }
                 CapMapSource::CNode(source_name) => {
                     if let Some((cnode_obj_id, size_bits)) = user_cnodes.get(source_name) {

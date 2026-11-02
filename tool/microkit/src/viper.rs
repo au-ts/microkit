@@ -143,6 +143,7 @@ pub fn get_cap_view(
             | Cap::DomainSet(_)
             | Cap::Frame(_)
             | Cap::SchedContext(_)
+            | Cap::SchedControl(_)
             | Cap::IOSpace(_)
             | Cap::IOPageTable(_)
             | Cap::Untyped(_) => {

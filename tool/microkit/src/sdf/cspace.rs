@@ -5,6 +5,7 @@
 //
 
 use super::consts::*;
+use super::pd_vm::CpuCore;
 use super::util::{check_attributes, checked_lookup, loc_string, sdf_parse_number, value_error};
 use super::{SdfLocation, SdfNode, XmlSystemDescription};
 
@@ -52,12 +53,14 @@ impl CNode {
 pub enum CapMapSource{
     Pd(String),
     CNode(String),
+    Core(CpuCore),
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
 pub enum CapMapType {
     Tcb,
     Sc,
+    SchedControl,
     VSpace,
     CSpace,
     CNode,
@@ -86,15 +89,17 @@ impl CapMap {
         xml_sdf: &XmlSystemDescription,
         node: &dyn SdfNode,
     ) -> Result<CapMap, String> {
-        check_attributes(xml_sdf, node, &["slot", "pd", "cnode_name"])?;
+        check_attributes(xml_sdf, node, &["slot", "pd", "cnode_name", "core"])?;
 
         let pd_name_maybe = node.attribute("pd").map(|pd_name_str| pd_name_str.to_string());
 
         let cnode_name_maybe = node.attribute("cnode_name").map(|cnode_name_str| cnode_name_str.to_string());
 
-        let source = match (pd_name_maybe, cnode_name_maybe) {
-            (Some(pd_name), None) => {
-                if cap_type == CapMapType::CNode {
+        let core_maybe = node.attribute("core");
+
+        let source = match (pd_name_maybe, cnode_name_maybe, core_maybe) {
+            (Some(pd_name), None, None) => {
+                if cap_type == CapMapType::CNode || cap_type == CapMapType::SchedControl {
                     return Err(value_error(
                         xml_sdf,
                         node,
@@ -104,7 +109,7 @@ impl CapMap {
 
                 CapMapSource::Pd(pd_name)
             },
-            (None, Some(cnode_name)) => {
+            (None, Some(cnode_name), None) => {
                 if cap_type != CapMapType::CNode {
                     return Err(value_error(
                         xml_sdf,
@@ -115,15 +120,34 @@ impl CapMap {
 
                 CapMapSource::CNode(cnode_name)
             },
-            (Some(_), Some(_)) => return Err(value_error(
+            (None, None, core) if cap_type == CapMapType::SchedControl => {
+                CapMapSource::Core(CpuCore(
+                    sdf_parse_number(core.unwrap_or("0"), node)?
+                        .try_into()
+                        .map_err(|_| {
+                            value_error(xml_sdf, node, "core must be between 0 and 255".to_string())
+                        })?,
+                ))
+            },
+            (None, None, Some(_)) => return Err(value_error(
+                xml_sdf,
+                node,
+                format!("invalid parameter 'core' for target CapMapType"),
+            )),
+            (Some(_), Some(_), None) => return Err(value_error(
                 xml_sdf,
                 node,
                 format!("'pd' and 'cnode_name' cannot be both specified"),
             )),
-            (None, None) => return Err(value_error(
+            (None, None, None) => return Err(value_error(
                 xml_sdf,
                 node,
                 format!("Either 'pd' or 'cnode_name' should be specified"),
+            )),
+            _ => return Err(value_error(
+                xml_sdf,
+                node,
+                format!("Only one of 'pd', 'cnode_name' and 'core' may be specified"),
             )),
         };
 
@@ -169,6 +193,7 @@ impl CSpace {
             cap_maps.push(match child.tag_name() {
                 "cap_tcb" => CapMap::from_xml(CapMapType::Tcb, xml_sdf, &*child)?,
                 "cap_sc" => CapMap::from_xml(CapMapType::Sc, xml_sdf, &*child)?,
+                "cap_sched_control" => CapMap::from_xml(CapMapType::SchedControl, xml_sdf, &*child)?,
                 "cap_vspace" => CapMap::from_xml(CapMapType::VSpace, xml_sdf, &*child)?,
                 "cap_cspace" => CapMap::from_xml(CapMapType::CSpace, xml_sdf, &*child)?,
                 "cap_cnode" => CapMap::from_xml(CapMapType::CNode, xml_sdf, &*child)?,

@@ -48,6 +48,7 @@ else ifeq ($(ARCH),x86_64)
 endif
 
 CFLAGS := -std=gnu11 \
+		  -MP -MD \
 		  -g -O3 -nostdlib \
 		  -ffreestanding \
 		  -Wall $(CFLAGS_TOOLCHAIN) \
@@ -73,3 +74,5 @@ all: $(LIB)
 
 $(LIB): $(addprefix $(BUILD_DIR)/, $(OBJS))
 	$(AR) -crv $@ $^
+
+-include $(BUILD_DIR)/*.d
