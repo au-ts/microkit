@@ -1513,12 +1513,12 @@ pub fn build_capdl_spec(
     for (pd_dest_idx, pd) in system.protection_domains.iter().enumerate() {
         for cap_map in pd.cap_maps.iter() {
 
-            let cap_map_obj = match &cap_map.source {
+            let cap_map_objs: Vec<Cap> = match &cap_map.source {
                 CapMapSource::Pd(source_name) => {
                     let pd_src_shadow_cspace_id = &pd_shadow_cspaces_name_to_id[source_name];
                     let pd_src_shadow_cspace = &pd_shadow_cspaces[pd_src_shadow_cspace_id];
 
-                    match cap_map.cap_type {
+                    vec![match cap_map.cap_type {
                         CapMapType::Tcb => capdl_util_make_tcb_cap(pd_src_shadow_cspace.tcb),
                         CapMapType::Sc => capdl_util_make_sc_cap(pd_src_shadow_cspace.sched_context),
                         CapMapType::VSpace => capdl_util_make_page_table_cap(pd_src_shadow_cspace.vspace),
@@ -1528,8 +1528,17 @@ pub fn build_capdl_spec(
 
                             capdl_util_make_cnode_cap(pd_src_shadow_cspace.cspace, 0, guard_size)
                         }
+                        CapMapType::Notification => capdl_util_make_ntfn_cap(
+                            pd_src_shadow_cspace.notification,
+                            true,
+                            true,
+                            0,
+                        ),
+                        CapMapType::MicrokitCNode => {
+                            capdl_util_make_cnode_cap(pd_src_shadow_cspace.microkit_cnode, 0, 0)
+                        }
                         _ => return Err("internal bug: invalid cap source type".to_string())
-                    }
+                    }]
                 }
                 CapMapSource::Core(core) => {
                     let sched_control_obj_id = match sched_control_objs.get(&core.0) {
@@ -1545,24 +1554,53 @@ pub fn build_capdl_spec(
                         }
                     };
 
-                    capdl_util_make_sched_control_cap(sched_control_obj_id)
+                    vec![capdl_util_make_sched_control_cap(sched_control_obj_id)]
                 }
                 CapMapSource::CNode(source_name) => {
                     if let Some((cnode_obj_id, size_bits)) = user_cnodes.get(source_name) {
                         let pd_guard_size = kernel_config.cap_address_bits as u8 - *size_bits - PD_ROOT_CAP_BITS;
-                        capdl_util_make_cnode_cap(*cnode_obj_id, 0, pd_guard_size)
+                        vec![capdl_util_make_cnode_cap(*cnode_obj_id, 0, pd_guard_size)]
                     } else {
                         return Err(format!("internal bug: couldn't find CNode with given name '{source_name}'."));
                     }
                 }
+                CapMapSource::Mr(mr_name) => mr_name_to_frames[mr_name]
+                    .iter()
+                    .map(|&frame_obj_id| {
+                        capdl_util_make_frame_cap(frame_obj_id, true, true, false, true)
+                    })
+                    .collect(),
             };
 
-            // Map this into the destination pd's cspace and the specified slot.
-            pd_shadow_cspaces[&pd_dest_idx].insert_cap_into_root_cnode(
-                &mut spec_container,
-                cap_map.slot as u32,
-                cap_map_obj,
-            );
+            match &cap_map.dest_cnode {
+                // Slot bounds and overlaps were checked when parsing the SDF.
+                Some(dest_cnode) => {
+                    let Some((cnode_obj_id, size_bits)) = user_cnodes.get(dest_cnode) else {
+                        return Err(format!(
+                            "internal bug: couldn't find CNode with given name '{dest_cnode}'."
+                        ));
+                    };
+                    for (i, cap) in cap_map_objs.into_iter().enumerate() {
+                        capdl_util_insert_cap_into_cspace(
+                            &mut spec_container,
+                            *cnode_obj_id,
+                            (cap_map.slot as usize + i) as u32,
+                            cap,
+                            *size_bits,
+                        );
+                    }
+                }
+                // Map this into the destination pd's cspace and the specified slot.
+                None => {
+                    for cap in cap_map_objs {
+                        pd_shadow_cspaces[&pd_dest_idx].insert_cap_into_root_cnode(
+                            &mut spec_container,
+                            cap_map.slot as u32,
+                            cap,
+                        );
+                    }
+                }
+            }
         }
     }
 

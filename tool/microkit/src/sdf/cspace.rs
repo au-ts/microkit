@@ -54,6 +54,7 @@ pub enum CapMapSource{
     Pd(String),
     CNode(String),
     Core(CpuCore),
+    Mr(String),
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
@@ -64,6 +65,13 @@ pub enum CapMapType {
     VSpace,
     CSpace,
     CNode,
+    /// An unbadged cap to a PD's notification, which the holder can mint badged caps from.
+    Notification,
+    /// A cap to the CNode holding a PD's Microkit caps (channels, IRQs, ...), with no guard,
+    /// so that the holder can install caps into it with CNode invocations.
+    MicrokitCNode,
+    /// A cap to every frame of a memory region, in consecutive slots.
+    Frames,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -74,6 +82,8 @@ pub struct CapMap {
     // can be shifted depending on the location in the CSpace to work as the CPtr,
     // but here it is given as the index into the CNode.
     pub slot: u64,
+    /// The user CNode the cap goes in, instead of the PD's root CNode.
+    pub dest_cnode: Option<String>,
     /// Location in the parsed SDF file
     pub text_pos: SdfLocation,
 }
@@ -89,7 +99,7 @@ impl CapMap {
         xml_sdf: &XmlSystemDescription,
         node: &dyn SdfNode,
     ) -> Result<CapMap, String> {
-        check_attributes(xml_sdf, node, &["slot", "pd", "cnode_name", "core"])?;
+        check_attributes(xml_sdf, node, &["slot", "pd", "cnode_name", "core", "mr", "dest_cnode"])?;
 
         let pd_name_maybe = node.attribute("pd").map(|pd_name_str| pd_name_str.to_string());
 
@@ -97,7 +107,52 @@ impl CapMap {
 
         let core_maybe = node.attribute("core");
 
+        let mr_maybe = node
+            .attribute("mr")
+            .map(|mr_name_str| mr_name_str.to_string());
+
+        let dest_cnode = node
+            .attribute("dest_cnode")
+            .map(|cnode_name_str| cnode_name_str.to_string());
+
+        // A CNode cap without a guard only resolves as the root of a CNode invocation from a
+        // slot of a user CNode, and a range of frames does not fit the root CNode's slots.
+        if dest_cnode.is_none()
+            && matches!(cap_type, CapMapType::MicrokitCNode | CapMapType::Frames)
+        {
+            return Err(value_error(
+                xml_sdf,
+                node,
+                "'dest_cnode' must be specified for this cap type".to_string(),
+            ));
+        }
+
+        if cap_type != CapMapType::Frames && mr_maybe.is_some() {
+            return Err(value_error(
+                xml_sdf,
+                node,
+                "invalid parameter 'mr' for target CapMapType".to_string(),
+            ));
+        }
+
         let source = match (pd_name_maybe, cnode_name_maybe, core_maybe) {
+            (None, None, None) if cap_type == CapMapType::Frames => match mr_maybe {
+                Some(mr_name) => CapMapSource::Mr(mr_name),
+                None => {
+                    return Err(value_error(
+                        xml_sdf,
+                        node,
+                        "'mr' must be specified".to_string(),
+                    ))
+                }
+            },
+            _ if cap_type == CapMapType::Frames => {
+                return Err(value_error(
+                    xml_sdf,
+                    node,
+                    "only 'mr' may be specified as the source of frames".to_string(),
+                ))
+            }
             (Some(pd_name), None, None) => {
                 if cap_type == CapMapType::CNode || cap_type == CapMapType::SchedControl {
                     return Err(value_error(
@@ -153,6 +208,25 @@ impl CapMap {
 
         let slot = sdf_parse_number(checked_lookup(xml_sdf, node, "slot")?, node)?;
 
+        // The bounds of a user CNode are checked once every CNode has been parsed.
+        if dest_cnode.is_some() {
+            if slot == 0 {
+                return Err(value_error(
+                    xml_sdf,
+                    node,
+                    "The destination slot 0 of a CNode holds its self-reference".to_string(),
+                ));
+            }
+
+            return Ok(CapMap {
+                cap_type,
+                source,
+                slot,
+                dest_cnode,
+                text_pos: node.range().start,
+            });
+        }
+
         if slot == 0 {
             return Err(value_error(
                 xml_sdf,
@@ -174,6 +248,7 @@ impl CapMap {
             cap_type,
             source,
             slot,
+            dest_cnode,
             text_pos: node.range().start,
         })
 
@@ -197,6 +272,9 @@ impl CSpace {
                 "cap_vspace" => CapMap::from_xml(CapMapType::VSpace, xml_sdf, &*child)?,
                 "cap_cspace" => CapMap::from_xml(CapMapType::CSpace, xml_sdf, &*child)?,
                 "cap_cnode" => CapMap::from_xml(CapMapType::CNode, xml_sdf, &*child)?,
+                "cap_notification" => CapMap::from_xml(CapMapType::Notification, xml_sdf, &*child)?,
+                "cap_microkit_cnode" => CapMap::from_xml(CapMapType::MicrokitCNode, xml_sdf, &*child)?,
+                "cap_frames" => CapMap::from_xml(CapMapType::Frames, xml_sdf, &*child)?,
                 child_name => {
                     let location = loc_string(xml_sdf, child.range().start);
                     if let Some(type_name) = child_name.strip_prefix("cap_") {

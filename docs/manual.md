@@ -1126,9 +1126,20 @@ It supports no attributes, but supports the following elements as children:
 * `cap_sc`: A capability to a protection domain's Scheduling Context (SC).
   If the protection domain is passive, this is a capability to the notification's scheduling context.
 * `cap_vspace`: A capability to a protection domain's VSpace.
+* `cap_notification`: An unbadged capability to a protection domain's notification, from which badged
+  capabilities can be minted.
+* `cap_microkit_cnode`: A capability, with no guard, to the CNode holding a protection domain's
+  Microkit capabilities (channels, IRQs and so on), so that capabilities can be installed into it at
+  runtime. Requires `dest_cnode`.
+* `cap_frames`: A capability to each frame of the memory region named by its `mr` attribute, in
+  consecutive slots starting at `slot`. Requires `dest_cnode`.
 
 All of the elements support the `slot` attribute, which is is an opaque identifier used to address the capability at runtime.
 To convert the `slot` to an `seL4_CPtr`, use the [`seL4_CPtr microkit_cspace_root_slot_to_cptr(seL4_Word slot)`](#libmicrokit_cspace_root_slot_to_cptr) function.
+
+All of the elements also support the optional `dest_cnode` attribute, the name of a `cnode`. The
+capability is then placed in that CNode at index `slot` instead of in the protection domain's
+CSpace. Slot 0 of a CNode holds a capability to itself, so `slot` must be at least 1.
 
 See the 'cap_sharing' example packaged in your SDK or [on GitHub](https://github.com/seL4/microkit/tree/main/example/cap_sharing).
 

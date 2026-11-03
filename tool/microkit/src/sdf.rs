@@ -49,6 +49,7 @@ pub(crate) use consts::*;
 pub(crate) use cspace::CapMapType;
 pub(crate) use cspace::CNode;
 pub(crate) use cspace::CapMapSource;
+use cspace::CapMap;
 pub(crate) use iommu::IommuDeviceIdentifier;
 pub(crate) use irq::{SysIrq, SysIrqKind};
 pub(crate) use memory_region::{Map, SysMapPerms};
@@ -296,6 +297,42 @@ pub fn parse(
                         ));
                     }
                 }
+                CapMapSource::Mr(source_name) => {
+                    if !mrs.iter().any(|mr| mr.name == *source_name) {
+                        return Err(format!(
+                            "Error: unknown memory region name '{}': {}",
+                            source_name,
+                            loc_string(&xml_sdf, cap_map.text_pos)
+                        ));
+                    }
+                }
+            }
+
+            if let Some(dest_cnode) = &cap_map.dest_cnode {
+                let Some(cnode) = cnodes.iter().find(|cnode| cnode.name == *dest_cnode) else {
+                    return Err(format!(
+                        "Error: unknown CNode name '{}': {}",
+                        dest_cnode,
+                        loc_string(&xml_sdf, cap_map.text_pos)
+                    ));
+                };
+                let num_caps = match &cap_map.source {
+                    CapMapSource::Mr(mr_name) => mrs
+                        .iter()
+                        .find(|mr| mr.name == *mr_name)
+                        .map_or(1, |mr| mr.page_count),
+                    _ => 1,
+                };
+                if cap_map.slot + num_caps > 1 << cnode.size_bits {
+                    return Err(format!(
+                        "Error: {} cap(s) from slot {} do not fit in CNode '{}' of {} slots: {}",
+                        num_caps,
+                        cap_map.slot,
+                        dest_cnode,
+                        1u64 << cnode.size_bits,
+                        loc_string(&xml_sdf, cap_map.text_pos)
+                    ));
+                }
             }
         }
     }
@@ -354,6 +391,15 @@ pub fn parse(
         if let Some(handler_idx) = handler_idx {
             pds[pd_idx].fault_handler_idx = Some(*handler_idx);
             pds[*handler_idx].is_fault_handler = true;
+        }
+    }
+    // The self endpoint copy is only placed while setting up a fault handler.
+    for pd in &pds {
+        if pd.self_ep_cnode.is_some() && !pd.is_fault_handler {
+            return Err(format!(
+                "Error: self_ep_cnode given to protection domain '{}', which is not a fault_handler",
+                pd.name
+            ));
         }
     }
 
@@ -600,7 +646,11 @@ pub fn parse(
     for pd in &pds {
         let mut user_cap_slots = HashMap::<u64, Vec<_>>::new();
 
-        for cap_map in &pd.cap_maps {
+        for cap_map in pd
+            .cap_maps
+            .iter()
+            .filter(|cap_map| cap_map.dest_cnode.is_none())
+        {
             user_cap_slots
                 .entry(cap_map.slot)
                 .and_modify(|v| v.push(cap_map))
@@ -636,12 +686,49 @@ pub fn parse(
                                 loc_string(&xml_sdf, mapping.text_pos)
                             ));
                         }
+                        CapMapSource::Mr(source_name) => {
+                            lines.push_str(&format!(
+                                "\n  type {:?} from memory region '{}' at '{}'",
+                                mapping.cap_type,
+                                source_name,
+                                loc_string(&xml_sdf, mapping.text_pos)
+                            ));
+                        }
                     }
                 }
                 return Err(format!(
                     "Error: overlapping user caps in slot {slot} of protection domain '{}':{}",
                     pd.name, lines
                 ));
+            }
+        }
+    }
+
+    // A user CNode can be given caps by any PD's cap maps, so its slots are checked across
+    // all of them. A range of frames occupies one slot per page.
+    let mut user_cnode_slots = HashMap::<(&str, u64), &CapMap>::new();
+    for pd in &pds {
+        for cap_map in &pd.cap_maps {
+            let Some(dest_cnode) = &cap_map.dest_cnode else {
+                continue;
+            };
+            let num_caps = match &cap_map.source {
+                CapMapSource::Mr(mr_name) => mrs
+                    .iter()
+                    .find(|mr| mr.name == *mr_name)
+                    .map_or(1, |mr| mr.page_count),
+                _ => 1,
+            };
+            for slot in cap_map.slot..cap_map.slot + num_caps {
+                if let Some(other) = user_cnode_slots.insert((dest_cnode.as_str(), slot), cap_map) {
+                    return Err(format!(
+                        "Error: overlapping caps in slot {slot} of CNode '{dest_cnode}':\n  type {:?} at '{}'\n  type {:?} at '{}'",
+                        other.cap_type,
+                        loc_string(&xml_sdf, other.text_pos),
+                        cap_map.cap_type,
+                        loc_string(&xml_sdf, cap_map.text_pos)
+                    ));
+                }
             }
         }
     }
