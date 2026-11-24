@@ -331,6 +331,7 @@ SUPPORTED_BOARDS = (
         smp_cores=4,
         kernel_options={
             "KernelPlatform": "qemu-riscv-virt",
+            "KernelRiscvSstc": True,
             "QEMU_MEMORY": "2048",
         },
     ),
