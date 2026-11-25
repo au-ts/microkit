@@ -20,6 +20,8 @@
 #define BADGE_FAULT_BIT 62
 #define BADGE_ENDPOINT_BIT 63
 
+#define MAPREPLYRECV
+
 /* All globals are prefixed with microkit_* to avoid clashes with user defined globals. */
 
 bool microkit_passive;
@@ -166,13 +168,26 @@ static void handler_loop(void)
             tag = seL4_Recv(INPUT_CAP, &badge, REPLY_CAP);
         }
 
+        after_map_reply_recv:
+
         uint64_t is_endpoint = badge >> BADGE_ENDPOINT_BIT;
         uint64_t is_fault = (badge >> BADGE_FAULT_BIT) & 1;
 
         have_reply = false;
 
         if (is_fault) {
+            #ifdef MAPREPLYRECV
+            seL4_Bool reply_to_fault;
+            if (microkit_msginfo_get_label(tag) == seL4_Fault_VMFault) {
+                // TODO: deferred flush may be necessary...
+                vm_fault(badge & PD_MASK, tag, &reply_tag, INPUT_CAP, &badge, REPLY_CAP);
+                goto after_map_reply_recv;
+            } else {
+                reply_to_fault = fault(badge & PD_MASK, tag, &reply_tag);
+            }
+            #else
             seL4_Bool reply_to_fault = fault(badge & PD_MASK, tag, &reply_tag);
+            #endif
 #if defined(CONFIG_VTX)
             /* If fault() returns false then we shouldn't resume the VCPU. */
             if (!reply_to_fault) {
