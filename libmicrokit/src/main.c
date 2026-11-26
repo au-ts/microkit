@@ -68,6 +68,15 @@ __attribute__((weak)) seL4_Bool fault(microkit_child child, microkit_msginfo msg
     return seL4_False;
 }
 
+#ifdef MAPREPLYRECV
+__attribute__((weak)) seL4_Bool vm_fault(microkit_child child, microkit_msginfo msginfo,
+                                         microkit_msginfo *reply_msginfo, seL4_CPtr src,
+                                         seL4_Word *sender, seL4_CPtr reply)
+{
+    return seL4_False;
+}
+#endif
+
 static void run_init_funcs(void)
 {
     size_t count = __init_array_end - __init_array_start;
@@ -168,7 +177,9 @@ static void handler_loop(void)
             tag = seL4_Recv(INPUT_CAP, &badge, REPLY_CAP);
         }
 
+#ifdef MAPREPLYRECV
         after_map_reply_recv:
+#endif
 
         uint64_t is_endpoint = badge >> BADGE_ENDPOINT_BIT;
         uint64_t is_fault = (badge >> BADGE_FAULT_BIT) & 1;
@@ -176,18 +187,16 @@ static void handler_loop(void)
         have_reply = false;
 
         if (is_fault) {
-            #ifdef MAPREPLYRECV
-            seL4_Bool reply_to_fault;
+#ifdef MAPREPLYRECV
             if (microkit_msginfo_get_label(tag) == seL4_Fault_VMFault) {
-                // TODO: deferred flush may be necessary...
-                vm_fault(badge & PD_MASK, tag, &reply_tag, INPUT_CAP, &badge, REPLY_CAP);
-                goto after_map_reply_recv;
-            } else {
-                reply_to_fault = fault(badge & PD_MASK, tag, &reply_tag);
+                deferred_flush();
+                if (vm_fault(badge & PD_MASK, tag, &reply_tag, INPUT_CAP, &badge, REPLY_CAP)) {
+                    tag = reply_tag;
+                    goto after_map_reply_recv;
+                }
             }
-            #else
+#endif
             seL4_Bool reply_to_fault = fault(badge & PD_MASK, tag, &reply_tag);
-            #endif
 #if defined(CONFIG_VTX)
             /* If fault() returns false then we shouldn't resume the VCPU. */
             if (!reply_to_fault) {
