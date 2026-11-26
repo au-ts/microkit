@@ -1,0 +1,100 @@
+/* SPDX-License-Identifier: BSD-2-Clause */
+
+/ {
+    chosen {
+        seL4,boot-cpu = <&{/cpus/cpu@0}>;
+        seL4,kernel-devices =
+            &{/soc/clint@2000000}, &aplic_s, &iommu;
+    };
+
+    platform-bus@4000000 {
+        interrupt-parent = <&aplic_s>;
+    };
+
+    soc {
+        /* Replace default PLIC with APLIC */
+        interrupt-controller@c000000 {
+            /delete-property/ riscv,ndev;
+            /delete-property/ interrupts-extended;
+            compatible = "qemu,aplic", "riscv,aplic";
+            reg = <0 0xc000000 0 0x8000>;
+            #interrupt-cells = <2>;
+            riscv,num-sources = <96>;
+            riscv,children = <&aplic_s>;
+            riscv,delegation = <&aplic_s 1 96>;
+            msi-parent = <&imsic_m>;
+        };
+
+        aplic_s: interrupt-controller@d000000 {
+            compatible = "qemu,aplic", "riscv,aplic";
+            reg = <0 0xd000000 0 0x8000>;
+            interrupt-controller;
+            #interrupt-cells = <2>;
+            #address-cells = <0>;
+            riscv,num-sources = <96>;
+            msi-parent = <&imsic_s>;
+        };
+
+        imsic_m: interrupt-controller@24000000 {
+            compatible = "qemu,imsics", "riscv,imsics";
+            reg = <0 0x24000000 0 0x1000>;
+            interrupt-controller;
+            #interrupt-cells = <0>;
+            msi-controller;
+            riscv,num-ids = <255>;
+            interrupts-extended = <&{/cpus/cpu@0/interrupt-controller} 11>;
+        };
+
+        imsic_s: interrupt-controller@28000000 {
+            compatible = "qemu,imsics", "riscv,imsics";
+            reg = <0 0x28000000 0 0x1000>;
+            interrupt-controller;
+            #interrupt-cells = <0>;
+            msi-controller;
+            riscv,num-ids = <255>;
+            interrupts-extended = <&{/cpus/cpu@0/interrupt-controller} 9>;
+        };
+
+        iommu: iommu@3010000 {
+            compatible = "riscv,iommu";
+            reg = <0 0x3010000 0 0x1000>;
+            #iommu-cells = <1>;
+            msi-parent = <&imsic_s>;
+            interrupt-parent = <&aplic_s>;
+            interrupts = <36 1 37 1 38 1 39 1>;
+        };
+
+        serial@10000000 { interrupt-parent = <&aplic_s>; interrupts = <10 4>; };
+        rtc@101000 { interrupt-parent = <&aplic_s>; interrupts = <11 4>; };
+        virtio_mmio@10001000 { interrupt-parent = <&aplic_s>; interrupts = <1 4>; };
+        virtio_mmio@10002000 { interrupt-parent = <&aplic_s>; interrupts = <2 4>; };
+        virtio_mmio@10003000 { interrupt-parent = <&aplic_s>; interrupts = <3 4>; };
+        virtio_mmio@10004000 { interrupt-parent = <&aplic_s>; interrupts = <4 4>; };
+        virtio_mmio@10005000 { interrupt-parent = <&aplic_s>; interrupts = <5 4>; };
+        virtio_mmio@10006000 { interrupt-parent = <&aplic_s>; interrupts = <6 4>; };
+        virtio_mmio@10007000 { interrupt-parent = <&aplic_s>; interrupts = <7 4>; };
+        virtio_mmio@10008000 { interrupt-parent = <&aplic_s>; interrupts = <8 4>; };
+
+        pci@30000000 {
+            msi-parent = <&imsic_s>;
+            iommu-map = <0 &iommu 0 0>, <0 &iommu 0 0xffff>;
+            interrupt-map =
+                <0x0000 0 0 1 &aplic_s 32 4>,
+                <0x0000 0 0 2 &aplic_s 33 4>,
+                <0x0000 0 0 3 &aplic_s 34 4>,
+                <0x0000 0 0 4 &aplic_s 35 4>,
+                <0x0800 0 0 1 &aplic_s 33 4>,
+                <0x0800 0 0 2 &aplic_s 34 4>,
+                <0x0800 0 0 3 &aplic_s 35 4>,
+                <0x0800 0 0 4 &aplic_s 32 4>,
+                <0x1000 0 0 1 &aplic_s 34 4>,
+                <0x1000 0 0 2 &aplic_s 35 4>,
+                <0x1000 0 0 3 &aplic_s 32 4>,
+                <0x1000 0 0 4 &aplic_s 33 4>,
+                <0x1800 0 0 1 &aplic_s 35 4>,
+                <0x1800 0 0 2 &aplic_s 32 4>,
+                <0x1800 0 0 3 &aplic_s 33 4>,
+                <0x1800 0 0 4 &aplic_s 34 4>;
+        };
+    };
+};

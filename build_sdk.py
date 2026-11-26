@@ -332,6 +332,9 @@ SUPPORTED_BOARDS = (
         kernel_options={
             "KernelPlatform": "qemu-riscv-virt",
             "QEMU_MEMORY": "2048",
+            "KernelRiscvAIA": True,
+            "KernelVerificationBuild": False,
+            "KernelRiscvSstc": True,
         },
     ),
     BoardInfo(

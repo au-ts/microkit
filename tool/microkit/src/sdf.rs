@@ -356,6 +356,7 @@ pub fn parse(
 
     // Ensure no duplicate IRQs
     let mut all_irqs = Vec::new();
+    let mut all_aplic_sources = BTreeSet::new();
     for pd in pds.values() {
         for sysirq in &pd.irqs {
             if all_irqs.contains(&sysirq.irq_num()) {
@@ -369,6 +370,15 @@ pub fn parse(
                 ));
             }
             all_irqs.push(sysirq.irq_num());
+            if let SysIrqKind::Riscv {
+                source: Some(source),
+                ..
+            } = sysirq.kind
+            {
+                if !all_aplic_sources.insert(source) {
+                    return Err(format!("Error: duplicate APLIC source: {source}"));
+                }
+            }
         }
     }
 

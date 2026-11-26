@@ -6,14 +6,19 @@
 
 use super::pci::PciDevice;
 
-use crate::sel4::{ArmRiscvIrqTrigger, X86IoapicIrqPolarity, X86IoapicIrqTrigger};
+use crate::sel4::{ArmIrqTrigger, RiscvIrqTrigger, X86IoapicIrqPolarity, X86IoapicIrqTrigger};
 
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, PartialEq, Eq)]
 pub enum SysIrqKind {
-    Conventional {
+    Arm {
         irq: u64,
-        trigger: ArmRiscvIrqTrigger,
+        trigger: ArmIrqTrigger,
+    },
+    Riscv {
+        irq: u64,
+        trigger: RiscvIrqTrigger,
+        source: Option<u64>,
     },
     /// x86-64 specific
     IOAPIC {
@@ -40,7 +45,7 @@ pub struct SysIrq {
 impl SysIrq {
     pub fn irq_num(&self) -> u64 {
         match self.kind {
-            SysIrqKind::Conventional { irq, .. } => irq,
+            SysIrqKind::Arm { irq, .. } | SysIrqKind::Riscv { irq, .. } => irq,
             SysIrqKind::IOAPIC { vector, .. } => vector,
             SysIrqKind::MSI { vector, .. } => vector,
         }

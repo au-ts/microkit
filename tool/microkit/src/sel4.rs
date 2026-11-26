@@ -375,6 +375,9 @@ pub struct Config {
     pub arm_smc: Option<bool>,
     /// RISC-V specific, what kind of virtual memory system (e.g Sv39)
     pub riscv_pt_levels: Option<RiscvVirtualMemory>,
+    pub riscv_aia: bool,
+    /// RISC-V specific, whether the kernel supports configuring APLIC sources.
+    pub riscv_aplic: bool,
     pub invocations_labels: serde_json::Value,
     /// Kernel object sizes, used for kernel boot emulation and untyped allocation.
     pub object_sizes: ObjectSizes,
@@ -521,6 +524,10 @@ impl Config {
             arm_pa_size_bits,
             arm_smc,
             riscv_pt_levels: Some(RiscvVirtualMemory::Sv39),
+            riscv_aia: arch == Arch::Riscv64
+                && json_str_as_bool(&kernel_config_json, "RISCV_AIA").unwrap_or(false),
+            riscv_aplic: arch == Arch::Riscv64
+                && json_str_as_bool(&kernel_config_json, "RISCV_APLIC").unwrap_or(false),
             invocations_labels,
             device_regions,
             normal_regions,
@@ -759,31 +766,62 @@ impl PageSize {
     }
 }
 
-// @merge: I would rather have the duplication of ARM and RISC-V
-// rather than a type that tries to unify both.
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-/// The same values apply to ARM and RISC-V
-pub enum ArmRiscvIrqTrigger {
+pub enum ArmIrqTrigger {
     Level = 0,
     Edge = 1,
 }
 
-impl From<u8> for ArmRiscvIrqTrigger {
-    fn from(item: u8) -> ArmRiscvIrqTrigger {
+impl From<u8> for ArmIrqTrigger {
+    fn from(item: u8) -> ArmIrqTrigger {
         match item {
-            0 => ArmRiscvIrqTrigger::Level,
-            1 => ArmRiscvIrqTrigger::Edge,
-            _ => panic!("Unknown ARM/RISC-V IRQ trigger {item:x}"),
+            0 => ArmIrqTrigger::Level,
+            1 => ArmIrqTrigger::Edge,
+            _ => panic!("Unknown ARM IRQ trigger {item:x}"),
         }
     }
 }
 
-impl ArmRiscvIrqTrigger {
+impl ArmIrqTrigger {
     pub fn human_name(&self) -> &str {
         match self {
-            ArmRiscvIrqTrigger::Level => "level",
-            ArmRiscvIrqTrigger::Edge => "edge",
+            ArmIrqTrigger::Level => "level",
+            ArmIrqTrigger::Edge => "edge",
+        }
+    }
+}
+
+/// CapDL initialiser encoding: 0 = level-high, 1 = edge-rising,
+/// 2 = level-low, 3 = edge-falling. Non-AIA IRQs use only the legacy 0/1 values.
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum RiscvIrqTrigger {
+    Level = 0,
+    Edge = 1,
+    LevelLow = 2,
+    EdgeFalling = 3,
+}
+
+impl From<u8> for RiscvIrqTrigger {
+    fn from(item: u8) -> RiscvIrqTrigger {
+        match item {
+            0 => RiscvIrqTrigger::Level,
+            1 => RiscvIrqTrigger::Edge,
+            2 => RiscvIrqTrigger::LevelLow,
+            3 => RiscvIrqTrigger::EdgeFalling,
+            _ => panic!("Unknown RISC-V IRQ trigger {item:x}"),
+        }
+    }
+}
+
+impl RiscvIrqTrigger {
+    pub fn human_name(&self) -> &str {
+        match self {
+            RiscvIrqTrigger::Level => "level",
+            RiscvIrqTrigger::Edge => "edge",
+            RiscvIrqTrigger::LevelLow => "level-low",
+            RiscvIrqTrigger::EdgeFalling => "edge-falling",
         }
     }
 }

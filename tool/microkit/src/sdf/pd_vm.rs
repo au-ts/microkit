@@ -20,7 +20,9 @@ use super::util::{
 };
 use super::{SdfLocation, SdfNode, SystemDescriptionFile};
 
-use crate::sel4::{Arch, ArmRiscvIrqTrigger, X86IoapicIrqPolarity, X86IoapicIrqTrigger};
+use crate::sel4::{
+    Arch, ArmIrqTrigger, RiscvIrqTrigger, X86IoapicIrqPolarity, X86IoapicIrqTrigger,
+};
 use crate::Config;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -359,36 +361,96 @@ impl ProtectionDomain {
                     }
 
                     if let Some(irq) = sdf_parse_attribute(xml_sdf, &*child, "irq")? {
-                        if config.arch == Arch::X86_64 {
-                            return Err(value_error(
-                                xml_sdf,
-                                &*child,
-                                "ARM and RISC-V IRQs are not supported on x86".to_string(),
-                            ));
-                        }
-
                         // ARM and RISC-V interrupts must have an "irq" attribute.
-                        check_attributes(xml_sdf, &*child, &["irq", "id", "setvar_id", "trigger"])?;
+                        let kind = match config.arch {
+                            Arch::Aarch64 => {
+                                check_attributes(
+                                    xml_sdf,
+                                    &*child,
+                                    &["irq", "id", "setvar_id", "trigger"],
+                                )?;
+                                // Default to level triggered.
+                                let trigger = match child.attribute("trigger").unwrap_or("level") {
+                                    "level" => ArmIrqTrigger::Level,
+                                    "edge" => ArmIrqTrigger::Edge,
+                                    _ => {
+                                        return Err(value_error(
+                                            xml_sdf,
+                                            &*child,
+                                            "trigger must be either 'level' or 'edge'".to_string(),
+                                        ));
+                                    }
+                                };
+                                SysIrqKind::Arm { irq, trigger }
+                            }
+                            Arch::Riscv64 => {
+                                let aplic_enabled = config.riscv_aia && config.riscv_aplic;
+                                let attributes: &[&str] = if aplic_enabled {
+                                    &["irq", "id", "setvar_id", "trigger", "source"]
+                                } else {
+                                    &["irq", "id", "setvar_id", "trigger"]
+                                };
+                                check_attributes(xml_sdf, &*child, attributes)?;
 
-                        let trigger = if let Some(trigger_str) = child.attribute("trigger") {
-                            match trigger_str {
-                                "level" => ArmRiscvIrqTrigger::Level,
-                                "edge" => ArmRiscvIrqTrigger::Edge,
-                                _ => {
+                                let source =
+                                    sdf_parse_attribute::<u64>(xml_sdf, &*child, "source")?;
+                                if source == Some(0) {
                                     return Err(value_error(
                                         xml_sdf,
                                         &*child,
-                                        "trigger must be either 'level' or 'edge'".to_string(),
-                                    ))
+                                        "APLIC source must be > 0".into(),
+                                    ));
+                                }
+                                if config.riscv_aia
+                                    && source.is_none()
+                                    && child.attribute("trigger").is_some()
+                                {
+                                    return Err(value_error(
+                                        xml_sdf,
+                                        &*child,
+                                        "trigger requires an APLIC source with AIA".into(),
+                                    ));
+                                }
+
+                                let aplic = aplic_enabled && source.is_some();
+                                // Default to level triggered.
+                                let trigger = match child.attribute("trigger").unwrap_or("level") {
+                                    "level" => RiscvIrqTrigger::Level,
+                                    "edge" => RiscvIrqTrigger::Edge,
+                                    "level-high" if aplic => RiscvIrqTrigger::Level,
+                                    "edge-rising" if aplic => RiscvIrqTrigger::Edge,
+                                    "level-low" if aplic => RiscvIrqTrigger::LevelLow,
+                                    "edge-falling" if aplic => RiscvIrqTrigger::EdgeFalling,
+                                    _ => {
+                                        return Err(value_error(
+                                            xml_sdf,
+                                            &*child,
+                                            if aplic {
+                                                "trigger must be 'level', 'edge', 'level-high', 'level-low', 'edge-rising' or 'edge-falling'".to_string()
+                                            } else {
+                                                "trigger must be either 'level' or 'edge'"
+                                                    .to_string()
+                                            },
+                                        ));
+                                    }
+                                };
+                                SysIrqKind::Riscv {
+                                    irq,
+                                    trigger,
+                                    source,
                                 }
                             }
-                        } else {
-                            // Default to level triggered
-                            ArmRiscvIrqTrigger::Level
+                            Arch::X86_64 => {
+                                return Err(value_error(
+                                    xml_sdf,
+                                    &*child,
+                                    "ARM and RISC-V IRQs are not supported on x86".to_string(),
+                                ));
+                            }
                         };
                         let irq = SysIrq {
                             id: id as u64,
-                            kind: SysIrqKind::Conventional { irq, trigger },
+                            kind,
                         };
                         irqs.push(irq);
                     } else if let Some(pin) = sdf_parse_attribute::<i64>(xml_sdf, &*child, "pin")? {

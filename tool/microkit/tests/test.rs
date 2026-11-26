@@ -46,6 +46,7 @@ const DEFAULT_AARCH64_KERNEL_CONFIG: sel4::Config = sel4::Config {
     arm_pa_size_bits: Some(40),
     arm_smc: None,
     riscv_pt_levels: None,
+    riscv_aia: false,
     // Not necessary for SDF parsing
     invocations_labels: json!(null),
     device_regions: None,
@@ -84,6 +85,7 @@ const DEFAULT_X86_64_KERNEL_CONFIG: sel4::Config = sel4::Config {
     arm_pa_size_bits: None,
     arm_smc: None,
     riscv_pt_levels: None,
+    riscv_aia: false,
     // Not necessary for SDF parsing
     invocations_labels: json!(null),
     device_regions: None,

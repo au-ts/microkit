@@ -861,14 +861,8 @@ pub fn build_capdl_spec(
         // Step 3-8 Create spec and caps to IRQs
         for irq in pd.irqs.iter() {
             // Create a IRQ handler cap and insert into the requested CSpace's slot.
-            let irq_handle_cap = create_irq_handler_cap(
-                &mut spec_container,
-                kernel_config,
-                &pd.name,
-                pd.cpu,
-                pd_ntfn_obj_id,
-                irq,
-            );
+            let irq_handle_cap =
+                create_irq_handler_cap(&mut spec_container, &pd.name, pd.cpu, pd_ntfn_obj_id, irq);
             let irq_cap_idx = PD_BASE_IRQ_CAP + irq.id;
             caps_to_insert_to_pd_cspace
                 .push(capdl_util_make_cte(irq_cap_idx as u32, irq_handle_cap));

@@ -17,7 +17,9 @@ use crate::{
         },
         CapDLSpecContainer, TcbBoundSlot,
     },
-    sel4::{Arch, ArmRiscvIrqTrigger, Config, X86IoapicIrqPolarity, X86IoapicIrqTrigger},
+    sel4::{
+        Arch, ArmIrqTrigger, Config, RiscvIrqTrigger, X86IoapicIrqPolarity, X86IoapicIrqTrigger,
+    },
 };
 
 pub fn write_report(
@@ -49,7 +51,7 @@ pub fn write_report(
                     .write_all(
                         format!(
                             "\t\t* Trigger: {}\n",
-                            ArmRiscvIrqTrigger::from(arm_irq.extra.trigger).human_name()
+                            ArmIrqTrigger::from(arm_irq.extra.trigger).human_name()
                         )
                         .as_bytes(),
                     )
@@ -62,15 +64,26 @@ pub fn write_report(
                 report_file
                     .write_all(format!("\t\t* Number: {}\n", irq_num.0).as_bytes())
                     .unwrap();
-                report_file
-                    .write_all(
-                        format!(
-                            "\t\t* Trigger: {}\n",
-                            ArmRiscvIrqTrigger::from(riscv_irq.extra.trigger).human_name()
+                if let Some(source) = riscv_irq.extra.source {
+                    report_file
+                        .write_all(format!("\t\t* APLIC source: {}\n", source.0).as_bytes())
+                        .unwrap();
+                }
+                if kernel_config.riscv_aia && riscv_irq.extra.source.is_none() {
+                    report_file
+                        .write_all(format!("\t\t* Direct IMSIC MSI\n").as_bytes())
+                        .unwrap();
+                } else {
+                    report_file
+                        .write_all(
+                            format!(
+                                "\t\t* Trigger: {}\n",
+                                RiscvIrqTrigger::from(riscv_irq.extra.trigger).human_name()
+                            )
+                            .as_bytes(),
                         )
-                        .as_bytes(),
-                    )
-                    .unwrap();
+                        .unwrap();
+                }
             }
             Object::IrqMsi(irq_msi) => {
                 report_file
