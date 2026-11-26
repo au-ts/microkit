@@ -22,6 +22,9 @@ const DEFAULT_OBJECT_SIZES: sel4::ObjectSizes = sel4::ObjectSizes {
     large_page: 0,
     small_page: 0,
     io_page_table: None,
+    riscv_root_x4: None,
+    riscv_iommu_ddt: None,
+    riscv_iommu_device: None,
     asid_pool: 0,
     vcpu: None,
 };
@@ -47,6 +50,7 @@ const DEFAULT_AARCH64_KERNEL_CONFIG: sel4::Config = sel4::Config {
     arm_smc: None,
     riscv_pt_levels: None,
     riscv_aia: false,
+    riscv_aplic: false,
     // Not necessary for SDF parsing
     invocations_labels: json!(null),
     device_regions: None,
@@ -86,6 +90,7 @@ const DEFAULT_X86_64_KERNEL_CONFIG: sel4::Config = sel4::Config {
     arm_smc: None,
     riscv_pt_levels: None,
     riscv_aia: false,
+    riscv_aplic: false,
     // Not necessary for SDF parsing
     invocations_labels: json!(null),
     device_regions: None,
@@ -853,18 +858,18 @@ mod iommu {
         );
     }
 
-    #[test]
-    fn test_iommu_unsupported_on_riscv64() {
-        check_error(
-            &sel4::Config {
-                arch: sel4::Arch::Riscv64,
-                iommu: true,
-                ..DEFAULT_AARCH64_KERNEL_CONFIG
-            },
-            "iommu_missing_from_config.system",
-            "Error: failed to parse device peripheral_id '0:3.0': IOMMU device identifiers are not supported on RISC-V (64-bit) on element 'io_address_space':",
-        );
-    }
+    // #[test]
+    // fn test_iommu_unsupported_on_riscv64() {
+    //     check_error(
+    //         &sel4::Config {
+    //             arch: sel4::Arch::Riscv64,
+    //             iommu: true,
+    //             ..DEFAULT_AARCH64_KERNEL_CONFIG
+    //         },
+    //         "iommu_missing_from_config.system",
+    //         "Error: failed to parse device peripheral_id '0:3.0': IOMMU device identifiers are not supported on RISC-V (64-bit) on element 'io_address_space':",
+    //     );
+    // }
 
     #[test]
     fn test_out_of_bound() {
