@@ -293,7 +293,7 @@ impl MapPerms for SysIOMapPerms {
 }
 
 impl SysIOMapPerms {
-    fn from_str(s: &str) -> Result<Self, String> {
+    pub(super) fn from_str(s: &str) -> Result<Self, String> {
         let mut read = false;
         let mut write = false;
 

@@ -19,7 +19,9 @@ use sel4_capdl_initializer_types::{
 use crate::{
     capdl::{
         irq::create_irq_handler_cap,
-        memory::{create_iospace, create_vspace, create_vspace_ept, AddressSpace},
+        memory::{
+            create_iospace, create_riscv_iospace, create_vspace, create_vspace_ept, AddressSpace,
+        },
         spec::{capdl_obj_physical_size_bits, BytesContent, ElfContent, FillContent},
         util::*,
     },
@@ -1310,6 +1312,36 @@ pub fn build_capdl_spec(
             address_space,
             &mr_name_to_frames[iomap.mr.as_str()],
         )?;
+    }
+
+    for (space_index, space) in system.riscv_io_address_spaces.iter().enumerate() {
+        let devices = system
+            .riscv_devices
+            .iter()
+            .filter_map(|(device, &index)| (index == space_index).then_some(device));
+        let address_space = create_riscv_iospace(&mut spec_container, &space.name, devices);
+        for iomap in &space.iomaps {
+            let page_size_bytes = mr_name_to_frames
+                .get(iomap.mr.as_str())
+                .ok_or(format!(
+                    "Error: Memory region {} referenced by iomap not found.",
+                    iomap.mr
+                ))?
+                .first()
+                .map(|&object_id| 1 << capdl_util_get_frame_size_bits(&spec_container, object_id))
+                .ok_or(format!(
+                    "Error: Memory region {} referenced by iomap has no frames.",
+                    &iomap.mr
+                ))?;
+            map_memory_region(
+                &mut spec_container,
+                kernel_config,
+                iomap,
+                page_size_bytes,
+                &address_space,
+                &mr_name_to_frames[iomap.mr.as_str()],
+            )?;
+        }
     }
 
     // *********************************

@@ -8,7 +8,7 @@ use crate::{
         spec::capdl_obj_human_name, util::capdl_util_make_cte, CapDLNamedObject,
         CapDLSpecContainer, FrameFill,
     },
-    sdf::IommuDeviceIdentifier,
+    sdf::{IommuDeviceIdentifier, RiscvIODevice},
     sel4::{Arch, Config, ObjectType, PageSize},
 };
 use sel4_capdl_initializer_types::{
@@ -71,17 +71,25 @@ pub enum AddressSpace {
         root: ObjectId,
         device: IommuDeviceIdentifier,
     },
+    RiscvIOSpace {
+        name: String,
+        root: ObjectId,
+    },
 }
 
 impl AddressSpace {
     pub fn root(&self) -> ObjectId {
         match self {
-            &Self::VSpace { root, .. } | &Self::IOSpace { root, .. } => root,
+            &Self::VSpace { root, .. }
+            | &Self::IOSpace { root, .. }
+            | &Self::RiscvIOSpace { root, .. } => root,
         }
     }
     pub fn name(&self) -> &str {
         match self {
-            Self::VSpace { name, .. } | Self::IOSpace { name, .. } => name,
+            Self::VSpace { name, .. }
+            | Self::IOSpace { name, .. }
+            | Self::RiscvIOSpace { name, .. } => name,
         }
     }
 
@@ -120,7 +128,9 @@ impl AddressSpace {
 
     fn get_level_name(&self, sel4_config: &Config, level: usize) -> String {
         match self {
-            Self::VSpace { .. } => get_pt_level_name(sel4_config, level).to_string(),
+            Self::VSpace { .. } | Self::RiscvIOSpace { .. } => {
+                get_pt_level_name(sel4_config, level).to_string()
+            }
             Self::IOSpace { .. } => get_iopt_level_name(level),
         }
     }
@@ -128,7 +138,7 @@ impl AddressSpace {
     fn get_addr_label(&self) -> &'static str {
         match self {
             Self::VSpace { .. } => "vaddr",
-            Self::IOSpace { .. } => "ioaddr",
+            Self::IOSpace { .. } | Self::RiscvIOSpace { .. } => "ioaddr",
         }
     }
 
@@ -139,6 +149,10 @@ impl AddressSpace {
     fn level_index_bits(&self, sel4_config: &Config, level: usize) -> u64 {
         match self {
             Self::VSpace { .. } => sel4_config.vspace_level_index_bits(level),
+            Self::RiscvIOSpace { .. } => {
+                sel4_config.address_space_constants.page_table_index_bits
+                    + if level == 0 { 2 } else { 0 }
+            }
             Self::IOSpace { .. } => {
                 if level > 0 {
                     sel4_config.io_page_table_index_bits()
@@ -322,6 +336,14 @@ impl AddressSpace {
         match self {
             &AddressSpace::VSpace { x86_ept, .. } => Object::PageTable(object::PageTable {
                 x86_ept,
+                riscv_root_x4: false,
+                is_root: false,
+                level: Some(level as u8),
+                slots: vec![],
+            }),
+            AddressSpace::RiscvIOSpace { .. } => Object::PageTable(object::PageTable {
+                x86_ept: false,
+                riscv_root_x4: false,
                 is_root: false,
                 level: Some(level as u8),
                 slots: vec![],
@@ -340,7 +362,9 @@ impl AddressSpace {
 
     fn make_intermediate_cap(&self, object: ObjectId) -> Cap {
         match self {
-            AddressSpace::VSpace { .. } => Cap::PageTable(cap::PageTable { object }),
+            AddressSpace::VSpace { .. } | AddressSpace::RiscvIOSpace { .. } => {
+                Cap::PageTable(cap::PageTable { object })
+            }
             AddressSpace::IOSpace { .. } => Cap::IOPageTable(cap::IOPageTable { object }),
         }
     }
@@ -363,6 +387,9 @@ impl AddressSpace {
     ) -> Result<(), String> {
         let valid = match self {
             AddressSpace::VSpace { .. } => matches!(object, Object::PageTable(_)),
+            AddressSpace::RiscvIOSpace { .. } => {
+                matches!(object, Object::PageTable(pt) if pt.riscv_root_x4 == (cur_level == 0))
+            }
             AddressSpace::IOSpace { .. } => {
                 if cur_level == 0 {
                     matches!(object, Object::IOSpace(_))
@@ -386,6 +413,7 @@ impl AddressSpace {
     fn address_space_levels(&self, sel4_config: &Config) -> usize {
         match self {
             AddressSpace::VSpace { .. } => sel4_config.num_page_table_levels(),
+            AddressSpace::RiscvIOSpace { .. } => 3,
             // IOSpace level 0 is the IOSpace root. Slot 0 points to the
             // normal IOPageTable tree root, and slots 1.. hold spare IOPTs for
             // runtime prefix levels.
@@ -396,8 +424,62 @@ impl AddressSpace {
     fn get_root_level(&self, sel4_config: &Config) -> usize {
         match self {
             AddressSpace::VSpace { .. } => sel4_config.vspace_root_level(),
-            AddressSpace::IOSpace { .. } => 0,
+            AddressSpace::IOSpace { .. } | AddressSpace::RiscvIOSpace { .. } => 0,
         }
+    }
+}
+
+pub fn create_riscv_iospace<'a>(
+    spec_container: &mut CapDLSpecContainer,
+    name: &str,
+    devices: impl IntoIterator<Item = &'a RiscvIODevice>,
+) -> AddressSpace {
+    let root = spec_container.add_root_object(CapDLNamedObject {
+        name: Some(format!("root_x4_{name}")),
+        object: Object::PageTable(object::PageTable {
+            x86_ept: false,
+            riscv_root_x4: true,
+            is_root: true,
+            level: Some(0),
+            slots: vec![],
+        }),
+    });
+    let mut slots = vec![capdl_util_make_cte(
+        object::RiscvIOSpace::ROOT_X4_SLOT as u32,
+        Cap::PageTable(cap::PageTable { object: root }),
+    )];
+    for (index, device) in devices.into_iter().enumerate() {
+        let mut ddts = Vec::new();
+        for level in 0..3 {
+            let object = spec_container.add_root_object(CapDLNamedObject {
+                name: Some(format!("ddt_{name}_{index}_{level}")),
+                object: Object::RiscvIOMMUDDT,
+            });
+            ddts.push(capdl_util_make_cte(
+                level,
+                Cap::RiscvIOMMUDDT(cap::RiscvIOMMUDDT { object }),
+            ));
+        }
+        let object = spec_container.add_root_object(CapDLNamedObject {
+            name: Some(format!("device_{name}_{index}")),
+            object: Object::RiscvIOMMUDevice(object::RiscvIOMMUDevice {
+                slots: ddts,
+                iommu_paddr: Word(device.iommu_paddr),
+                device_id: Word(device.device_id),
+            }),
+        });
+        slots.push(capdl_util_make_cte(
+            (object::RiscvIOSpace::ROOT_X4_SLOT + 1 + index) as u32,
+            Cap::RiscvIOMMUDevice(cap::RiscvIOMMUDevice { object }),
+        ));
+    }
+    spec_container.add_root_object(CapDLNamedObject {
+        name: Some(format!("iospace_{name}")),
+        object: Object::RiscvIOSpace(object::RiscvIOSpace { slots }),
+    });
+    AddressSpace::RiscvIOSpace {
+        name: name.to_string(),
+        root,
     }
 }
 
@@ -470,6 +552,7 @@ fn create_vspace_address_space(
         name: format!("{}_{}", get_pt_level_name(sel4_config, root_level), name).into(),
         object: Object::PageTable(object::PageTable {
             x86_ept,
+            riscv_root_x4: false,
             is_root: true,
             level: Some(root_level as u8),
             slots: vec![],

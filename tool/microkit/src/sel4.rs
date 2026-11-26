@@ -342,6 +342,9 @@ pub struct ObjectSizes {
     pub vspace: u64,
     pub page_table: u64,
     pub io_page_table: Option<u64>,
+    pub riscv_root_x4: Option<u64>,
+    pub riscv_iommu_ddt: Option<u64>,
+    pub riscv_iommu_device: Option<u64>,
     pub huge_page: u64,
     pub large_page: u64,
     pub small_page: u64,
@@ -465,7 +468,8 @@ impl Config {
         };
 
         let iommu = match arch {
-            Arch::X86_64 => json_str_as_bool(&kernel_config_json, "IOMMU")?,
+            Arch::X86_64 => json_str_as_bool(&kernel_config_json, "IOMMU").unwrap_or(false),
+            Arch::Riscv64 => json_str_as_bool(&kernel_config_json, "RISCV_IOMMU").unwrap_or(false),
             _ => false,
         };
 
@@ -705,6 +709,9 @@ pub enum ObjectType {
     Vcpu,
     AsidPool,
     IOPageTable,
+    RiscvRootX4,
+    RiscvIOMMUDDT,
+    RiscvIOMMUDevice,
 }
 
 impl ObjectType {
@@ -723,6 +730,9 @@ impl ObjectType {
                 (Arch::X86_64, true) => Some(object_sizes.io_page_table.unwrap()),
                 _ => panic!("Unexpected architecture or build asking for io_page_table_bits"),
             },
+            ObjectType::RiscvRootX4 => object_sizes.riscv_root_x4,
+            ObjectType::RiscvIOMMUDDT => object_sizes.riscv_iommu_ddt,
+            ObjectType::RiscvIOMMUDevice => object_sizes.riscv_iommu_device,
             ObjectType::HugePage => Some(object_sizes.huge_page),
             ObjectType::LargePage => Some(object_sizes.large_page),
             ObjectType::SmallPage => Some(object_sizes.small_page),

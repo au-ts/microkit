@@ -44,13 +44,23 @@ pub fn capdl_obj_physical_size_bits(obj: &Object<FrameFill>, sel4_config: &Confi
         Object::VCpu => ObjectType::Vcpu.fixed_size_bits(sel4_config).unwrap(),
         Object::Frame(frame) => frame.size_bits as u64,
         Object::PageTable(pt) => {
-            if pt.is_root {
+            if pt.riscv_root_x4 {
+                ObjectType::RiscvRootX4
+                    .fixed_size_bits(sel4_config)
+                    .unwrap()
+            } else if pt.is_root {
                 ObjectType::VSpace.fixed_size_bits(sel4_config).unwrap()
             } else {
                 ObjectType::PageTable.fixed_size_bits(sel4_config).unwrap()
             }
         }
         Object::AsidPool(_) => ObjectType::AsidPool.fixed_size_bits(sel4_config).unwrap(),
+        Object::RiscvIOMMUDDT => ObjectType::RiscvIOMMUDDT
+            .fixed_size_bits(sel4_config)
+            .unwrap(),
+        Object::RiscvIOMMUDevice(_) => ObjectType::RiscvIOMMUDevice
+            .fixed_size_bits(sel4_config)
+            .unwrap(),
         Object::IOPageTable(_) => ObjectType::IOPageTable
             .fixed_size_bits(sel4_config)
             .unwrap(),
@@ -76,10 +86,14 @@ pub fn capdl_obj_human_name(obj: &Object<FrameFill>, sel4_config: &Config) -> &'
                 unreachable!("unknown frame size bits {}", frame.size_bits);
             }
         }
+        Object::PageTable(pt) if pt.riscv_root_x4 => "RISCV Sv39x4 root",
         Object::PageTable(_) => "PageTable",
         Object::AsidPool(_) => "AsidPool",
         Object::IOSpace(_) => "x86 IOSpace",
         Object::IOPageTable(_) => "x86 IOPageTable",
+        Object::RiscvIOSpace(_) => "RISCV IOSpace",
+        Object::RiscvIOMMUDDT => "RISCV IOMMU DDT",
+        Object::RiscvIOMMUDevice(_) => "RISCV IOMMU device",
         Object::ArmIrq(_) => "ARM IRQ",
         Object::IrqMsi(_) => "x86 MSI IRQ",
         Object::IrqIOApic(_) => "x86 IOAPIC IRQ",

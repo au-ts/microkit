@@ -146,6 +146,8 @@ pub fn get_cap_view(
             | Cap::SchedContext(_)
             | Cap::IOSpace(_)
             | Cap::IOPageTable(_)
+            | Cap::RiscvIOMMUDDT(_)
+            | Cap::RiscvIOMMUDevice(_)
             | Cap::Untyped(_) => {
                 /* ^ The caps above can occupy CSpace slots, but Viper
                  * verification currently has no use for them, so we

@@ -26,6 +26,7 @@ mod irq;
 mod memory_region;
 mod pci;
 mod pd_vm;
+mod riscv_iommu;
 mod util;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -52,6 +53,7 @@ pub(crate) use iommu::IommuDeviceIdentifier;
 pub(crate) use irq::{SysIrq, SysIrqKind};
 pub(crate) use memory_region::Map;
 pub(crate) use pd_vm::{CpuCore, SysSetVarKind};
+pub(crate) use riscv_iommu::{RiscvIOAddressSpace, RiscvIODevice};
 
 // Public re-exports
 pub use memory_region::{SysMemoryRegion, SysMemoryRegionPaddr};
@@ -136,6 +138,9 @@ pub struct SystemDescription {
     pub protection_domains: BTreeMap<Rc<str>, ProtectionDomain>,
     pub memory_regions: Vec<SysMemoryRegion>,
     pub iomaps: Vec<SysIOMap>,
+    pub riscv_io_address_spaces: Vec<RiscvIOAddressSpace>,
+    /// RISC-V devices mapped to indices in `riscv_io_address_spaces`.
+    pub riscv_devices: BTreeMap<RiscvIODevice, usize>,
     pub channels: Vec<Channel>,
     pub domains: Domains,
 }
@@ -177,6 +182,8 @@ pub fn parse(
     let mut root_pds = vec![];
     let mut mrs = vec![];
     let mut iomaps = vec![];
+    let mut riscv_io_address_spaces = vec![];
+    let mut riscv_devices = BTreeMap::new();
     let mut io_address_space_names = BTreeSet::new();
     let mut iommu_domain_ids = BTreeSet::new();
     let mut iommu_device_identifiers = Vec::new();
@@ -201,6 +208,17 @@ pub fn parse(
                 &*child,
                 search_paths,
             )?),
+            "io_address_space" if config.arch == Arch::Riscv64 => {
+                let space_index = riscv_io_address_spaces.len();
+                riscv_io_address_spaces.push(RiscvIOAddressSpace::from_xml(
+                    config,
+                    &xml_sdf,
+                    &*child,
+                    &mut io_address_space_names,
+                    space_index,
+                    &mut riscv_devices,
+                )?);
+            }
             "io_address_space" => {
                 iomaps.extend(
                     IOAddressSpace::from_xml(
@@ -576,6 +594,15 @@ pub fn parse(
     }
 
     check_io_maps(&xml_sdf, &mrs, &iomaps)?;
+    for space in &riscv_io_address_spaces {
+        check_maps(
+            &xml_sdf,
+            &mrs,
+            space.iomaps.iter(),
+            &format!("io_address_space '{}'", space.name),
+            riscv_iommu::MAX_GPA,
+        )?;
+    }
 
     // Ensure that there are no overlapping extra cap maps in the user caps region
     // and we are not mapping in the same cap from the same source more than once
@@ -661,7 +688,12 @@ pub fn parse(
 
     // Optimise page size of MRs, if the page size is not specified
     for mr in &mut mrs {
-        if mr.page_size_specified_by_user || iomaps.iter().any(|iomap| iomap.mr_name() == mr.name) {
+        if mr.page_size_specified_by_user
+            || iomaps.iter().any(|iomap| iomap.mr_name() == mr.name)
+            || riscv_io_address_spaces
+                .iter()
+                .any(|space| space.iomaps.iter().any(|map| map.mr == mr.name))
+        {
             continue;
         }
 
@@ -755,6 +787,8 @@ pub fn parse(
         protection_domains: pds,
         memory_regions: mrs,
         iomaps,
+        riscv_io_address_spaces,
+        riscv_devices,
         channels,
         domains,
     })

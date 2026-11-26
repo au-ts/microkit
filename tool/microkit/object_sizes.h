@@ -43,3 +43,8 @@ huge_page: seL4_HugePageBits
 #ifdef seL4_IOPageTableBits
 io_page_table: seL4_IOPageTableBits
 #endif
+#ifdef CONFIG_RISCV_IOMMU
+riscv_root_x4: seL4_RootX4PageTableBits
+riscv_iommu_ddt: seL4_IOMMUDDTBits
+riscv_iommu_device: seL4_IOMMUDeviceBits
+#endif
