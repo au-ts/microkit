@@ -335,6 +335,7 @@ SUPPORTED_BOARDS = (
             "KernelRiscvAIA": True,
             "KernelVerificationBuild": False,
             "KernelRiscvSstc": True,
+            "KernelCustomDTSOverlay": Path("custom_dts/overlay-qemu-riscv-virt-aia.dts"),
         },
     ),
     BoardInfo(
@@ -792,6 +793,9 @@ def build_sel4(
                 if "-" in size:
                     lhs, rhs = size.strip("( )").split("-", 1)
                     size = str(int(lhs.strip(), 0) - int(rhs.strip(), 0))
+                if "+" in size:
+                    lhs, rhs = size.strip("( )").split("+", 1)
+                    size = str(int(lhs.strip(), 0) + int(rhs.strip(), 0))
                 sizes.append((obj_name, int(size, 0)))
 
         with open(json_dst, "w") as out_file:
